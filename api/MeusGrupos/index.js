@@ -1,26 +1,24 @@
 /**
  * Sistema de Aprovação de NF — MeusGrupos
  *
- * Substitui o `rolesSource` (que não estava sendo invocado pelo SWA Free).
+ * Lê x-ms-client-principal (Easy Auth), descobre o OID do usuário,
+ * obtém token Application via Client Credentials e consulta o Graph
+ * pra retornar os grupos do usuário + roles mapeadas.
  *
- * Fluxo:
- *   1) Lê o header `x-ms-client-principal` injetado pelo Easy Auth (SWA),
- *      decodifica o base64 e descobre o `oid` (Object ID) do usuário logado.
- *   2) Faz Client Credentials flow contra o Entra ID (mesmo AppReg, com
- *      Application permission Group.Read.All / Directory.Read.All) e obtém
- *      um token para o Microsoft Graph.
- *   3) Chama GET https://graph.microsoft.com/v1.0/users/{oid}/transitiveMemberOf
- *      e devolve a lista de grupos do usuário + as roles mapeadas.
+ * App Settings exigidas no SWA:
+ *   - AAD_CLIENT_ID
+ *   - AAD_CLIENT_SECRET
+ *   - AAD_TENANT_ID
  *
- * App Settings exigidas no SWA (Configuration):
- *   - AAD_CLIENT_ID         (já existe, reusada do Easy Auth)
- *   - AAD_CLIENT_SECRET     (já existe, reusada do Easy Auth)
- *   - AAD_TENANT_ID         (novo — colocar 4b30645b-0888-45c0-9481-712bde435ffd)
- *
- * Permissões Application no AppReg (Microsoft Graph):
- *   - GroupMember.Read.All  (com admin consent)
- *      ou alternativamente Directory.Read.All
+ * Permissões Application (Microsoft Graph) no AppReg:
+ *   - GroupMember.Read.All (com admin consent)
  */
+
+require('isomorphic-fetch');
+const { ClientSecretCredential } = require('@azure/identity');
+const { Client } = require('@microsoft/microsoft-graph-client');
+const { TokenCredentialAuthenticationProvider } =
+  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 
 const GROUP_TO_ROLE = {
   '01d540d1-8596-42d0-9a20-de5c361c7c96': 'submitter',
@@ -39,7 +37,7 @@ const GROUP_TO_ROLE = {
 };
 
 function readClientPrincipal(req) {
-  const header = req.headers['x-ms-client-principal'];
+  const header = req.headers && req.headers['x-ms-client-principal'];
   if (!header) return null;
   try {
     const decoded = Buffer.from(header, 'base64').toString('utf-8');
@@ -51,8 +49,6 @@ function readClientPrincipal(req) {
 
 function extractUserOid(principal) {
   if (!principal) return null;
-  // userId do SWA já costuma ser o oid do Entra ID, mas vamos validar
-  // procurando explicitamente um claim "oid" se existir.
   const claims = principal.claims || [];
   const oidClaim = claims.find(c =>
     c.typ === 'http://schemas.microsoft.com/identity/claims/objectidentifier' ||
@@ -63,64 +59,43 @@ function extractUserOid(principal) {
   return null;
 }
 
-async function getGraphAppToken(tenantId, clientId, clientSecret) {
-  const url = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`;
-  const params = new URLSearchParams();
-  params.append('client_id', clientId);
-  params.append('client_secret', clientSecret);
-  params.append('scope', 'https://graph.microsoft.com/.default');
-  params.append('grant_type', 'client_credentials');
-
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: params.toString()
-  });
-
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Token endpoint retornou ${resp.status}: ${text}`);
-  }
-
-  const data = await resp.json();
-  return data.access_token;
-}
-
-async function fetchUserGroups(graphToken, userOid) {
-  // transitiveMemberOf devolve TODOS os grupos (incluindo grupos aninhados)
-  const url = `https://graph.microsoft.com/v1.0/users/${userOid}/transitiveMemberOf?$select=id,displayName&$top=200`;
-
-  const resp = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${graphToken}` }
-  });
-
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`Graph ${url} retornou ${resp.status}: ${text}`);
-  }
-
-  const data = await resp.json();
-  const items = data.value || [];
-  // Filtra só grupos (microsoft.graph.group), ignora roles de diretório
-  const groups = items
-    .filter(it => it['@odata.type'] === '#microsoft.graph.group' || it.id)
-    .map(it => ({ id: (it.id || '').toLowerCase(), displayName: it.displayName || '' }));
-  return groups;
-}
-
 module.exports = async function (context, req) {
+  // Diagnóstico: sempre retorna JSON, mesmo em caso de erro
+  const diag = { step: 'start' };
   try {
-    const principal = readClientPrincipal(req);
+    diag.step = 'env';
+    const tenantId = process.env.AAD_TENANT_ID;
+    const clientId = process.env.AAD_CLIENT_ID;
+    const clientSecret = process.env.AAD_CLIENT_SECRET;
 
-    if (!principal) {
+    if (!tenantId || !clientId || !clientSecret) {
       context.res = {
-        status: 401,
+        status: 500,
         headers: { 'Content-Type': 'application/json' },
-        body: { error: 'Usuário não autenticado (x-ms-client-principal ausente).' }
+        body: {
+          error: 'App Settings incompletas',
+          missing: {
+            AAD_TENANT_ID: !tenantId,
+            AAD_CLIENT_ID: !clientId,
+            AAD_CLIENT_SECRET: !clientSecret
+          }
+        }
       };
       return;
     }
 
+    diag.step = 'principal';
+    const principal = readClientPrincipal(req);
+    if (!principal) {
+      context.res = {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+        body: { error: 'x-ms-client-principal ausente — usuário não autenticado.' }
+      };
+      return;
+    }
+
+    diag.step = 'oid';
     const userOid = extractUserOid(principal);
     if (!userOid) {
       context.res = {
@@ -131,55 +106,58 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const tenantId = process.env.AAD_TENANT_ID || '4b30645b-0888-45c0-9481-712bde435ffd';
-    const clientId = process.env.AAD_CLIENT_ID;
-    const clientSecret = process.env.AAD_CLIENT_SECRET;
+    diag.step = 'credential';
+    const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+    const authProvider = new TokenCredentialAuthenticationProvider(credential, {
+      scopes: ['https://graph.microsoft.com/.default']
+    });
 
-    if (!clientId || !clientSecret) {
-      context.res = {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-        body: { error: 'AAD_CLIENT_ID ou AAD_CLIENT_SECRET não configurados nas App Settings.' }
-      };
-      return;
-    }
+    diag.step = 'graph_client';
+    const client = Client.initWithMiddleware({ authProvider });
 
-    const graphToken = await getGraphAppToken(tenantId, clientId, clientSecret);
-    const groups = await fetchUserGroups(graphToken, userOid);
+    diag.step = 'graph_call';
+    const result = await client
+      .api(`/users/${userOid}/transitiveMemberOf`)
+      .select('id,displayName')
+      .top(200)
+      .get();
 
-    // Mapeia GUIDs → roles internas
+    const items = (result && result.value) || [];
+    const groups = items
+      .filter(it => it && it.id)
+      .map(it => ({ id: String(it.id).toLowerCase(), displayName: it.displayName || '' }));
+
     const roleMap = {};
     for (const [k, v] of Object.entries(GROUP_TO_ROLE)) roleMap[k.toLowerCase()] = v;
-    const roles = groups
-      .map(g => roleMap[g.id])
-      .filter(Boolean);
+    const roles = groups.map(g => roleMap[g.id]).filter(Boolean);
 
-    // Roles "agregadas" pra simplificar o front-end
     const aggregated = new Set(roles);
-    const isGestor = roles.some(r => r.startsWith('gestor_'));
-    if (isGestor) aggregated.add('gestor');
+    if (roles.some(r => r.startsWith('gestor_'))) aggregated.add('gestor');
 
     context.res = {
       status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store'
-      },
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       body: {
         userId: userOid,
         userDetails: principal.userDetails || null,
         identityProvider: principal.identityProvider || null,
-        groups,          // [{ id, displayName }]
-        roles,           // ex.: ['submitter','gestor_financeira']
-        rolesAggregated: Array.from(aggregated) // inclui 'gestor' genérico
+        groups,
+        roles,
+        rolesAggregated: Array.from(aggregated)
       }
     };
   } catch (err) {
-    context.log.error('MeusGrupos error:', err);
+    context.log && context.log.error && context.log.error('MeusGrupos error:', err);
     context.res = {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
-      body: { error: err.message }
+      body: {
+        error: (err && err.message) || String(err),
+        code: err && err.code,
+        statusCode: err && err.statusCode,
+        body: err && err.body,
+        diag
+      }
     };
   }
 };
