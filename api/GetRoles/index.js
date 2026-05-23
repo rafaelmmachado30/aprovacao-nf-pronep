@@ -1,44 +1,15 @@
 /**
  * Sistema de Aprovação de NF — GetRoles
  *
- * Azure Function chamada pelo Azure Static Web Apps após o login.
- * Recebe os claims do usuário (incluindo grupos do Entra ID) e devolve
- * as roles que ele deve ter na plataforma.
- *
- * Configurada no staticwebapp.config.json via auth.rolesSource = /api/GetRoles
- *
- * MAPEAMENTO DE GRUPOS:
- *   Os GUIDs abaixo precisam ser substituídos pelos IDs reais dos grupos
- *   criados no Entra ID. Veja GUIA_ENTRA_ID.md na raiz do projeto para o
- *   passo-a-passo de criação dos 12 grupos.
- *
- *   Grupos a criar:
- *     PRONEP-NF-Submitter
- *     PRONEP-NF-Admin
- *     PRONEP-Financeiro-Gestao        (Izabel Rocha — para negociação D+5)
- *     PRONEP-NF-Gestor-Suprimentos    (Bruno Hioka)
- *     PRONEP-NF-Gestor-Financeira     (Henrico Molina)
- *     PRONEP-NF-Gestor-Tecnologia     (Rafael Machado)
- *     PRONEP-NF-Gestor-Qualidade      (Sabrina Fernandes)
- *     PRONEP-NF-Gestor-RH-DP          (Janilene Santos)
- *     PRONEP-NF-Gestor-Fiscal-Contabil(Janilene Santos)
- *     PRONEP-NF-Gestor-Juridica       (Rafaella Santos)
- *     PRONEP-NF-Gestor-Administrativa (Rafaella Santos)
- *     PRONEP-NF-Gestor-Tecnica-SP     (Nicolle Boas)
- *     PRONEP-NF-Gestor-Tecnica-RJES   (Vitor Amaral)
+ * VERSÃO DE TESTE: retorna roles FIXAS pra confirmar que o SWA está chamando este endpoint.
+ * Se as roles fixas aparecerem no `.auth/me` após relogar, o SWA está chamando.
+ * Se não aparecerem, o `rolesSource` no staticwebapp.config.json não está sendo executado.
  */
 
-// ------------------------------------------------------------------
-// CONFIGURAÇÃO — TROCAR OS GUIDS ABAIXO PELOS REAIS DEPOIS DE CRIAR
-// OS GRUPOS NO ENTRA ID (Azure Portal → Microsoft Entra ID → Grupos)
-// ------------------------------------------------------------------
 const GROUP_TO_ROLE = {
-  // Roles globais
-  '01d540d1-8596-42d0-9a20-de5c361c7c96': 'submitter',          // PRONEP-NF-Submitter
-  '480a1595-bdc3-492a-9ef2-317f148a237e': 'administrador',      // PRONEP-NF-Admin
-  'c2a73d16-4659-4b3c-93a1-0c0fbfaaaa96': 'financeiro_nf',      // PRONEP-NF-Financeiro-Gestao
-
-  // Gestores por diretoria (10 grupos)
+  '01d540d1-8596-42d0-9a20-de5c361c7c96': 'submitter',
+  '480a1595-bdc3-492a-9ef2-317f148a237e': 'administrador',
+  'c2a73d16-4659-4b3c-93a1-0c0fbfaaaa96': 'financeiro_nf',
   '2d9f5bcf-2ae0-494e-957b-a1c69016664d': 'gestor_suprimentos',
   '6b77405b-ba89-47ee-af21-58ec19bb3ff7': 'gestor_financeira',
   'a7826b5c-7c29-4a24-836b-a7432aa941ec': 'gestor_tecnologia',
@@ -51,34 +22,6 @@ const GROUP_TO_ROLE = {
   '334eb19b-c138-4551-8e45-a36ca4e32e48': 'gestor_tecnica_rjes'
 };
 
-// Lista de todas as roles de gestor (usada na herança)
-const TODAS_ROLES_GESTOR = [
-  'gestor_suprimentos', 'gestor_financeira', 'gestor_tecnologia',
-  'gestor_qualidade', 'gestor_rh_dp', 'gestor_fiscal_contabil',
-  'gestor_juridica', 'gestor_administrativa',
-  'gestor_tecnica_sp', 'gestor_tecnica_rjes'
-];
-
-// Role "gestor" agregada — verdadeira se o usuário tem QUALQUER role de gestor
-// (usada nas rotas do staticwebapp.config.json para regras genéricas)
-const ROLE_INHERITANCE = {
-  administrador:  ['submitter', 'financeiro_nf', 'gestor', ...TODAS_ROLES_GESTOR],
-  // Gestor de qualquer diretoria também ganha "submitter" (pode lançar NFs) e "gestor" (agregada)
-  gestor_suprimentos:      ['submitter', 'gestor'],
-  gestor_financeira:       ['submitter', 'gestor'],
-  gestor_tecnologia:       ['submitter', 'gestor'],
-  gestor_qualidade:        ['submitter', 'gestor'],
-  gestor_rh_dp:            ['submitter', 'gestor'],
-  gestor_fiscal_contabil:  ['submitter', 'gestor'],
-  gestor_juridica:         ['submitter', 'gestor'],
-  gestor_administrativa:   ['submitter', 'gestor'],
-  gestor_tecnica_sp:       ['submitter', 'gestor'],
-  gestor_tecnica_rjes:     ['submitter', 'gestor'],
-  // Quem está no time financeiro também pode lançar NFs
-  financeiro_nf:           ['submitter']
-};
-
-// Tipos de claim possíveis pra grupos (varia entre v1/v2 do token AAD)
 const GROUP_CLAIM_TYPES = [
   'groups',
   'http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid',
@@ -88,45 +31,35 @@ const GROUP_CLAIM_TYPES = [
 
 module.exports = async function (context, req) {
   try {
-    context.log('=== GetRoles (Aprovação NF) invoked ===');
+    context.log('=== GetRoles invoked ===');
+    context.log('Method:', req.method);
+    context.log('Body:', JSON.stringify(req.body || {}));
+    context.log('Headers:', JSON.stringify(Object.keys(req.headers || {})));
+
+    // TESTE: ignora totalmente o body e SEMPRE retorna roles fixas.
+    // Se depois disso "administrador" aparecer no .auth/me, o SWA está chamando o GetRoles.
+    // Se "administrador" continuar não aparecendo, o rolesSource não está sendo invocado.
+    const TEST_ROLES = ['submitter', 'administrador', 'TEST_HARDCODED'];
+
+    context.log('Returning TEST_ROLES:', TEST_ROLES.join(', '));
+
+    // Lógica real (comentada durante teste)
+    /*
     const claims = (req.body && req.body.claims) || [];
-    context.log(`Total claims received: ${claims.length}`);
-
-    // Log dos tipos de claim recebidos pra debug
-    const claimTypes = [...new Set(claims.map(c => c.typ))];
-    context.log('Claim types present:', claimTypes.join(' | '));
-
-    // Extrai grupos tolerando diferentes formatos de claim type
     const groupClaims = claims.filter(c =>
       GROUP_CLAIM_TYPES.includes(c.typ) ||
       (c.typ && c.typ.toLowerCase().includes('group'))
     );
     const groups = groupClaims.map(c => (c.val || '').toLowerCase());
-    context.log(`Group claims found: ${groups.length}`);
-
-    // Mapeia grupos -> roles (case-insensitive)
     const groupToRoleLower = {};
-    for (const [k, v] of Object.entries(GROUP_TO_ROLE)) {
-      groupToRoleLower[k.toLowerCase()] = v;
-    }
-    let roles = groups
-      .map(g => groupToRoleLower[g])
-      .filter(Boolean);
-
-    // Aplica herança (até 2 níveis — gestor → submitter+gestor)
-    for (let i = 0; i < 2; i++) {
-      const novasRoles = [];
-      for (const r of roles) {
-        if (ROLE_INHERITANCE[r]) novasRoles.push(...ROLE_INHERITANCE[r]);
-      }
-      roles = [...new Set([...roles, ...novasRoles])];
-    }
-
-    context.log(`Final roles assigned: ${roles.join(', ') || '(none)'}`);
+    for (const [k, v] of Object.entries(GROUP_TO_ROLE)) groupToRoleLower[k.toLowerCase()] = v;
+    let roles = groups.map(g => groupToRoleLower[g]).filter(Boolean);
+    */
 
     context.res = {
       status: 200,
-      body: { roles }
+      headers: { 'Content-Type': 'application/json' },
+      body: { roles: TEST_ROLES }
     };
   } catch (err) {
     context.log.error('GetRoles error:', err);
