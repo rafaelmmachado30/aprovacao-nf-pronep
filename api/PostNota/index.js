@@ -36,7 +36,33 @@ const { TokenCredentialAuthenticationProvider } =
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
-const cache = { siteId: null, driveId: null, listNotasId: null, listDirId: null };
+const cache = { siteId: null, driveId: null, listNotasId: null, listDirId: null, colMap: null };
+
+// Descobre mapping displayName -> internalName das colunas da lista NotasFiscais
+async function getColumnMap(client, siteId, listId) {
+  if (cache.colMap) return cache.colMap;
+  const resp = await client
+    .api(`/sites/${siteId}/lists/${listId}/columns`)
+    .get();
+  const map = {};
+  for (const col of (resp.value || [])) {
+    if (col.displayName && col.name) {
+      map[col.displayName] = col.name;
+    }
+  }
+  cache.colMap = map;
+  return map;
+}
+
+// Constroi o objeto fields com internalNames corretos
+function buildFieldsObject(colMap, data) {
+  const fields = {};
+  for (const [displayName, value] of Object.entries(data)) {
+    const internal = colMap[displayName] || displayName;
+    fields[internal] = value;
+  }
+  return fields;
+}
 
 async function getGraphClient() {
   const tenantId = process.env.AAD_TENANT_ID;
@@ -186,31 +212,35 @@ module.exports = async function (context, req) {
     diag.driveItemId = uploadResp.id;
     diag.webUrl = uploadResp.webUrl;
 
+    diag.step = 'discover_columns';
+    const colMap = await getColumnMap(client, siteId, listNotasId);
+    diag.colMap = colMap;
+
     diag.step = 'create_list_item';
-    // Cria item na lista NotasFiscais
     // Title = "NF {numero}" ou descricao se nao tem numero
     const title = numero ? `NF ${numero}` : (descricao || 'NF sem numero').slice(0, 80);
-    const itemFields = {
-      Title: title,
-      // Esses sao os displayNames originais — SharePoint pode ter renomeado pra field_N
-      // Tentamos ambos via spread (Graph aceita o internalName correto, ignora outros)
-      NumeroNF: numero || '',
-      CNPJFornecedor: fornecedorCNPJ,
-      Descricao: descricao || '',
-      Valor: String(valor),
-      DataVencimento: vencimento,
-      Unidade: unidade,
-      Diretoria: diretoria,
-      AprovadorAtual: aprovador.email,
-      Status: 'Lancada',
-      LancadoPor: submitterEmail,
-      LancadoEm: new Date().toISOString(),
-      AprovadoEm: '',
-      MotivoRejeicao: '',
-      HashSHA256: hash,
-      UrlPDF: uploadResp.webUrl || '',
-      UrlPDFAprovado: ''
+    // Constroi o objeto com displayNames; buildFieldsObject converte pra internalNames
+    const rawFields = {
+      Title:           title,
+      NumeroNF:        numero || '',
+      CNPJFornecedor:  fornecedorCNPJ,
+      Descricao:       descricao || '',
+      Valor:           String(valor),
+      DataVencimento:  vencimento,
+      Unidade:         unidade,
+      Diretoria:       diretoria,
+      AprovadorAtual:  aprovador.email,
+      Status:          'Lancada',
+      LancadoPor:      submitterEmail,
+      LancadoEm:       new Date().toISOString(),
+      AprovadoEm:      '',
+      MotivoRejeicao:  '',
+      HashSHA256:      hash,
+      UrlPDF:          uploadResp.webUrl || '',
+      UrlPDFAprovado:  ''
     };
+    const itemFields = buildFieldsObject(colMap, rawFields);
+    diag.itemFieldsUsados = Object.keys(itemFields);
     const itemResp = await client
       .api(`/sites/${siteId}/lists/${listNotasId}/items`)
       .post({ fields: itemFields });
