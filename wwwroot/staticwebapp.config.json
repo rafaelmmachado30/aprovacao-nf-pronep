@@ -16,6 +16,7 @@
     { "route": "/logout", "redirect": "/.auth/logout" },
 
     { "route": "/api/GetRoles",            "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/api/DebugClaims",         "allowedRoles": ["authenticated"] },
     { "route": "/api/ListarNotas",         "allowedRoles": ["submitter", "gestor", "financeiro_nf", "administrador"] },
     { "route": "/api/PostNota",            "allowedRoles": ["submitter", "gestor", "financeiro_nf", "administrador"] },
     { "route": "/api/AprovarNota",         "allowedRoles": ["gestor", "administrador"] },
