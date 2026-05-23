@@ -754,9 +754,21 @@ if (window.Chart) {
 // destruir charts ativos antes de remontar (evita vazamento)
 window._activeCharts = window._activeCharts || {};
 function destroyChart(id) {
+  // Tenta destruir chart referenciado pela nossa tabela
   if (window._activeCharts[id]) {
     try { window._activeCharts[id].destroy(); } catch(e){}
     delete window._activeCharts[id];
+  }
+  // Tambem destrui qualquer chart orfao apontando pro canvas atual com mesmo id
+  // (acontece quando innerHTML substitui o canvas e Chart.js mantem referencia antiga)
+  if (window.Chart && typeof Chart.getChart === 'function') {
+    const canvas = document.getElementById(id);
+    if (canvas) {
+      const orphan = Chart.getChart(canvas);
+      if (orphan) {
+        try { orphan.destroy(); } catch(e){}
+      }
+    }
   }
 }
 
