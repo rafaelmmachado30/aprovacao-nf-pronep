@@ -768,6 +768,26 @@ function mountDashboardCharts() {
   const canvasBar = document.getElementById('chart-diretoria');
   if (canvasBar && data.barEntries.length) {
     destroyChart('chart-diretoria');
+    // Plugin inline: escreve o valor no fim de cada barra
+    const barLabelsPlugin = {
+      id: 'barLabels',
+      afterDatasetsDraw(chart) {
+        const ctx = chart.ctx;
+        chart.data.datasets.forEach((dataset, i) => {
+          const meta = chart.getDatasetMeta(i);
+          meta.data.forEach((bar, idx) => {
+            const v = dataset.data[idx];
+            ctx.save();
+            ctx.fillStyle = '#1F4E79';
+            ctx.font = 'bold 11px Inter, system-ui, sans-serif';
+            ctx.textBaseline = 'middle';
+            ctx.textAlign = 'left';
+            ctx.fillText(fmtBRL(v), bar.x + 6, bar.y);
+            ctx.restore();
+          });
+        });
+      }
+    };
     window._activeCharts['chart-diretoria'] = new Chart(canvasBar, {
       type: 'bar',
       data: {
@@ -786,6 +806,7 @@ function mountDashboardCharts() {
         indexAxis: 'y',
         responsive: true,
         maintainAspectRatio: false,
+        layout: { padding: { right: 90 } },
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: c => fmtBRL(c.parsed.x) } }
@@ -794,7 +815,8 @@ function mountDashboardCharts() {
           x: { beginAtZero: true, grid: { color: '#EEF2F5' }, ticks: { callback: v => fmtBRL(v) } },
           y: { grid: { display: false } }
         }
-      }
+      },
+      plugins: [barLabelsPlugin]
     });
   }
 
@@ -804,7 +826,42 @@ function mountDashboardCharts() {
     destroyChart('chart-unidade');
     const labels = Object.keys(data.byUnit);
     const values = Object.values(data.byUnit);
+    const totalUnit = values.reduce((a,b)=>a+b,0);
     const colors = labels.map(u => ({ RJ:'#27AAE1', SP:'#7B61C6', ES:'#F09030' }[u] || '#888'));
+    // Plugin: rotulo de % no centro de cada fatia + total no meio
+    const donutLabelsPlugin = {
+      id: 'donutLabels',
+      afterDatasetsDraw(chart) {
+        const ctx = chart.ctx;
+        const meta = chart.getDatasetMeta(0);
+        meta.data.forEach((arc, idx) => {
+          const v = chart.data.datasets[0].data[idx];
+          if (!totalUnit) return;
+          const pct = (v / totalUnit * 100).toFixed(1) + '%';
+          const pos = arc.tooltipPosition();
+          ctx.save();
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 12px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(pct, pos.x, pos.y);
+          ctx.restore();
+        });
+        // Total no centro
+        const cx = (chart.chartArea.left + chart.chartArea.right) / 2;
+        const cy = (chart.chartArea.top + chart.chartArea.bottom) / 2;
+        ctx.save();
+        ctx.fillStyle = '#647883';
+        ctx.font = '10px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('Total', cx, cy - 10);
+        ctx.fillStyle = '#1F4E79';
+        ctx.font = 'bold 14px Inter, system-ui, sans-serif';
+        ctx.fillText(fmtBRL(totalUnit), cx, cy + 8);
+        ctx.restore();
+      }
+    };
     window._activeCharts['chart-unidade'] = new Chart(canvasUnit, {
       type: 'doughnut',
       data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#fff', borderWidth: 2 }] },
@@ -817,14 +874,14 @@ function mountDashboardCharts() {
           tooltip: {
             callbacks: {
               label: c => {
-                const total = values.reduce((a,b)=>a+b,0);
-                const pct = (c.parsed/total*100).toFixed(1);
+                const pct = (c.parsed/totalUnit*100).toFixed(1);
                 return `${c.label}: ${fmtBRL(c.parsed)} (${pct}%)`;
               }
             }
           }
         }
-      }
+      },
+      plugins: [donutLabelsPlugin]
     });
   }
 
@@ -832,6 +889,29 @@ function mountDashboardCharts() {
   const canvasLine = document.getElementById('chart-mensal');
   if (canvasLine) {
     destroyChart('chart-mensal');
+    // Plugin: rotulo acima de cada ponto (formato compacto R$XXk)
+    const fmtCompact = v => {
+      if (v >= 1000000) return 'R$' + (v/1000000).toFixed(1).replace('.', ',') + 'M';
+      if (v >= 1000)    return 'R$' + Math.round(v/1000) + 'k';
+      return 'R$' + Math.round(v);
+    };
+    const lineLabelsPlugin = {
+      id: 'lineLabels',
+      afterDatasetsDraw(chart) {
+        const ctx = chart.ctx;
+        const meta = chart.getDatasetMeta(0);
+        meta.data.forEach((point, idx) => {
+          const v = chart.data.datasets[0].data[idx];
+          ctx.save();
+          ctx.fillStyle = '#1F4E79';
+          ctx.font = 'bold 10px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(fmtCompact(v), point.x, point.y - 8);
+          ctx.restore();
+        });
+      }
+    };
     window._activeCharts['chart-mensal'] = new Chart(canvasLine, {
       type: 'line',
       data: {
@@ -852,6 +932,7 @@ function mountDashboardCharts() {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        layout: { padding: { top: 20 } },
         plugins: {
           legend: { display: false },
           tooltip: { callbacks: { label: c => fmtBRL(c.parsed.y) } }
@@ -860,7 +941,8 @@ function mountDashboardCharts() {
           y: { beginAtZero: true, grid: { color: '#EEF2F5' }, ticks: { callback: v => fmtBRL(v) } },
           x: { grid: { display: false } }
         }
-      }
+      },
+      plugins: [lineLabelsPlugin]
     });
   }
 }
