@@ -153,6 +153,7 @@
   .file-drop .fd-main { color: var(--azul-escuro); font-weight: 600; font-size: 14px; }
   .file-drop .fd-sub { color: var(--cinza-medio); font-size: 12px; margin-top: 4px; }
   .file-drop.has-file { border-style: solid; border-color: var(--verde); background: var(--verde-bg); }
+  .file-drop.dragging { border-color: var(--azul-claro); background: var(--azul-soft); transform: scale(1.005); }
   .file-drop.has-file .fd-main { color: var(--verde); }
 
   .btn { padding: 10px 18px; border-radius: 5px; font-size: 14px; font-weight: 600; transition: all 0.15s; }
@@ -1159,10 +1160,13 @@ const views = {
 
         <div class="form-row full">
           <label>Anexo PDF (máx. 6 MB) *</label>
-          <div class="file-drop" id="file-drop" onclick="fakeFileUpload()">
+          <input type="file" id="file-input" accept="application/pdf,.pdf" style="display:none" onchange="onFileSelected(event)">
+          <div class="file-drop" id="file-drop"
+               onclick="document.getElementById('file-input').click()"
+               ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onFileDrop(event)">
             <div class="fd-icon">⬆</div>
             <div class="fd-main" id="fd-main">Clique para selecionar o PDF da NF</div>
-            <div class="fd-sub" id="fd-sub">ou arraste e solte aqui</div>
+            <div class="fd-sub" id="fd-sub">ou arraste e solte aqui · máx. 6 MB</div>
           </div>
         </div>
       </div>
@@ -2298,12 +2302,56 @@ function onNegociouChange() {
   }
 }
 
-let fakeFile = null;
+// Upload REAL de PDF (substitui o mock fakeFileUpload)
+let selectedFile = null;  // mantemos referencia ao File selecionado
+
 function fakeFileUpload() {
-  fakeFile = { name: `NFSe_${Math.floor(Math.random()*9000+1000)}.pdf`, size: Math.floor(Math.random()*5+1)*1024*1024 };
+  // mantido por compatibilidade — dispara o input file real
+  document.getElementById('file-input').click();
+}
+
+function onFileSelected(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  processFileSelection(file);
+}
+
+function onDragOver(ev) { ev.preventDefault(); ev.currentTarget.classList.add('dragging'); }
+function onDragLeave(ev) { ev.preventDefault(); ev.currentTarget.classList.remove('dragging'); }
+function onFileDrop(ev) {
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('dragging');
+  const file = ev.dataTransfer.files && ev.dataTransfer.files[0];
+  if (file) processFileSelection(file);
+}
+
+function processFileSelection(file) {
+  // Valida tipo
+  const isPdf = (file.type === 'application/pdf') || /\.pdf$/i.test(file.name);
+  if (!isPdf) {
+    selectedFile = null;
+    document.getElementById('file-drop').classList.remove('has-file');
+    document.getElementById('fd-main').textContent = '✕ Apenas arquivos PDF';
+    document.getElementById('fd-sub').textContent = 'Selecione um arquivo .pdf';
+    document.getElementById('fd-main').style.color = 'var(--vermelho)';
+    return;
+  }
+  // Valida tamanho (6 MB)
+  if (file.size > 6 * 1024 * 1024) {
+    selectedFile = null;
+    document.getElementById('file-drop').classList.remove('has-file');
+    document.getElementById('fd-main').textContent = '✕ Arquivo muito grande';
+    document.getElementById('fd-sub').textContent = 'Limite: 6 MB · seu arquivo: ' + (file.size/1024/1024).toFixed(2) + ' MB';
+    document.getElementById('fd-main').style.color = 'var(--vermelho)';
+    return;
+  }
+  selectedFile = file;
+  // Compatibilidade com o codigo antigo que usa fakeFile
+  window.fakeFile = file;
   document.getElementById('file-drop').classList.add('has-file');
-  document.getElementById('fd-main').textContent = '✓ ' + fakeFile.name;
-  document.getElementById('fd-sub').textContent = (fakeFile.size/1024/1024).toFixed(2) + ' MB · clique para trocar';
+  document.getElementById('fd-main').textContent = '✓ ' + file.name;
+  document.getElementById('fd-main').style.color = '';
+  document.getElementById('fd-sub').textContent = (file.size/1024/1024).toFixed(2) + ' MB · clique para trocar';
 }
 
 function submitNF() {
