@@ -1,17 +1,17 @@
 /**
- * DEBUG v2 — decodifica o JWT completo do header x-ms-token-aad-id-token
- * (esse header tem TODOS os claims, ao contrário do x-ms-client-principal resumido).
+ * DEBUG v3 — decodifica TODOS os JWTs presentes nos headers
+ * Foco em x-ms-auth-token e authorization, que devem conter os grupos.
  *
  * REMOVER após resolver o problema!
  */
 
 function decodeJwtPayload(jwt) {
   if (!jwt) return null;
+  // Remove "Bearer " prefix se tiver
+  jwt = jwt.replace(/^Bearer\s+/i, '');
   const parts = jwt.split('.');
-  if (parts.length !== 3) return null;
-  // base64url -> base64
+  if (parts.length !== 3) return { _error: 'JWT mal formado', _parts_count: parts.length };
   const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-  // pad
   const padded = payload + '='.repeat((4 - payload.length % 4) % 4);
   try {
     return JSON.parse(Buffer.from(padded, 'base64').toString('utf-8'));
@@ -23,32 +23,33 @@ function decodeJwtPayload(jwt) {
 module.exports = async function (context, req) {
   try {
     const allHeaders = req.headers || {};
-    // Lista headers úteis para debug (sem expor tokens completos)
-    const interestingHeaders = {};
-    for (const [k, v] of Object.entries(allHeaders)) {
-      if (k.startsWith('x-ms-') || k === 'authorization') {
-        interestingHeaders[k] = (typeof v === 'string' && v.length > 60)
-          ? v.substring(0, 30) + '...(' + v.length + ' chars total)'
-          : v;
+
+    // Decodifica todos os possíveis tokens
+    const decoded = {};
+    for (const headerName of [
+      'authorization',
+      'x-ms-auth-token',
+      'x-ms-token-aad-id-token',
+      'x-ms-token-aad-access-token',
+      'x-ms-token-aad-refresh-token'
+    ]) {
+      if (allHeaders[headerName]) {
+        decoded[headerName] = {
+          length: allHeaders[headerName].length,
+          payload: decodeJwtPayload(allHeaders[headerName])
+        };
+      } else {
+        decoded[headerName] = '(não enviado pelo SWA)';
       }
     }
 
-    // Decodifica o ID Token
-    const idToken = allHeaders['x-ms-token-aad-id-token'];
-    const decodedId = decodeJwtPayload(idToken);
-
-    // Decodifica o Access Token
-    const accessToken = allHeaders['x-ms-token-aad-access-token'];
-    const decodedAccess = decodeJwtPayload(accessToken);
-
-    // Principal resumido
-    const principalB64 = allHeaders['x-ms-client-principal'];
-    let principal = null;
-    if (principalB64) {
-      try {
-        principal = JSON.parse(Buffer.from(principalB64, 'base64').toString('utf-8'));
-      } catch (e) {
-        principal = { _decode_error: e.message };
+    // Lista todos os headers x-ms-* (sem valores grandes)
+    const xmsHeaders = {};
+    for (const [k, v] of Object.entries(allHeaders)) {
+      if (k.startsWith('x-ms-')) {
+        xmsHeaders[k] = (typeof v === 'string' && v.length > 100)
+          ? `(${v.length} chars)`
+          : v;
       }
     }
 
@@ -56,14 +57,9 @@ module.exports = async function (context, req) {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
       body: {
-        message: 'JWT debug',
-        '_HEADERS_PRESENTES': Object.keys(allHeaders).filter(h => h.startsWith('x-ms-')),
-        '_HEADER_x-ms-token-aad-id-token_existe': !!idToken,
-        '_HEADER_x-ms-token-aad-access-token_existe': !!accessToken,
-        'principal_resumido': principal,
-        'id_token_payload': decodedId,
-        'access_token_payload': decodedAccess,
-        '_INTERESTING_HEADERS': interestingHeaders
+        message: 'JWT debug v3',
+        '_HEADERS_X-MS': xmsHeaders,
+        'TOKENS_DECODIFICADOS': decoded
       }
     };
   } catch (err) {
