@@ -2354,106 +2354,172 @@ function processFileSelection(file) {
   document.getElementById('fd-sub').textContent = (file.size/1024/1024).toFixed(2) + ' MB · clique para trocar';
 }
 
-function submitNF() {
+// Converte File para base64 (data URL)
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function submitNF() {
   const msgs = document.getElementById('form-msgs');
+  const btn = document.getElementById('btn-enviar-nf');
   msgs.innerHTML = '';
+
   const fornIdx = document.getElementById('frm-forn').value;
   const numero = document.getElementById('frm-numero').value;
   const valor = parseFloat(document.getElementById('frm-valor').value);
   const venc = document.getElementById('frm-venc').value;
+  const descricao = (document.getElementById('frm-descricao')||{}).value || '';
+  const file = window.fakeFile || window.selectedFile;
 
-  if (!fornIdx || !numero || !valor || !venc || !fakeFile) {
-    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">✕</span><div><b>Campos obrigatórios faltando.</b> Verifique fornecedor, número, valor, vencimento e o anexo PDF.</div></div>';
+  if (!fornIdx || !numero || !valor || !venc || !file) {
+    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>Campos obrigatorios faltando.</b> Verifique fornecedor, numero, valor, vencimento e o anexo PDF.</div></div>';
     return;
   }
 
   // Tamanho
-  if (fakeFile.size > 6 * 1024 * 1024) {
-    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">✕</span><div><b>Arquivo maior que 6 MB.</b> O sistema rejeitou o upload. Comprima o PDF e tente novamente.</div></div>';
+  if (file.size > 6 * 1024 * 1024) {
+    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>Arquivo maior que 6 MB.</b> Comprima o PDF e tente novamente.</div></div>';
     return;
   }
 
-  // Vencimento — fora de D+5 só é permitido SE houve negociação com Financeiro
+  // Vencimento — fora de D+5 so eh permitido SE houve negociacao com Financeiro
   const dVenc = new Date(venc + 'T00:00:00');
   const diff = diasEntre(HOJE, dVenc);
+  let negociouComEmail = null, negociouComNome = null;
   if (diff < 5) {
     const negociouRadio = document.querySelector('input[name="frm-negociou"]:checked');
     if (!negociouRadio) {
-      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">✕</span><div><b>Vencimento fora do prazo (D+5).</b> Para prosseguir, responda se a NF já foi negociada com o Financeiro.</div></div>`;
+      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">x</span><div><b>Vencimento fora do prazo (D+5).</b> Para prosseguir, responda se a NF ja foi negociada com o Financeiro.</div></div>`;
       return;
     }
     if (negociouRadio.value === 'nao') {
       const membros = gruposEntraID['PRONEP-Financeiro-Gestao'].membros;
       const sugestao = membros.map(m => `<li>${m.nome} (${m.cargo}) — <span class="mono">${m.email}</span></li>`).join('');
-      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">✕</span><div><b>Lançamento bloqueado.</b> Vencimento de ${diff} dia(s) está fora do prazo D+5 e a NF ainda não foi negociada com o Financeiro. Procure um gestor do Financeiro antes de lançar:<ul style="margin:8px 0 0 16px;padding:0">${sugestao}</ul></div></div>`;
+      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">x</span><div><b>Lancamento bloqueado.</b> Vencimento de ${diff} dia(s) esta fora do prazo D+5 e a NF ainda nao foi negociada. Procure um gestor do Financeiro:<ul style="margin:8px 0 0 16px;padding:0">${sugestao}</ul></div></div>`;
       return;
     }
-    // Negociou == sim: exige a seleção do gestor no dropdown
-    var negociouComEmail = document.getElementById('frm-negociou-com').value;
+    negociouComEmail = document.getElementById('frm-negociou-com').value;
     if (!negociouComEmail) {
-      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">✕</span><div><b>Selecione o gestor do Financeiro com quem você negociou.</b> A lista é puxada do grupo <span class="mono">PRONEP-Financeiro-Gestao</span> do Entra ID.</div></div>`;
+      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">x</span><div><b>Selecione o gestor do Financeiro com quem voce negociou.</b></div></div>`;
       return;
     }
-    var negociouComNome = gruposEntraID['PRONEP-Financeiro-Gestao'].membros.find(m => m.email === negociouComEmail).nome;
+    const m = gruposEntraID['PRONEP-Financeiro-Gestao'].membros.find(m => m.email === negociouComEmail);
+    if (m) negociouComNome = m.nome;
   }
 
-  // Duplicidade — simula match com NF-2026-0451
+  // Resolve fornecedor (vem da lista carregada via /api/ListarFornecedores)
   const forn = fornecedores[parseInt(fornIdx)];
-  if (forn.cnpj === '32.554.883/0001-78' && numero === '2545') {
-    msgs.innerHTML = `<div class="alert alert-error"><span class="ico">⚠</span><div><b>Duplicidade detectada.</b> Esta NF já foi lançada por <b>Carla Souza</b> em <b>21/05/2026 09:34</b> (NF-2026-0451) e está atualmente <b>PENDENTE</b> na diretoria Técnica. O lançamento foi bloqueado e o arquivo NÃO foi gravado no SharePoint.<br><br><b>Camada que pegou:</b> tripla CNPJ + Número + Série.</div></div>`;
+  if (!forn) {
+    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>Fornecedor invalido.</b> Recarregue a pagina.</div></div>';
     return;
   }
 
-  // Sucesso — gravar a NF na lista de pendentes (para o Submitter conseguir acompanhar)
-  const novoId = 'NF-2026-' + String(Math.floor(Math.random()*900+500));
-  const agora = '2026-05-22 ' + new Date().toTimeString().substring(0,8);
-  const fornIdxInt = parseInt(fornIdx);
-  notas.unshift({
-    id: novoId,
-    numero: numero,
-    serie: document.getElementById('frm-serie').value || '1',
-    fornecedorIdx: fornIdxInt,
-    valor: valor,
-    vencimento: venc,
-    emissao: '2026-05-22',
-    unidade: forn.unidade,
-    diretoria: forn.diretoria,
-    status: 'pendente',
-    foraPrazo: diff < 5,
-    negociouCom: diff < 5 ? negociouComNome : null,
-    negociouComEmail: diff < 5 ? negociouComEmail : null,
-    lancadoPor: currentPersona.name,
-    lancadoEm: agora,
-    aprovadoPor: null,
-    aprovadoEm: null,
-    hash: Math.random().toString(36).substring(2,8) + '...' + Math.random().toString(36).substring(2,6)
-  });
+  // Disable botao + loading
+  btn.disabled = true;
+  const labelOriginal = btn.textContent;
+  btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:8px"></span>Enviando para SharePoint...';
 
-  toast(`NF ${novoId} enviada — gestor da ${forn.diretoria}/${forn.unidade} notificado`, 'success');
+  try {
+    msgs.innerHTML = '<div class="alert alert-info" style="background:var(--azul-soft);border-left:3px solid var(--azul-claro);color:var(--azul-escuro);padding:10px;border-radius:4px"><span class="ico">⏳</span><div>Convertendo PDF e enviando ao SharePoint...</div></div>';
 
-  // Modal — Enviar outra NF? Sim / Não
-  const extraInfo = diff < 5
-    ? `<div style="margin-top:10px;padding:10px;background:var(--amarelo-bg);border-left:3px solid var(--amarelo);border-radius:4px;font-size:13px;color:#6D4C00"><b>⚠ Vencimento fora do prazo</b> — negociação confirmada com <b>${negociouComNome}</b> (<span class="mono">${negociouComEmail}</span>). Esta pessoa será copiada na notificação ao gestor.</div>`
-    : '';
+    const dataURL = await fileToDataURL(file);
+    const payload = {
+      fornecedorCNPJ:  forn.documento || forn.cnpj,
+      fornecedorRazao: forn.razao,
+      numero:          numero,
+      serie:           document.getElementById('frm-serie').value || '1',
+      valor:           valor,
+      vencimento:      venc,
+      unidade:         forn.unidade,
+      diretoria:       forn.diretoria,
+      negociadoCom:    negociouComEmail || null,
+      descricao:       descricao,
+      fileBase64:      dataURL,
+      fileName:        file.name
+    };
 
-  openModal(`
-    <div style="text-align:center;padding:8px 0 4px">
-      <div style="width:64px;height:64px;border-radius:50%;background:var(--verde-bg);color:var(--verde);display:inline-grid;place-items:center;font-size:34px;margin-bottom:14px">✓</div>
-      <h3 style="margin-bottom:6px">Nota enviada com sucesso!</h3>
-      <div class="muted" style="font-size:14px;margin-bottom:6px">Identificador: <b style="color:var(--azul-escuro);font-family:monospace">${novoId}</b></div>
-      <div class="small muted">Arquivo salvo em <span class="mono">SharePoint/Notas Pendentes/${forn.unidade}/${forn.diretoria}/</span></div>
-      <div class="small muted" style="margin-top:4px">O gestor responsável já recebeu e-mail e card no Teams.</div>
-      ${extraInfo}
-    </div>
-    <hr>
-    <div style="text-align:center">
-      <div style="font-weight:600;color:var(--azul-escuro);font-size:15px;margin-bottom:14px">Deseja enviar outra NF?</div>
-      <div style="display:flex;gap:10px;justify-content:center">
-        <button class="btn btn-secondary" onclick="afterSubmitNF(false)" style="min-width:140px">Não — ir para Fila</button>
-        <button class="btn btn-primary" onclick="afterSubmitNF(true)" style="min-width:140px">Sim — nova NF</button>
+    const resp = await fetch('/api/PostNota', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await resp.json().catch(() => ({}));
+
+    if (resp.status === 409) {
+      // Duplicidade
+      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">⚠</span><div><b>Duplicidade detectada.</b> Esta NF ja foi lancada anteriormente. Motivo: <b>${data.motivo}</b> · Status atual: <b>${data.status || '—'}</b>. O lancamento foi bloqueado e o arquivo NAO foi gravado no SharePoint.</div></div>`;
+      return;
+    }
+
+    if (!resp.ok) {
+      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">x</span><div><b>Erro ao enviar NF (HTTP ${resp.status}).</b><br>${data.error || 'Erro desconhecido'}<br><span class="small muted">Diag: ${(data.diag && data.diag.step) || '—'}</span></div></div>`;
+      console.error('[PostNota erro]', data);
+      return;
+    }
+
+    // Sucesso — adiciona na lista local pra atualizar UI imediatamente
+    const novoId = data.id;
+    const agora = new Date().toISOString().replace('T',' ').substring(0,19);
+    notas.unshift({
+      id: 'NF-' + novoId,
+      numero: numero,
+      serie: payload.serie,
+      fornecedorIdx: parseInt(fornIdx),
+      valor: valor,
+      vencimento: venc,
+      emissao: agora.substring(0,10),
+      unidade: forn.unidade,
+      diretoria: forn.diretoria,
+      status: 'pendente',
+      foraPrazo: diff < 5,
+      negociouCom: negociouComNome,
+      negociouComEmail: negociouComEmail,
+      lancadoPor: currentPersona.name,
+      lancadoEm: agora,
+      aprovadoPor: null,
+      aprovadoEm: null,
+      hash: (data.diag && data.diag.hash || '').slice(0,16),
+      urlPDF: data.urlPDF || ''
+    });
+
+    toast(`NF enviada — gestor ${data.aprovador.nome} notificado`, 'success');
+
+    const extraInfo = diff < 5
+      ? `<div style="margin-top:10px;padding:10px;background:var(--amarelo-bg);border-left:3px solid var(--amarelo);border-radius:4px;font-size:13px;color:#6D4C00"><b>⚠ Vencimento fora do prazo</b> — negociacao confirmada com <b>${negociouComNome}</b>.</div>`
+      : '';
+
+    openModal(`
+      <div style="text-align:center;padding:8px 0 4px">
+        <div style="width:64px;height:64px;border-radius:50%;background:var(--verde-bg);color:var(--verde);display:inline-grid;place-items:center;font-size:34px;margin-bottom:14px">✓</div>
+        <h3 style="margin-bottom:6px">Nota enviada com sucesso!</h3>
+        <div class="muted" style="font-size:14px;margin-bottom:6px">Identificador: <b style="color:var(--azul-escuro);font-family:monospace">NF-${novoId}</b></div>
+        <div class="small muted">Arquivo salvo em <span class="mono">SharePoint/Notas Fiscais/Pendentes/${forn.unidade}/Diretoria ${forn.diretoria}/</span></div>
+        <div class="small muted" style="margin-top:4px">Aprovador: <b>${data.aprovador.nome}</b> (${data.aprovador.email})</div>
+        ${extraInfo}
       </div>
-    </div>
-  `);
+      <hr>
+      <div style="text-align:center">
+        <div style="font-weight:600;color:var(--azul-escuro);font-size:15px;margin-bottom:14px">Deseja enviar outra NF?</div>
+        <div style="display:flex;gap:10px;justify-content:center">
+          <button class="btn btn-secondary" onclick="afterSubmitNF(false)" style="min-width:140px">Nao — ir para Fila</button>
+          <button class="btn btn-primary" onclick="afterSubmitNF(true)" style="min-width:140px">Sim — nova NF</button>
+        </div>
+      </div>
+    `);
+  } catch (e) {
+    msgs.innerHTML = `<div class="alert alert-error"><span class="ico">x</span><div><b>Falha ao comunicar com o servidor.</b><br>${e && e.message || String(e)}</div></div>`;
+    console.error('[submitNF]', e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = labelOriginal;
+  }
 }
 
 function afterSubmitNF(maisUma) {
