@@ -1,12 +1,13 @@
 {
   "name": "pronep-aprovacao-nf-api",
   "version": "1.0.0",
-  "description": "API debug — testando @azure/identity",
+  "description": "API debug — testando @microsoft/microsoft-graph-client",
   "scripts": {
     "test": "echo \"No tests\""
   },
   "dependencies": {
     "isomorphic-fetch": "^3.0.0",
-    "@azure/identity": "^4.0.0"
+    "@azure/identity": "^4.0.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7"
   }
 }
