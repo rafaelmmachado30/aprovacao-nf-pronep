@@ -1,11 +1,12 @@
 {
   "name": "pronep-aprovacao-nf-api",
   "version": "1.0.0",
-  "description": "API debug — testando isomorphic-fetch isolado",
+  "description": "API debug — testando @azure/identity",
   "scripts": {
     "test": "echo \"No tests\""
   },
   "dependencies": {
-    "isomorphic-fetch": "^3.0.0"
+    "isomorphic-fetch": "^3.0.0",
+    "@azure/identity": "^4.0.0"
   }
 }

@@ -1,9 +1,12 @@
-// Hello v2 — testa se isomorphic-fetch consegue ser carregado
-let fetchRequireError = null;
+// Hello v3 — testa isomorphic-fetch + @azure/identity
+let fetchErr = null, identityErr = null;
+try { require('isomorphic-fetch'); } catch (e) { fetchErr = e.message; }
+let ClientSecretCredential = null;
 try {
-  require('isomorphic-fetch');
+  const id = require('@azure/identity');
+  ClientSecretCredential = typeof id.ClientSecretCredential;
 } catch (e) {
-  fetchRequireError = e.message;
+  identityErr = e.message;
 }
 
 module.exports = async function (context, req) {
@@ -14,12 +17,14 @@ module.exports = async function (context, req) {
       ok: true,
       time: new Date().toISOString(),
       node: process.version,
-      step: 'checkpoint-2: testing isomorphic-fetch',
-      fetchRequireError: fetchRequireError,
+      step: 'checkpoint-3: testing @azure/identity',
+      fetchRequireError: fetchErr,
       fetchAvailable: typeof fetch,
+      identityRequireError: identityErr,
+      ClientSecretCredentialType: ClientSecretCredential,
       env: {
-        AAD_TENANT_ID:           !!process.env.AAD_TENANT_ID,
-        SHAREPOINT_SITE_HOSTNAME: process.env.SHAREPOINT_SITE_HOSTNAME || null
+        AAD_TENANT_ID: !!process.env.AAD_TENANT_ID,
+        AAD_CLIENT_ID: !!process.env.AAD_CLIENT_ID
       }
     }
   };
