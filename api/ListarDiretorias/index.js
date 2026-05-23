@@ -71,6 +71,7 @@ module.exports = async function (context, req) {
     diag.totalItems = all.length;
 
     diag.step = 'transform';
+    diag.rawFieldsDebug = all.slice(0,3).map(item => item.fields);
     const diretorias = all.map(item => {
       const f = item.fields || {};
       return {

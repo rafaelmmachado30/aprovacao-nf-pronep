@@ -102,6 +102,9 @@ module.exports = async function (context, req) {
     diag.totalItems = all.length;
 
     diag.step = 'transform';
+    // DEBUG: incluir rawFields dos 3 primeiros pra descobrir internalNames reais
+    diag.rawFieldsDebug = all.slice(0,3).map(item => item.fields);
+
     // Normaliza pro formato consumido pelo front
     let fornecedores = all.map(item => {
       const f = item.fields || {};
