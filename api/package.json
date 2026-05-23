@@ -1,9 +1,11 @@
 {
   "name": "pronep-aprovacao-nf-api",
   "version": "1.0.0",
-  "description": "API minimal de debug — sem dependencias",
+  "description": "API debug — testando isomorphic-fetch isolado",
   "scripts": {
     "test": "echo \"No tests\""
   },
-  "dependencies": {}
+  "dependencies": {
+    "isomorphic-fetch": "^3.0.0"
+  }
 }
