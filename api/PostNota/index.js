@@ -228,31 +228,52 @@ module.exports = async function (context, req) {
     // Title = "NF {numero}" ou descricao se nao tem numero
     const title = numero ? `NF ${numero}` : (descricao || 'NF sem numero').slice(0, 80);
     // Constroi o objeto com displayNames; buildFieldsObject converte pra internalNames
+    // Formata datas como ISO completo (DataVencimento precisa de hora pra SharePoint Date+Time)
+    // Se a coluna for soh Date, o SharePoint aceita ISO completo tambem (truncar)
+    const isoVenc = (vencimento && vencimento.length === 10) ? (vencimento + 'T00:00:00Z') : vencimento;
     const rawFields = {
       Title:           title,
       NumeroNF:        numero || '',
       CNPJFornecedor:  fornecedorCNPJ,
       Descricao:       descricao || '',
-      Valor:           String(valor),
-      DataVencimento:  vencimento,
+      Valor:           valor,                       // <-- NUMERO (nao string)
+      DataVencimento:  isoVenc,
       Unidade:         unidade,
       Diretoria:       diretoria,
       AprovadorAtual:  aprovador.email,
       Status:          'Lancada',
       LancadoPor:      submitterEmail,
       LancadoEm:       new Date().toISOString(),
-      AprovadoEm:      '',
+      AprovadoEm:      null,                        // <-- null em vez de '' (campo data)
       MotivoRejeicao:  '',
       HashSHA256:      hash,
       UrlPDF:          uploadResp.webUrl || '',
-      UrlPDFAprovado:  ''
+      UrlPDFAprovado:  null                         // <-- null em vez de ''
     };
     const itemFields = buildFieldsObject(colMap, rawFields);
+    // Remove campos com null/undefined (SharePoint reclama de "argument not acceptable")
+    for (const k of Object.keys(itemFields)) {
+      if (itemFields[k] === null || itemFields[k] === undefined || itemFields[k] === '') {
+        delete itemFields[k];
+      }
+    }
     diag.itemFieldsUsados = Object.keys(itemFields);
-    const itemResp = await client
-      .api(`/sites/${siteId}/lists/${listNotasId}/items`)
-      .post({ fields: itemFields });
-    diag.itemId = itemResp.id;
+    diag.itemFieldsPayload = itemFields;
+    try {
+      const itemResp = await client
+        .api(`/sites/${siteId}/lists/${listNotasId}/items`)
+        .post({ fields: itemFields });
+      diag.itemId = itemResp.id;
+    } catch (createErr) {
+      // Re-throw com info mais util no diag
+      diag.createListError = {
+        message: createErr.message,
+        statusCode: createErr.statusCode,
+        body: createErr.body,
+        code: createErr.code
+      };
+      throw createErr;
+    }
 
     context.res = {
       status: 200,
