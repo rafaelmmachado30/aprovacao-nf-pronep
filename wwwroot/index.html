@@ -641,7 +641,9 @@ async function carregarDiretoriasReais() {
 async function carregarDadosIniciais() {
   await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais()]);
   // Re-renderiza a view atual se for uma que depende desses dados
-  if (currentView === 'fornecedores' || currentView === 'lancamento' || currentView === 'mapa') {
+  // Re-renderiza qualquer view que dependa de fornecedores/diretorias
+  const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
+  if (viewsQueDependem.includes(currentView)) {
     showView(currentView);
   }
 }
@@ -733,6 +735,8 @@ function showView(id) {
   const m = menuItems.find(m=>m.id===id) || {label:'Visão'};
   document.getElementById('crumb-view').textContent = m.label;
   renderNav();
+  // Antes de trocar o innerHTML, destrua charts ativos (evita erro 'this._fn is not a function' do Chart.js)
+  destroyAllCharts();
   const area = document.getElementById('content-area');
   area.innerHTML = views[id] ? views[id]() : '<div class="card">Tela em construção.</div>';
   // Anima KPIs (count-up) sempre que houver KPI na tela
@@ -740,6 +744,15 @@ function showView(id) {
   // Monta charts do dashboard se necessario
   if (id === 'dashboard') {
     requestAnimationFrame(() => mountDashboardCharts());
+  }
+}
+
+// Destroi todos os charts ativos (chamado ANTES de trocar a view)
+function destroyAllCharts() {
+  if (!window._activeCharts) return;
+  for (const id of Object.keys(window._activeCharts)) {
+    try { window._activeCharts[id].destroy(); } catch(e){}
+    delete window._activeCharts[id];
   }
 }
 

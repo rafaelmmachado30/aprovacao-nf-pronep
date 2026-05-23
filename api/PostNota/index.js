@@ -259,8 +259,9 @@ module.exports = async function (context, req) {
     }
     diag.itemFieldsUsados = Object.keys(itemFields);
     diag.itemFieldsPayload = itemFields;
+    let itemResp;
     try {
-      const itemResp = await client
+      itemResp = await client
         .api(`/sites/${siteId}/lists/${listNotasId}/items`)
         .post({ fields: itemFields });
       diag.itemId = itemResp.id;
