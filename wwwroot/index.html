@@ -209,6 +209,38 @@
   .tag-sp { background: #F3E5F5; color: #6A1B9A; }
   .tag-es { background: #FFF3E0; color: #E65100; }
   hr { border: 0; border-top: 1px solid var(--cinza-borda); margin: 18px 0; }
+
+  /* ============= ANIMAÇÕES (Pronep style) ============= */
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  /* Cascata nas KPIs */
+  .kpi { animation: fadeInUp 0.4s ease-out backwards; }
+  .kpi:nth-child(1) { animation-delay: 0.05s; }
+  .kpi:nth-child(2) { animation-delay: 0.12s; }
+  .kpi:nth-child(3) { animation-delay: 0.19s; }
+  .kpi:nth-child(4) { animation-delay: 0.26s; }
+  .kpi:nth-child(5) { animation-delay: 0.33s; }
+  .kpi { transition: box-shadow 0.2s ease, transform 0.2s ease; }
+  .kpi:hover { transform: translateY(-2px); box-shadow: 0 4px 18px rgba(31,78,121,0.10); }
+  /* Cards do dashboard com entrada suave */
+  .chart-grid > .card,
+  .view > .card { animation: fadeInUp 0.5s ease-out backwards; }
+  .chart-grid > .card:nth-child(1) { animation-delay: 0.30s; }
+  .chart-grid > .card:nth-child(2) { animation-delay: 0.40s; }
+  /* Tabela de dados com entrada escalonada */
+  .data tbody tr { animation: fadeInUp 0.3s ease-out backwards; }
+  .data tbody tr:nth-child(1) { animation-delay: 0.45s; }
+  .data tbody tr:nth-child(2) { animation-delay: 0.50s; }
+  .data tbody tr:nth-child(3) { animation-delay: 0.55s; }
+  .data tbody tr:nth-child(4) { animation-delay: 0.60s; }
+  .data tbody tr:nth-child(5) { animation-delay: 0.65s; }
+  .data tbody tr:nth-child(n+6) { animation-delay: 0.70s; }
+  /* Botões com micro-interação */
+  .btn { transition: transform 0.1s ease, box-shadow 0.15s ease; }
+  .btn:active { transform: scale(0.97); }
+  .tag, .pill, .status-pill { transition: transform 0.15s ease; }
 </style>
 </head>
 <body>
@@ -370,16 +402,12 @@ const aprovadoresReais = {
 const unidades = ['SP','RJ','ES'];
 const diretorias = ['Suprimentos','Qualidade','Administrativa','Jurídica','Fiscal-Contábil','Técnica','Financeira','RH-DP','Tecnologia'];
 
-const fornecedores = [
-  { cnpj: '32.554.883/0001-78', razao: 'TNC-GAN Terapia Nutricional',     unidade: 'RJ', diretoria: 'Técnica',        categoria: 'Serviços',  ativo: true },
-  { cnpj: '14.785.236/0001-04', razao: 'MedSupply Materiais Hospitalares',unidade: 'RJ', diretoria: 'Suprimentos',    categoria: 'Materiais', ativo: true },
-  { cnpj: '09.118.473/0001-22', razao: 'Olá Tecnologia em Saúde',         unidade: 'SP', diretoria: 'Tecnologia',     categoria: 'Serviços',  ativo: true },
-  { cnpj: '09.118.473/0002-03', razao: 'Olá Tecnologia em Saúde',         unidade: 'RJ', diretoria: 'Tecnologia',     categoria: 'Serviços',  ativo: true },
-  { cnpj: '09.118.473/0003-94', razao: 'Olá Tecnologia em Saúde',         unidade: 'ES', diretoria: 'Tecnologia',     categoria: 'Serviços',  ativo: true },
-  { cnpj: '21.456.789/0001-90', razao: 'Advocacia Bertolini & Associados',unidade: 'RJ', diretoria: 'Jurídica',       categoria: 'Serviços',  ativo: true },
-  { cnpj: '07.331.456/0001-11', razao: 'Construtora Capixaba Reformas',   unidade: 'ES', diretoria: 'Administrativa', categoria: 'Serviços',  ativo: true },
-  { cnpj: '18.923.118/0001-65', razao: 'Lavanderia Hospital Limpa+',      unidade: 'SP', diretoria: 'Suprimentos',    categoria: 'Serviços',  ativo: true },
-  { cnpj: '32.554.883/0002-59', razao: 'TNC-GAN Terapia Nutricional',     unidade: 'SP', diretoria: 'Técnica',        categoria: 'Serviços',  ativo: false },
+// Fornecedores: comeca vazio, sera carregado de /api/ListarFornecedores (SharePoint)
+// Mantemos algumas entradas mock como FALLBACK caso a API falhe (modo offline/demo)
+let fornecedores = [];
+const _fornecedoresFallback = [
+  { documento: '32.554.883/0001-78', tipoDocumento: 'CNPJ', razao: 'TNC-GAN Terapia Nutricional (mock)', unidade: 'RJ', diretoria: 'Técnica',     ativo: true },
+  { documento: '14.785.236/0001-04', tipoDocumento: 'CNPJ', razao: 'MedSupply Materiais (mock)',         unidade: 'RJ', diretoria: 'Suprimentos', ativo: true },
 ];
 
 let notas = [
@@ -490,6 +518,9 @@ function loginCheckEmail() {
 }
 
 function loginAs(userData, emailLogin) {
+  // Carrega dados reais do SharePoint apos login (mockado ou real)
+  if (!window._dadosCarregados.fornecedores) carregarDadosIniciais();
+
   const base = personas[userData.persona];
   // Resolve o e-mail (vem do login ou da lista)
   const email = emailLogin || Object.entries(usuariosReconhecidos).find(([k,v]) => v.nome === userData.nome)?.[0] || '';
@@ -548,6 +579,70 @@ document.addEventListener('DOMContentLoaded', () => {
 //
 // Se a chamada falhar (rodando em localhost ou fora do SWA), o fluxo de
 // login mockado (digitar e-mail) continua disponivel normalmente.
+// =================== CARREGAMENTO DE DADOS REAIS (SharePoint via Graph) ===================
+let aprovadoresReaisDinamico = null;  // sera populado por carregarDiretoriasReais
+window._dadosCarregados = { fornecedores: false, diretorias: false };
+
+async function carregarFornecedoresReais() {
+  try {
+    const r = await fetch('/api/ListarFornecedores?limit=5000', { credentials: 'include' });
+    if (!r.ok) {
+      console.warn('[ListarFornecedores] HTTP ' + r.status + ' — usando fallback mock');
+      fornecedores = _fornecedoresFallback.map(f => Object.assign({}, f, { cnpj: f.documento }));
+      return false;
+    }
+    const data = await r.json();
+    if (!data || !Array.isArray(data.fornecedores)) {
+      console.warn('[ListarFornecedores] payload invalido');
+      fornecedores = _fornecedoresFallback.map(f => Object.assign({}, f, { cnpj: f.documento }));
+      return false;
+    }
+    // Adapta pro formato consumido pelo restante do app (mantem .cnpj como alias de .documento)
+    fornecedores = data.fornecedores.map(f => Object.assign({}, f, {
+      cnpj: f.documento,
+      categoria: 'Serviços'
+    }));
+    window._dadosCarregados.fornecedores = true;
+    console.log('[ListarFornecedores] ' + fornecedores.length + ' carregados');
+    return true;
+  } catch (e) {
+    console.warn('[ListarFornecedores] erro:', e && e.message);
+    fornecedores = _fornecedoresFallback.map(f => Object.assign({}, f, { cnpj: f.documento }));
+    return false;
+  }
+}
+
+async function carregarDiretoriasReais() {
+  try {
+    const r = await fetch('/api/ListarDiretorias', { credentials: 'include' });
+    if (!r.ok) {
+      console.warn('[ListarDiretorias] HTTP ' + r.status);
+      return false;
+    }
+    const data = await r.json();
+    if (data && data.mapa) {
+      aprovadoresReaisDinamico = data.mapa;
+      // Sobrescreve a constante aprovadoresReais com os dados reais (cuidado: ela e const,
+      // entao apenas escrevemos no window e os callers que dependem podem checar)
+      window._aprovadoresReaisAtuais = data.mapa;
+      window._dadosCarregados.diretorias = true;
+      console.log('[ListarDiretorias] ' + Object.keys(data.mapa).length + ' combinacoes carregadas');
+      return true;
+    }
+  } catch (e) {
+    console.warn('[ListarDiretorias] erro:', e && e.message);
+  }
+  return false;
+}
+
+async function carregarDadosIniciais() {
+  await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais()]);
+  // Re-renderiza a view atual se for uma que depende desses dados
+  if (currentView === 'fornecedores' || currentView === 'lancamento' || currentView === 'mapa') {
+    showView(currentView);
+  }
+}
+
 async function tryAutoLoginFromAzure() {
   try {
     const meResp = await fetch('/.auth/me', { credentials: 'include' });
@@ -595,6 +690,7 @@ async function tryAutoLoginFromAzure() {
     userData = Object.assign({}, userData, { persona });
 
     loginAs(userData, email);
+    carregarDadosIniciais();  // carrega fornecedores+diretorias do SharePoint
   } catch (e) {
     console.warn('[tryAutoLoginFromAzure] ignorado:', e && e.message);
   }
@@ -636,6 +732,160 @@ function showView(id) {
   renderNav();
   const area = document.getElementById('content-area');
   area.innerHTML = views[id] ? views[id]() : '<div class="card">Tela em construção.</div>';
+  // Anima KPIs (count-up) sempre que houver KPI na tela
+  requestAnimationFrame(() => animateKPIs());
+  // Monta charts do dashboard se necessario
+  if (id === 'dashboard') {
+    requestAnimationFrame(() => mountDashboardCharts());
+  }
+}
+
+// =================== ANIMACOES DOS GRAFICOS / KPIs ===================
+// Chart.js global config (defaults para todos os charts)
+if (window.Chart) {
+  Chart.defaults.font.family = 'Inter, -apple-system, Segoe UI, Roboto, sans-serif';
+  Chart.defaults.font.size = 11;
+  Chart.defaults.color = '#647883';
+  Chart.defaults.animation = { duration: 900, easing: 'easeOutQuart' };
+}
+
+// destruir charts ativos antes de remontar (evita vazamento)
+window._activeCharts = window._activeCharts || {};
+function destroyChart(id) {
+  if (window._activeCharts[id]) {
+    try { window._activeCharts[id].destroy(); } catch(e){}
+    delete window._activeCharts[id];
+  }
+}
+
+function mountDashboardCharts() {
+  if (!window.Chart || !window._dashData) return;
+  const data = window._dashData;
+
+  // === BAR HORIZONTAL: Valor por Diretoria ===
+  const canvasBar = document.getElementById('chart-diretoria');
+  if (canvasBar && data.barEntries.length) {
+    destroyChart('chart-diretoria');
+    window._activeCharts['chart-diretoria'] = new Chart(canvasBar, {
+      type: 'bar',
+      data: {
+        labels: data.barEntries.map(e => e[0]),
+        datasets: [{
+          label: 'Valor aprovado',
+          data: data.barEntries.map(e => e[1]),
+          backgroundColor: '#27AAE1',
+          borderColor: '#1F4E79',
+          borderWidth: 1,
+          borderRadius: 4,
+          hoverBackgroundColor: '#1F4E79'
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => fmtBRL(c.parsed.x) } }
+        },
+        scales: {
+          x: { beginAtZero: true, grid: { color: '#EEF2F5' }, ticks: { callback: v => fmtBRL(v) } },
+          y: { grid: { display: false } }
+        }
+      }
+    });
+  }
+
+  // === DONUT: Distribuicao por Unidade ===
+  const canvasUnit = document.getElementById('chart-unidade');
+  if (canvasUnit && Object.keys(data.byUnit).length) {
+    destroyChart('chart-unidade');
+    const labels = Object.keys(data.byUnit);
+    const values = Object.values(data.byUnit);
+    const colors = labels.map(u => ({ RJ:'#27AAE1', SP:'#7B61C6', ES:'#F09030' }[u] || '#888'));
+    window._activeCharts['chart-unidade'] = new Chart(canvasUnit, {
+      type: 'doughnut',
+      data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#fff', borderWidth: 2 }] },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        cutout: '60%',
+        plugins: {
+          legend: { position: 'right', labels: { boxWidth: 12, padding: 12 } },
+          tooltip: {
+            callbacks: {
+              label: c => {
+                const total = values.reduce((a,b)=>a+b,0);
+                const pct = (c.parsed/total*100).toFixed(1);
+                return `${c.label}: ${fmtBRL(c.parsed)} (${pct}%)`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // === LINHA: Evolucao Mensal ===
+  const canvasLine = document.getElementById('chart-mensal');
+  if (canvasLine) {
+    destroyChart('chart-mensal');
+    window._activeCharts['chart-mensal'] = new Chart(canvasLine, {
+      type: 'line',
+      data: {
+        labels: data.months,
+        datasets: [{
+          label: 'Valor aprovado',
+          data: data.monthly,
+          borderColor: '#27AAE1',
+          backgroundColor: 'rgba(39,170,225,0.12)',
+          borderWidth: 2.5,
+          fill: true,
+          tension: 0.35,
+          pointBackgroundColor: '#1F4E79',
+          pointRadius: 4,
+          pointHoverRadius: 6
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: c => fmtBRL(c.parsed.y) } }
+        },
+        scales: {
+          y: { beginAtZero: true, grid: { color: '#EEF2F5' }, ticks: { callback: v => fmtBRL(v) } },
+          x: { grid: { display: false } }
+        }
+      }
+    });
+  }
+}
+
+// Anima contadores nos elementos .value[data-count]
+function animateKPIs() {
+  const els = document.querySelectorAll('.value[data-count]');
+  els.forEach(el => {
+    const target = parseFloat(el.getAttribute('data-count'));
+    const fmt = el.getAttribute('data-fmt') || 'int';
+    if (isNaN(target)) return;
+    const dur = 900;
+    const start = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - start) / dur);
+      // easeOutQuart
+      const eased = 1 - Math.pow(1 - t, 4);
+      const cur = target * eased;
+      let txt;
+      if (fmt === 'brl')      txt = fmtBRL(cur);
+      else if (fmt === 'pct') txt = cur.toFixed(1).replace('.', ',') + '%';
+      else                    txt = Math.round(cur).toLocaleString('pt-BR');
+      el.textContent = txt;
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  });
 }
 
 // ============== VIEWS ==============
@@ -645,74 +895,54 @@ const views = {
     const pendentes = notas.filter(n => n.status === 'pendente');
     const rejeitadas = notas.filter(n => n.status === 'rejeitada' || n.status === 'duplicada');
     const totalMes = aprovadas.reduce((s, n) => s + n.valor, 0);
-    const taxaDup = (notas.filter(n => n.status === 'duplicada').length / notas.length * 100).toFixed(1);
+    const taxaDup = (notas.filter(n => n.status === 'duplicada').length / Math.max(notas.length,1) * 100).toFixed(1);
 
-    // Bar chart by diretoria
+    // Dados pros graficos
     const byDiretoria = {};
     aprovadas.forEach(n => { byDiretoria[n.diretoria] = (byDiretoria[n.diretoria]||0) + n.valor; });
-    const bars = Object.entries(byDiretoria).sort((a,b)=>b[1]-a[1]);
-    const maxBar = Math.max(...bars.map(b=>b[1]));
-    let chartHtml = '';
-    if (bars.length === 0) {
-      chartHtml = '<div class="muted small">Sem aprovações no período.</div>';
-    } else {
-      chartHtml = '<svg viewBox="0 0 600 280" style="width:100%;height:280px">';
-      bars.forEach((b, i) => {
-        const barW = 480; const x0 = 110; const y = 30 + i*36; const w = (b[1]/maxBar)*barW;
-        chartHtml += `<text x="105" y="${y+13}" text-anchor="end" font-size="11" fill="#647883">${b[0]}</text>`;
-        chartHtml += `<rect x="${x0}" y="${y}" width="${w}" height="18" rx="2" fill="#27AAE1" opacity="0.85"/>`;
-        chartHtml += `<text x="${x0+w+6}" y="${y+13}" font-size="11" fill="#1F4E79" font-weight="600">${fmtBRL(b[1])}</text>`;
-      });
-      chartHtml += '</svg>';
-    }
+    const barEntries = Object.entries(byDiretoria).sort((a,b)=>b[1]-a[1]);
 
-    // Line chart - last 12 months (synthetic)
+    const byUnit = {};
+    aprovadas.forEach(n => byUnit[n.unidade] = (byUnit[n.unidade]||0) + n.valor);
+
     const monthly = [42000, 58000, 51000, 67000, 73000, 81000, 76000, 88000, 92000, 95000, 102000, totalMes];
-    const months = ['Jun/25','Jul','Ago','Set','Out','Nov','Dez','Jan/26','Fev','Mar','Abr','Mai'];
-    const maxM = Math.max(...monthly);
-    const points = monthly.map((v,i) => {
-      const x = 40 + i * (520/11);
-      const y = 200 - (v/maxM) * 160;
-      return [x, y];
-    });
-    let lineSvg = '<svg viewBox="0 0 600 240" style="width:100%;height:240px">';
-    [0,0.25,0.5,0.75,1].forEach(p => { const y = 200 - p*160; lineSvg += `<line x1="40" x2="580" y1="${y}" y2="${y}" stroke="#EEF2F5"/>`; });
-    lineSvg += '<polyline fill="none" stroke="#27AAE1" stroke-width="2.5" points="' + points.map(p=>p.join(',')).join(' ') + '"/>';
-    points.forEach((p,i) => { lineSvg += `<circle cx="${p[0]}" cy="${p[1]}" r="3.5" fill="#1F4E79"/>`; lineSvg += `<text x="${p[0]}" y="220" text-anchor="middle" font-size="10" fill="#647883">${months[i]}</text>`; });
-    lineSvg += '</svg>';
+    const months  = ['Jun/25','Jul','Ago','Set','Out','Nov','Dez','Jan/26','Fev','Mar','Abr','Mai'];
+
+    // Guarda dados pra mountDashboardCharts() consumir apos innerHTML
+    window._dashData = { barEntries, byUnit, monthly, months, totalMes };
 
     return `
-      <h2>Dashboard Analítico</h2>
-      <div class="view-sub">Visão consolidada de aprovações e indicadores · Maio/2026</div>
+      <h2>Dashboard Analitico</h2>
+      <div class="view-sub">Visao consolidada de aprovacoes e indicadores · Maio/2026</div>
 
       <div class="kpi-row">
-        <div class="kpi"><div class="label">Aprovado no Mês</div><div class="value">${fmtBRL(totalMes)}</div><div class="delta up">▲ 18% vs Abr</div></div>
-        <div class="kpi"><div class="label">NFs Aprovadas</div><div class="value">${aprovadas.length}</div><div class="delta up">▲ 12 NFs</div></div>
-        <div class="kpi"><div class="label">Pendentes</div><div class="value">${pendentes.length}</div><div class="delta small muted">Tempo médio: 6,4h</div></div>
-        <div class="kpi"><div class="label">Duplicidade Evitada</div><div class="value">${taxaDup}%</div><div class="delta up">${rejeitadas.length} NF(s) barradas</div></div>
+        <div class="kpi"><div class="label">Aprovado no Mes</div><div class="value" data-count="${totalMes}" data-fmt="brl">R$ 0</div><div class="delta up">&#9650; 18% vs Abr</div></div>
+        <div class="kpi"><div class="label">NFs Aprovadas</div><div class="value" data-count="${aprovadas.length}" data-fmt="int">0</div><div class="delta up">&#9650; 12 NFs</div></div>
+        <div class="kpi"><div class="label">Pendentes</div><div class="value" data-count="${pendentes.length}" data-fmt="int">0</div><div class="delta small muted">Tempo medio: 6,4h</div></div>
+        <div class="kpi"><div class="label">Duplicidade Evitada</div><div class="value" data-count="${taxaDup}" data-fmt="pct">0%</div><div class="delta up">${rejeitadas.length} NF(s) barradas</div></div>
       </div>
 
       <div class="chart-grid">
         <div class="card">
           <h3>Valor Aprovado por Diretoria <span class="pill">Maio/2026</span></h3>
-          ${chartHtml}
+          <div style="position:relative;height:280px"><canvas id="chart-diretoria"></canvas></div>
         </div>
         <div class="card">
-          <h3>Distribuição por Unidade</h3>
-          ${pieByUnit(aprovadas)}
+          <h3>Distribuicao por Unidade</h3>
+          <div style="position:relative;height:280px"><canvas id="chart-unidade"></canvas></div>
         </div>
       </div>
 
       <div class="card">
-        <h3>Evolução Mensal de Valor Aprovado <span class="pill">Últimos 12 meses</span></h3>
-        ${lineSvg}
+        <h3>Evolucao Mensal de Valor Aprovado <span class="pill">Ultimos 12 meses</span></h3>
+        <div style="position:relative;height:260px"><canvas id="chart-mensal"></canvas></div>
       </div>
 
       <div class="card">
-        <h3>Detalhamento Analítico (top 10)</h3>
+        <h3>Detalhamento Analitico (top 10)</h3>
         ${analyticsTable(aprovadas.slice(0, 10))}
         <div style="margin-top:12px;text-align:right">
-          <button class="btn btn-secondary" onclick="exportXlsxStub()">⤓ Exportar Excel</button>
+          <button class="btn btn-secondary" onclick="exportXlsxStub()">&#10515; Exportar Excel</button>
         </div>
       </div>
     `;
@@ -1150,17 +1380,32 @@ function abrirModalFornecedor(idx) {
     <span class="close-x" onclick="closeModal()">×</span>
     <h3>${titulo}</h3>
     <div class="form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="form-row" style="grid-column:1/-1;display:grid;grid-template-columns:160px 1fr auto;gap:8px;align-items:end">
+        <div>
+          <label>Tipo *</label>
+          <select id="frn-tipo-doc" ${isEdit?'disabled':''} onchange="atualizaCampoDocumento()">
+            <option value="CNPJ" ${(x.tipoDocumento||'CNPJ')==='CNPJ'?'selected':''}>CNPJ (PJ)</option>
+            <option value="CPF"  ${x.tipoDocumento==='CPF'?'selected':''}>CPF (PF)</option>
+          </select>
+        </div>
+        <div>
+          <label id="frn-doc-label">CNPJ *</label>
+          <input id="frn-cnpj" value="${x.cnpj||x.documento||''}" placeholder="00.000.000/0000-00" ${isEdit?'readonly':''}
+                 oninput="mascaraDocumento(this)" maxlength="18">
+        </div>
+        <button type="button" id="frn-btn-buscar" class="btn btn-secondary" onclick="buscarCNPJ()" ${isEdit?'disabled':''} style="white-space:nowrap;height:38px">
+          <span id="frn-cnpj-spinner" style="display:none;width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:6px"></span>
+          <span id="frn-cnpj-label">🔎 Buscar dados</span>
+        </button>
+      </div>
+      <div id="frn-cnpj-msg" class="small muted" style="grid-column:1/-1;margin-top:-8px;min-height:16px"></div>
       <div class="form-row" style="grid-column:1/-1">
-        <label>Razão Social *</label>
+        <label id="frn-razao-label">Razão Social *</label>
         <input id="frn-razao" value="${x.razao}" placeholder="Ex.: Olá Tecnologia em Saúde">
       </div>
       <div class="form-row" style="grid-column:1/-1">
         <label>Nome Fantasia</label>
         <input id="frn-fantasia" value="${x.nomeFantasia||''}" placeholder="Opcional">
-      </div>
-      <div class="form-row">
-        <label>CNPJ *</label>
-        <input id="frn-cnpj" value="${x.cnpj}" placeholder="00.000.000/0000-00" ${isEdit?'readonly':''}>
       </div>
       <div class="form-row">
         <label>Categoria *</label>
@@ -1195,6 +1440,104 @@ function abrirModalFornecedor(idx) {
       <button class="btn btn-primary" onclick="salvarFornecedor(${isEdit ? idx : 'null'})">${isEdit ? 'Salvar alterações' : 'Cadastrar'}</button>
     </div>
   `);
+}
+
+// =================== INTEGRACAO BRASILAPI - CONSULTA CNPJ ===================
+// Mascara dinamica conforme TipoDocumento
+function mascaraDocumento(input) {
+  const tipo = document.getElementById('frn-tipo-doc');
+  const tipoVal = tipo ? tipo.value : 'CNPJ';
+  if (tipoVal === 'CPF') {
+    let v = input.value.replace(/\D/g, '').slice(0, 11);
+    if (v.length > 9)      v = v.slice(0,3)+'.'+v.slice(3,6)+'.'+v.slice(6,9)+'-'+v.slice(9);
+    else if (v.length > 6) v = v.slice(0,3)+'.'+v.slice(3,6)+'.'+v.slice(6);
+    else if (v.length > 3) v = v.slice(0,3)+'.'+v.slice(3);
+    input.value = v;
+  } else {
+    let v = input.value.replace(/\D/g, '').slice(0, 14);
+    if (v.length > 12)     v = v.slice(0,2)+'.'+v.slice(2,5)+'.'+v.slice(5,8)+'/'+v.slice(8,12)+'-'+v.slice(12);
+    else if (v.length > 8) v = v.slice(0,2)+'.'+v.slice(2,5)+'.'+v.slice(5,8)+'/'+v.slice(8);
+    else if (v.length > 5) v = v.slice(0,2)+'.'+v.slice(2,5)+'.'+v.slice(5);
+    else if (v.length > 2) v = v.slice(0,2)+'.'+v.slice(2);
+    input.value = v;
+  }
+}
+// Atualiza UI do modal de fornecedor conforme o tipo escolhido
+function atualizaCampoDocumento() {
+  const tipo = document.getElementById('frn-tipo-doc').value;
+  const labelDoc   = document.getElementById('frn-doc-label');
+  const labelRazao = document.getElementById('frn-razao-label');
+  const input      = document.getElementById('frn-cnpj');
+  const btnBuscar  = document.getElementById('frn-btn-buscar');
+  if (tipo === 'CPF') {
+    labelDoc.textContent = 'CPF *';
+    if (labelRazao) labelRazao.textContent = 'Nome Completo *';
+    input.placeholder = '000.000.000-00';
+    input.maxLength = 14;
+    if (btnBuscar) {
+      btnBuscar.disabled = true;
+      btnBuscar.title = 'Consulta automatica disponivel apenas para CNPJ (BrasilAPI/ReceitaWS)';
+      btnBuscar.style.opacity = '0.5';
+    }
+  } else {
+    labelDoc.textContent = 'CNPJ *';
+    if (labelRazao) labelRazao.textContent = 'Razao Social *';
+    input.placeholder = '00.000.000/0000-00';
+    input.maxLength = 18;
+    if (btnBuscar) {
+      btnBuscar.disabled = false;
+      btnBuscar.title = '';
+      btnBuscar.style.opacity = '';
+    }
+  }
+  // Limpa o campo se trocou o tipo
+  input.value = '';
+  const msg = document.getElementById('frn-cnpj-msg');
+  if (msg) msg.textContent = '';
+}
+
+async function buscarCNPJ() {
+  const cnpjInput = document.getElementById('frn-cnpj');
+  const msgEl     = document.getElementById('frn-cnpj-msg');
+  const spinner   = document.getElementById('frn-cnpj-spinner');
+  const label     = document.getElementById('frn-cnpj-label');
+  if (!cnpjInput) return;
+  const cnpj = cnpjInput.value.replace(/\D/g, '');
+  if (cnpj.length !== 14) {
+    msgEl.textContent = '! Informe um CNPJ com 14 digitos antes de buscar.';
+    msgEl.style.color = 'var(--vermelho)';
+    return;
+  }
+  spinner.style.display = 'inline-block';
+  label.textContent = 'Consultando...';
+  msgEl.textContent = '';
+  try {
+    const r = await fetch('/api/ConsultarCNPJ?cnpj=' + encodeURIComponent(cnpj), { credentials: 'include' });
+    if (!r.ok) {
+      const errBody = await r.json().catch(() => ({}));
+      throw new Error(errBody.error || ('HTTP ' + r.status));
+    }
+    const data = await r.json();
+    // Preenche os campos
+    if (data.razaoSocial)  document.getElementById('frn-razao').value = data.razaoSocial;
+    if (data.nomeFantasia) document.getElementById('frn-fantasia').value = data.nomeFantasia;
+    // Tenta inferir Unidade (RJ/SP/ES) a partir da UF
+    const unidadeSel = document.getElementById('frn-unidade');
+    if (unidadeSel && data.uf) {
+      const opt = Array.from(unidadeSel.options).find(o => o.value.toUpperCase() === data.uf.toUpperCase());
+      if (opt) unidadeSel.value = opt.value;
+    }
+    msgEl.style.color = 'var(--verde)';
+    msgEl.innerHTML = 'OK Dados encontrados (' + (data.source || 'fonte publica') + ')'
+      + (data.situacao ? ' - Situacao: <b>' + data.situacao + '</b>' : '')
+      + (data.uf ? ' - UF: <b>' + data.uf + '</b>' : '');
+  } catch (e) {
+    msgEl.style.color = 'var(--vermelho)';
+    msgEl.textContent = 'X ' + (e.message || 'Falha ao consultar CNPJ. Preencha manualmente.');
+  } finally {
+    spinner.style.display = 'none';
+    label.textContent = '🔎 Buscar dados';
+  }
 }
 
 function salvarFornecedor(idx) {
