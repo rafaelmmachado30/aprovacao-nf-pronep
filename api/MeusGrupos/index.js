@@ -59,6 +59,14 @@ function extractUserOid(principal) {
   return null;
 }
 
+// Easy Auth as vezes manda OID sem hifens (32 chars). Graph exige UUID com hifens.
+function formatGuid(guid) {
+  if (!guid) return guid;
+  const d = String(guid).replace(/-/g, '').toLowerCase();
+  if (d.length !== 32) return guid;
+  return d.slice(0,8) + '-' + d.slice(8,12) + '-' + d.slice(12,16) + '-' + d.slice(16,20) + '-' + d.slice(20,32);
+}
+
 module.exports = async function (context, req) {
   // Diagnóstico: sempre retorna JSON, mesmo em caso de erro
   const diag = { step: 'start' };
@@ -96,7 +104,7 @@ module.exports = async function (context, req) {
     }
 
     diag.step = 'oid';
-    const userOid = extractUserOid(principal);
+    let userOid = extractUserOid(principal);
     if (!userOid) {
       context.res = {
         status: 400,
@@ -105,6 +113,10 @@ module.exports = async function (context, req) {
       };
       return;
     }
+
+    // Formata UUID com hifens (Easy Auth as vezes manda sem)
+    userOid = formatGuid(userOid);
+    diag.userOid = userOid;
 
     diag.step = 'credential';
     const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
