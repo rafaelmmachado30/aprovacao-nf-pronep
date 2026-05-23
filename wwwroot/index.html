@@ -530,7 +530,88 @@ function logout() {
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('login-email');
   if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') loginCheckEmail(); });
+  // Tenta auto-login se Easy Auth (SWA) já identificou o usuário
+  tryAutoLoginFromAzure();
 });
+
+// =================== INTEGRAÇÃO REAL ENTRA ID / SWA ===================
+// Quando rodando no Azure Static Web Apps, o Easy Auth já garantiu o login
+// (via Entra ID). Aqui consultamos:
+//   - /.auth/me  → identidade do usuário (e-mail e oid)
+//   - /api/MeusGrupos → grupos do Entra ID + roles mapeadas (via Graph API)
+//
+// As roles retornadas decidem qual "persona" do protótipo será aplicada:
+//   administrador → admin
+//   financeiro_nf → financeiro
+//   gestor_*      → gestor
+//   submitter     → submitter
+//
+// Se a chamada falhar (rodando em localhost ou fora do SWA), o fluxo de
+// login mockado (digitar e-mail) continua disponível normalmente.
+async function tryAutoLoginFromAzure() {
+  try {
+    const meResp = await fetch('/.auth/me', { credentials: 'include' });
+    if (!meResp.ok) return; // não está rodando no SWA ou não autenticado
+    const meJson = await meResp.json();
+    const principal = meJson && (meJson.clientPrincipal || (Array.isArray(meJson) && meJson[0]));
+    if (!principal || !principal.userId) return;
+
+    const gruposResp = await fetch('/api/MeusGrupos', { credentials: 'include' });
+    if (!gruposResp.ok) {
+      console.warn('[MeusGrupos] HTTP ' + gruposResp.status);
+      mostrarSemAcesso(principal.userDetails || principal.userId, 'Não foi possível consultar /api/MeusGrupos (' + gruposResp.status + ').');
+      return;
+    }
+    const data = await gruposResp.json();
+    const roles = (data && data.rolesAggregated) || (data && data.roles) || [];
+    if (!roles.length) {
+      mostrarSemAcesso(data.userDetails || principal.userDetails || principal.userId,
+        'Seu usuário foi autenticado, mas não pertence a nenhum grupo de acesso do sistema. Solicite ao administrador.');
+      return;
+    }
+
+    // Define persona a partir das roles
+    let persona = null;
+    if (roles.includes('administrador'))      persona = 'admin';
+    else if (roles.includes('financeiro_nf')) persona = 'financeiro';
+    else if (roles.includes('gestor'))        persona = 'gestor';
+    else if (roles.includes('submitter'))     persona = 'submitter';
+    if (!persona) {
+      mostrarSemAcesso(data.userDetails || principal.userDetails, 'Roles retornadas: ' + roles.join(', '));
+      return;
+    }
+
+    // Resolve dados do usuário: prioridade pro cadastro do protótipo
+    const email = ((data.userDetails || principal.userDetails) || '').toLowerCase();
+    let userData = usuariosReconhecidos[email];
+    if (!userData) {
+      // Fallback: usa o nome a partir do e-mail
+      const nome = email
+        .split('@')[0]
+        .split('.')
+        .map(s => s.charAt(0).toUpperCase() + s.slice(1))
+        .join(' ');
+      userData = { persona, nome, cargo: persona.charAt(0).toUpperCase() + persona.slice(1) };
+    }
+    // Sobrescreve a persona com base nos grupos REAIS do Entra ID
+    userData = Object.assign({}, userData, { persona });
+
+    loginAs(userData, email);
+  } catch (e) {
+    // Silencioso: estamos provavelmente em ambiente local sem SWA
+    console.warn('[tryAutoLoginFromAzure] ignorado:', e && e.message);
+  }
+}
+
+function mostrarSemAcesso(email, detalhe) {
+  const msg = document.getElementById('login-msg');
+  if (!msg) return;
+  msg.innerHTML = '<div class="alert alert-error"><span class="ico">✕</span><div><b>Usuário sem acesso ao sistema.</b><br>'
+    + 'Conta autenticada: <span class="mono">' + (email || '—') + '</span><br>'
+    + (detalhe ? '<br><i>' + detalhe + '</i><br>' : '')
+    + '<br>Solicite ao administrador (rafael.machado@pronep.com.br) a inclusão do seu usuário em um dos grupos do Entra ID '
+    + '(<span class="mono">PRONEP-NF-*</span>).</div></div>';
+}
 
 // ============== NAV ==============
 function renderNav() {
