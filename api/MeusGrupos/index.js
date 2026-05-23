@@ -103,20 +103,39 @@ module.exports = async function (context, req) {
       return;
     }
 
-    diag.step = 'oid';
-    let userOid = extractUserOid(principal);
-    if (!userOid) {
+    diag.step = 'identify_user';
+    // Estrategia robusta:
+    //  1) Claim 'oid' do token JWT — fonte autoritativa do Entra ID
+    //  2) userDetails (email/UPN) — Graph aceita /users/email
+    //  principal.userId NAO eh confiavel (ID interno do SWA, nao do AAD)
+    const claims = principal.claims || [];
+    const oidFromClaim = claims.find(c =>
+      c.typ === 'http://schemas.microsoft.com/identity/claims/objectidentifier' ||
+      c.typ === 'oid'
+    );
+
+    let userKey = null;
+    let userKeyKind = null;
+    if (oidFromClaim && oidFromClaim.val && /^[0-9a-f-]{32,36}$/i.test(oidFromClaim.val)) {
+      userKey = formatGuid(oidFromClaim.val);
+      userKeyKind = 'oid_claim';
+    } else if (principal.userDetails && /@/.test(principal.userDetails)) {
+      userKey = principal.userDetails;
+      userKeyKind = 'userDetails_email';
+    } else {
       context.res = {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
-        body: { error: 'Não foi possível identificar o OID do usuário.', principal }
+        body: {
+          error: 'Nao foi possivel identificar o usuario (nem oid claim nem email).',
+          principal,
+          claimsResumo: claims.map(c => ({ typ: c.typ, val: (c.val||'').slice(0,40) }))
+        }
       };
       return;
     }
-
-    // Formata UUID com hifens (Easy Auth as vezes manda sem)
-    userOid = formatGuid(userOid);
-    diag.userOid = userOid;
+    diag.userKey = userKey;
+    diag.userKeyKind = userKeyKind;
 
     diag.step = 'credential';
     const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
@@ -129,7 +148,7 @@ module.exports = async function (context, req) {
 
     diag.step = 'graph_call';
     const result = await client
-      .api(`/users/${userOid}/transitiveMemberOf`)
+      .api(`/users/${encodeURIComponent(userKey)}/transitiveMemberOf`)
       .select('id,displayName')
       .top(200)
       .get();
@@ -150,7 +169,8 @@ module.exports = async function (context, req) {
       status: 200,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       body: {
-        userId: userOid,
+        userId: userKey,
+        userKeyKind: userKeyKind,
         userDetails: principal.userDetails || null,
         identityProvider: principal.identityProvider || null,
         groups,
