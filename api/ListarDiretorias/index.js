@@ -71,17 +71,18 @@ module.exports = async function (context, req) {
     diag.totalItems = all.length;
 
     diag.step = 'transform';
-    diag.rawFieldsDebug = all.slice(0,3).map(item => item.fields);
+    // SharePoint renomeou colunas como field_1..field_5
+    // Title=Chave, field_1=Unidade, field_2=Diretoria, field_3=Email, field_4=Nome, field_5=GrupoEntraId
     const diretorias = all.map(item => {
       const f = item.fields || {};
       return {
         id: item.id,
-        chave: f.Title || '',
-        unidade: f.Unidade || '',
-        diretoria: f.Diretoria || '',
-        aprovadorEmail: f.AprovadorEmail || '',
-        aprovadorNome: f.AprovadorNome || '',
-        grupoEntraId: f.GrupoEntraId || ''
+        chave:          f.Title   || '',
+        unidade:        f.field_1 || '',
+        diretoria:      f.field_2 || '',
+        aprovadorEmail: f.field_3 || '',
+        aprovadorNome:  f.field_4 || '',
+        grupoEntraId:   f.field_5 || ''
       };
     });
 

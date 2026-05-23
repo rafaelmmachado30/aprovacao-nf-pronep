@@ -85,7 +85,7 @@ module.exports = async function (context, req) {
     diag.siteId = siteId; diag.listId = listId;
 
     diag.step = 'fetch_items';
-    // Pega items com fields. Lista grande -> paginar
+    // Pega items com fields. Lista grande -> paginar (todas as paginas, sem cortar)
     const all = [];
     let url = `/sites/${siteId}/lists/${listId}/items?expand=fields&$top=500`;
     let pages = 0;
@@ -93,37 +93,39 @@ module.exports = async function (context, req) {
       const resp = await client.api(url).get();
       all.push(...(resp.value || []));
       pages++;
-      if (all.length >= limit) break;
       url = resp['@odata.nextLink']
         ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','')
         : null;
+      // proteção: max 30 paginas (15k items)
+      if (pages >= 30) break;
     }
     diag.pages = pages;
     diag.totalItems = all.length;
 
     diag.step = 'transform';
-    // DEBUG: incluir rawFields dos 3 primeiros pra descobrir internalNames reais
-    diag.rawFieldsDebug = all.slice(0,3).map(item => item.fields);
-
-    // Normaliza pro formato consumido pelo front
+    // SharePoint renomeou as colunas importadas via XLSX como field_1, field_2, etc
+    // Mapeamento descoberto via debug:
+    //   Title=Razao, field_1=TipoDoc, field_2=Doc, field_3=Fantasia, field_4=Unidade,
+    //   field_5=Diretoria, field_6=UF, field_7=Ativo, field_8=Telefone, field_9=Email,
+    //   field_10=Cidade, field_11=CEP, field_12=ApareceNoHist, field_13=QtdNFs
     let fornecedores = all.map(item => {
       const f = item.fields || {};
       return {
         id: item.id,
-        razao: f.Title || '',
-        tipoDocumento: f.TipoDocumento || '',
-        documento: f.Documento || '',
-        nomeFantasia: f.NomeFantasia || '',
-        unidade: f.UnidadePadrao || '',
-        diretoria: f.DiretoriaPadrao || '',
-        uf: f.UF || '',
-        ativo: (f.Ativo || '').toLowerCase() === 'sim',
-        telefone: f.Telefone || '',
-        email: f.Email || '',
-        cidade: f.Cidade || '',
-        cep: f.CEP || '',
-        apareceNoHistorico: (f.ApareceNoHistorico || '').toLowerCase() === 'sim',
-        qtdNFsHistorico: parseInt(f.QtdNFsHistorico || '0', 10)
+        razao:             f.Title    || '',
+        tipoDocumento:     f.field_1  || '',
+        documento:         f.field_2  || '',
+        nomeFantasia:      f.field_3  || '',
+        unidade:           f.field_4  || '',
+        diretoria:         f.field_5  || '',
+        uf:                f.field_6  || '',
+        ativo:             String(f.field_7 || '').toLowerCase() === 'sim',
+        telefone:          f.field_8  || '',
+        email:             f.field_9  || '',
+        cidade:            f.field_10 || '',
+        cep:               f.field_11 || '',
+        apareceNoHistorico: String(f.field_12 || '').toLowerCase() === 'sim',
+        qtdNFsHistorico:   parseInt(f.field_13 || '0', 10) || 0
       };
     });
 
@@ -137,12 +139,18 @@ module.exports = async function (context, req) {
         (x.documento || '').toLowerCase().includes(q)
       );
     }
+    // Aplica limite no final (depois de filtros)
+    const totalFiltrado = fornecedores.length;
+    if (limit && fornecedores.length > limit) {
+      fornecedores = fornecedores.slice(0, limit);
+    }
 
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       body: {
         total: fornecedores.length,
+        totalFiltrado: totalFiltrado,
         totalAntesFiltros: all.length,
         diag,
         fornecedores
