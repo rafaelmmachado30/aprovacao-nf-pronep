@@ -1,0 +1,15 @@
+{
+  "name": "pronep-aprovacao-nf-api",
+  "version": "1.0.0",
+  "description": "API functions para o Sistema de Aprovação de NF da Pronep",
+  "main": "GetRoles/index.js",
+  "scripts": {
+    "test": "echo \"No tests yet\""
+  },
+  "dependencies": {
+    "@azure/identity": "^4.0.0",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "pdf-lib": "^1.17.1",
+    "isomorphic-fetch": "^3.0.0"
+  }
+}

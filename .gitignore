@@ -1,0 +1,33 @@
+# Credenciais
+.env
+*.env.local
+.msal_cache.bin
+
+# Node
+node_modules/
+npm-debug.log
+
+# Logs e runtime
+logs/*
+!logs/.gitkeep
+backups/*
+!backups/.gitkeep
+cache/
+
+# Azure Functions local
+local.settings.json
+bin/
+obj/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+dist/
+build/
