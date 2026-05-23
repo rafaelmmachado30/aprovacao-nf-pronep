@@ -39,6 +39,8 @@ const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
 const cache = { siteId: null, driveId: null, listNotasId: null, listDirId: null, colMap: null };
 
 // Descobre mapping displayName -> internalName das colunas da lista NotasFiscais
+// IMPORTANTE: filtra colunas read-only (LinkTitle, Edit, ItemChildCount, etc) e colunas
+// de sistema (_UIVersionString, _ComplianceTag, etc) pra nao bagunçar o mapeamento
 async function getColumnMap(client, siteId, listId) {
   if (cache.colMap) return cache.colMap;
   const resp = await client
@@ -46,9 +48,15 @@ async function getColumnMap(client, siteId, listId) {
     .get();
   const map = {};
   for (const col of (resp.value || [])) {
-    if (col.displayName && col.name) {
-      map[col.displayName] = col.name;
-    }
+    if (!col.displayName || !col.name) continue;
+    if (col.readOnly === true) continue;             // ignora read-only (LinkTitle, etc)
+    if (col.hidden === true) continue;               // ignora hidden
+    if (col.name.startsWith('_')) continue;          // ignora internas (_UIVersion, etc)
+    if (['LinkTitle','LinkTitleNoMenu','Edit','DocIcon','ItemChildCount',
+         'FolderChildCount','AppAuthor','AppEditor','Attachments'].includes(col.name)) continue;
+    // Se ja mapeou esse displayName antes, prefere a coluna NAO read-only / NAO sistema
+    // (no caso de duplicata Title vs LinkTitle, queremos Title)
+    map[col.displayName] = col.name;
   }
   cache.colMap = map;
   return map;
