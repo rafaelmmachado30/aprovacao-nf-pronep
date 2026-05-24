@@ -47,18 +47,33 @@ async function getColumnMap(client, siteId, listId) {
     .api(`/sites/${siteId}/lists/${listId}/columns`)
     .get();
   const map = {};
+  const types = {};
   for (const col of (resp.value || [])) {
     if (!col.displayName || !col.name) continue;
-    if (col.readOnly === true) continue;             // ignora read-only (LinkTitle, etc)
-    if (col.hidden === true) continue;               // ignora hidden
-    if (col.name.startsWith('_')) continue;          // ignora internas (_UIVersion, etc)
+    if (col.readOnly === true) continue;
+    if (col.hidden === true) continue;
+    if (col.name.startsWith('_')) continue;
     if (['LinkTitle','LinkTitleNoMenu','Edit','DocIcon','ItemChildCount',
          'FolderChildCount','AppAuthor','AppEditor','Attachments'].includes(col.name)) continue;
-    // Se ja mapeou esse displayName antes, prefere a coluna NAO read-only / NAO sistema
-    // (no caso de duplicata Title vs LinkTitle, queremos Title)
     map[col.displayName] = col.name;
+    // Captura o TIPO da coluna pra logica especifica
+    // Possiveis: text, number, dateTime, boolean, choice, hyperlinkOrPicture,
+    //            personOrGroup, currency, calculated, lookup, ...
+    let detectedType = 'text';
+    if (col.text)                detectedType = 'text';
+    else if (col.number)         detectedType = 'number';
+    else if (col.dateTime)       detectedType = 'dateTime';
+    else if (col.boolean)        detectedType = 'boolean';
+    else if (col.choice)         detectedType = 'choice';
+    else if (col.hyperlinkOrPicture) detectedType = 'hyperlink';
+    else if (col.personOrGroup)  detectedType = 'person';
+    else if (col.currency)       detectedType = 'currency';
+    else if (col.calculated)     detectedType = 'calculated';
+    else if (col.lookup)         detectedType = 'lookup';
+    types[col.name] = detectedType;
   }
   cache.colMap = map;
+  cache.colTypes = types;
   return map;
 }
 
@@ -223,6 +238,7 @@ module.exports = async function (context, req) {
     diag.step = 'discover_columns';
     const colMap = await getColumnMap(client, siteId, listNotasId);
     diag.colMap = colMap;
+    diag.colTypes = cache.colTypes;
 
     diag.step = 'create_list_item';
     // Title = "NF {numero}" ou descricao se nao tem numero
@@ -250,11 +266,13 @@ module.exports = async function (context, req) {
       UrlPDF:          uploadResp.webUrl || '',
       UrlPDFAprovado:  null                         // <-- null em vez de ''
     };
-    const itemFields = buildFieldsObject(colMap, rawFields);
-    // Remove campos com null/undefined (SharePoint reclama de "argument not acceptable")
-    for (const k of Object.keys(itemFields)) {
-      if (itemFields[k] === null || itemFields[k] === undefined || itemFields[k] === '') {
-        delete itemFields[k];
+    const itemFieldsRaw = buildFieldsObject(colMap, rawFields);
+    // Aplica formatacao por tipo
+    const itemFields = {};
+    for (const [k, v] of Object.entries(itemFieldsRaw)) {
+      const formatted = formatByType(k, v);
+      if (formatted !== undefined) {
+        itemFields[k] = formatted;
       }
     }
     diag.itemFieldsUsados = Object.keys(itemFields);
