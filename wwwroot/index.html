@@ -2664,15 +2664,68 @@ function confirmApprove(id) {
   `);
 }
 
-function doApprove(id) {
+async function doApprove(id) {
   const n = notas.find(x => x.id === id);
   if (!n) return;
-  n.status = 'aprovada';
-  n.aprovadoPor = currentPersona.name;
-  n.aprovadoEm = '2026-05-22 15:42';
-  closeModal();
-  toast(`${id} aprovada · PDF movido para SharePoint`, 'success');
-  showView(currentView);
+  // Identifica o ID da lista SharePoint (spId). Se nao tiver, eh nota local/mock — fallback.
+  const spId = n.spId || String(id).replace(/^NF-/, '');
+  if (!spId || isNaN(parseInt(spId))) {
+    toast('NF nao tem ID do SharePoint — provavelmente eh um mock antigo', 'error');
+    return;
+  }
+  // Substitui o botao por loading
+  const modalBody = document.getElementById('modal-content');
+  if (modalBody) {
+    modalBody.insertAdjacentHTML('beforeend',
+      '<div id="approve-progress" class="alert alert-info" style="margin-top:12px;background:var(--azul-soft);border-left:3px solid var(--azul-claro);color:var(--azul-escuro);padding:10px;border-radius:4px"><span style="display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:8px"></span>Aplicando watermark e movendo PDF para Notas Aprovadas...</div>');
+  }
+  // Disable buttons no modal
+  document.querySelectorAll('.modal .btn').forEach(b => b.disabled = true);
+
+  try {
+    const r = await fetch('/api/AprovarNota', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: spId })
+    });
+    const data = await r.json().catch(() => ({}));
+
+    if (r.status === 403) {
+      toast(`Voce nao eh o aprovador desta NF (atual: ${data.aprovadorAtual})`, 'error');
+      closeModal();
+      return;
+    }
+    if (r.status === 409) {
+      toast(`NF ja esta ${data.error || 'em outro status'}`, 'error');
+      closeModal();
+      return;
+    }
+    if (!r.ok) {
+      console.error('[AprovarNota erro]', data);
+      const msg = (data.diag && data.diag.step) ? ` (passo: ${data.diag.step})` : '';
+      toast(`Erro ao aprovar NF: ${data.error || ('HTTP ' + r.status)}${msg}`, 'error');
+      // Re-habilita botoes
+      document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+      const prog = document.getElementById('approve-progress');
+      if (prog) prog.remove();
+      return;
+    }
+
+    // Sucesso!
+    n.status = 'aprovada';
+    n.aprovadoPor = currentPersona.name;
+    n.aprovadoEm = new Date().toISOString().replace('T',' ').substring(0,16);
+    n.urlPDFAprovado = data.urlPDFAprovado || '';
+    closeModal();
+    toast(`✓ ${id} aprovada · PDF com watermark movido para Notas Aprovadas`, 'success');
+    showView(currentView);
+  } catch (e) {
+    toast('Falha ao comunicar com servidor: ' + (e && e.message), 'error');
+    document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+    const prog = document.getElementById('approve-progress');
+    if (prog) prog.remove();
+  }
 }
 
 function confirmReject(id) {
