@@ -111,7 +111,13 @@ function buildEmail(evento, dados, links) {
           </td></tr>
         </table>
         ${links && evento === 'lancada' ? `
-        <p style="margin-top:24px;text-align:center">
+        ${urlPDF ? `
+        <p style="margin-top:20px;text-align:center">
+          <a href="${escapeHtml(urlPDF)}" target="_blank" style="background:#1F4E79;color:#fff;padding:13px 32px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;font-size:15px">📄 Ver PDF da NF</a>
+        </p>
+        <p style="margin-top:6px;text-align:center;font-size:12px;color:#647883">Recomendamos visualizar o PDF antes de aprovar ou rejeitar.</p>
+        ` : ''}
+        <p style="margin-top:18px;text-align:center">
           <a href="${links.aprovar}" style="background:#2E7D32;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;margin:0 6px;font-size:15px">✓ Aprovar</a>
           <a href="${links.rejeitar}" style="background:#C62828;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;margin:0 6px;font-size:15px">✕ Rejeitar</a>
         </p>
@@ -121,8 +127,9 @@ function buildEmail(evento, dados, links) {
         </p>` : `
         <p style="margin-top:24px;text-align:center">
           <a href="https://purple-forest-09588fe10.7.azurestaticapps.net/" style="background:${corHeader};color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block">Abrir Sistema</a>
-        </p>`}
-        ${urlPDF ? `<p style="margin-top:16px;font-size:13px;color:#647883;text-align:center">PDF arquivado: <a href="${escapeHtml(urlPDF)}" style="color:${corHeader}">abrir no SharePoint</a></p>` : ''}
+        </p>
+        ${urlPDF ? `<p style="margin-top:14px;text-align:center;font-size:13px"><a href="${escapeHtml(urlPDF)}" target="_blank" style="color:${corHeader}">📄 Ver PDF arquivado</a></p>` : ''}`}
+        
       </td></tr>
       <tr><td style="background:#F4F8FB;color:#647883;padding:14px 24px;font-size:11px;text-align:center;border-top:1px solid #DCE3E9">
         Sistema de Aprovação de NF · Pronep Life Care · automatizado, não responda
@@ -185,19 +192,25 @@ async function enviarTeams(evento, dados, destinatariosEmail) {
   if (evento === 'rejeitada' && motivo) facts.push({ title: 'Motivo', value: String(motivo) });
 
   // Gera links assinados se for evento 'lancada' (botoes interativos no card)
-  let actions = [
-    { type: 'Action.OpenUrl', title: 'Abrir Sistema',
-      url: 'https://purple-forest-09588fe10.7.azurestaticapps.net/' }
-  ];
+  let actions = [];
+  if (dados.urlPDF) {
+    actions.push({ type: 'Action.OpenUrl', title: '📄 Ver PDF', url: dados.urlPDF });
+  }
+  actions.push({ type: 'Action.OpenUrl', title: 'Abrir Sistema',
+    url: 'https://purple-forest-09588fe10.7.azurestaticapps.net/' });
   if (evento === 'lancada' && dados.itemId && destinatariosEmail && destinatariosEmail[0]) {
     const links = gerarLinks(dados.itemId, destinatariosEmail[0]);
     if (links) {
-      actions = [
+      actions = [];
+      if (dados.urlPDF) {
+        actions.push({ type: 'Action.OpenUrl', title: '📄 Ver PDF', url: dados.urlPDF });
+      }
+      actions.push(
         { type: 'Action.OpenUrl', title: '✓ Aprovar', url: links.aprovar, style: 'positive' },
         { type: 'Action.OpenUrl', title: '✕ Rejeitar', url: links.rejeitar, style: 'destructive' },
         { type: 'Action.OpenUrl', title: 'Abrir Sistema',
           url: 'https://purple-forest-09588fe10.7.azurestaticapps.net/' }
-      ];
+      );
     }
   }
 
