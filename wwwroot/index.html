@@ -2753,14 +2753,68 @@ function confirmReject(id) {
   `);
 }
 
-function doReject(id) {
+async function doReject(id) {
   const n = notas.find(x => x.id === id);
   if (!n) return;
-  n.status = 'rejeitada';
-  n.motivo = document.getElementById('rej-motivo').value;
-  closeModal();
-  toast(`${id} rejeitada · ${n.lancadoPor} foi notificado por e-mail + Teams`, 'error');
-  showView(currentView);
+  const spId = n.spId || String(id).replace(/^NF-/, '');
+  if (!spId || isNaN(parseInt(spId))) {
+    toast('NF nao tem ID do SharePoint — provavelmente eh mock antigo', 'error');
+    return;
+  }
+  const motivo = document.getElementById('rej-motivo').value;
+  // Procura textarea de observacao no modal (rejeicao costuma ter um)
+  const obsEl = document.querySelector('.modal textarea');
+  const observacao = obsEl ? obsEl.value.trim() : '';
+
+  // Bloqueia botoes durante a chamada
+  document.querySelectorAll('.modal .btn').forEach(b => b.disabled = true);
+  const modalContent = document.getElementById('modal-content');
+  if (modalContent) {
+    modalContent.insertAdjacentHTML('beforeend',
+      '<div id="reject-progress" class="alert alert-info" style="margin-top:12px;background:var(--azul-soft);border-left:3px solid var(--azul-claro);color:var(--azul-escuro);padding:10px;border-radius:4px"><span style="display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:8px"></span>Movendo PDF para Rejeitadas e atualizando lista...</div>');
+  }
+
+  try {
+    const r = await fetch('/api/RejeitarNota', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: spId, motivo, observacao })
+    });
+    const data = await r.json().catch(() => ({}));
+
+    if (r.status === 403) {
+      toast(`Voce nao eh o aprovador desta NF (atual: ${data.aprovadorAtual})`, 'error');
+      closeModal();
+      return;
+    }
+    if (r.status === 409) {
+      toast(`${data.error}`, 'error');
+      closeModal();
+      return;
+    }
+    if (!r.ok) {
+      console.error('[RejeitarNota erro]', data);
+      const msg = (data.diag && data.diag.step) ? ` (passo: ${data.diag.step})` : '';
+      toast(`Erro ao rejeitar: ${data.error || ('HTTP ' + r.status)}${msg}`, 'error');
+      document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+      const prog = document.getElementById('reject-progress');
+      if (prog) prog.remove();
+      return;
+    }
+
+    // Sucesso
+    n.status = 'rejeitada';
+    n.motivo = data.motivo || motivo;
+    closeModal();
+    toast(`✕ ${id} rejeitada · PDF movido para Rejeitadas`, 'error');
+    showView(currentView);
+  } catch (e) {
+    toast('Falha ao comunicar com servidor: ' + (e && e.message), 'error');
+    document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+    const prog = document.getElementById('reject-progress');
+    if (prog) prog.remove();
+  }
 }
 
 function openApprovedPdf(id) {
