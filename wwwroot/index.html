@@ -797,15 +797,37 @@ function showView(id) {
   const m = menuItems.find(m=>m.id===id) || {label:'Visão'};
   document.getElementById('crumb-view').textContent = m.label;
   renderNav();
-  // Antes de trocar o innerHTML, destrua charts ativos (evita erro 'this._fn is not a function' do Chart.js)
   destroyAllCharts();
   const area = document.getElementById('content-area');
   area.innerHTML = views[id] ? views[id]() : '<div class="card">Tela em construção.</div>';
-  // Anima KPIs (count-up) sempre que houver KPI na tela
   requestAnimationFrame(() => animateKPIs());
-  // Monta charts do dashboard se necessario
   if (id === 'dashboard') {
     requestAnimationFrame(() => mountDashboardCharts());
+  }
+  // Re-carrega notas em tempo real ao entrar em views que dependem do Status atual
+  // (caso o usuario tenha aprovado/rejeitado por email/Teams, sincroniza)
+  const viewsQueRecarregamNotas = ['fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','dashboard'];
+  if (viewsQueRecarregamNotas.includes(id) && window._dadosCarregados && window._dadosCarregados.notas) {
+    refreshNotasSilencioso();
+  }
+}
+
+// Recarrega notas em background SEM perder o render atual; re-render a view se houver diff
+async function refreshNotasSilencioso() {
+  const antes = notas.length;
+  const antesStatusMap = new Map(notas.map(n => [n.id, n.status]));
+  const ok = await carregarNotasReais();
+  if (!ok) return;
+  // Detecta se houve mudanca: tamanho ou algum status diferente
+  let mudou = (notas.length !== antes);
+  if (!mudou) {
+    for (const n of notas) {
+      if (antesStatusMap.get(n.id) !== n.status) { mudou = true; break; }
+    }
+  }
+  if (mudou) {
+    console.log('[Notas] sincronizado com SharePoint — re-renderizando view ' + currentView);
+    showView(currentView);
   }
 }
 
