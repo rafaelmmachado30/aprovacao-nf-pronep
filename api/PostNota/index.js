@@ -87,6 +87,27 @@ function buildFieldsObject(colMap, data) {
   return fields;
 }
 
+// Formata valor de acordo com o tipo da coluna no SharePoint
+function formatByType(internalName, value) {
+  const t = (cache.colTypes && cache.colTypes[internalName]) || 'text';
+  if (value === null || value === undefined || value === '') return undefined;
+  switch (t) {
+    case 'hyperlink':
+      return { Url: String(value), Description: '' };
+    case 'currency':
+    case 'number': {
+      const num = Number(value);
+      return isNaN(num) ? undefined : num;
+    }
+    case 'boolean':
+      return value === true || value === 'true' || value === 'Sim';
+    case 'dateTime':
+      return value;
+    default:
+      return String(value);
+  }
+}
+
 async function getGraphClient() {
   const tenantId = process.env.AAD_TENANT_ID;
   const clientId = process.env.AAD_CLIENT_ID;
