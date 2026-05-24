@@ -13,6 +13,7 @@
  */
 
 require('isomorphic-fetch');
+const { notificar } = require('../shared/notificar');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -264,6 +265,16 @@ module.exports = async function (context, req) {
       AprovadoEm: new Date().toISOString()
     }, colMap, colTypes);
     await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(patchPayload);
+
+    // Dispara notificacao pro submitter (quem lancou)
+    diag.step = 'notify';
+    await notificar('rejeitada', [f.LancadoPor || aprovadorEmail], {
+      numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor,
+      vencimento: f.DataVencimento, unidade: f.Unidade, diretoria: f.Diretoria,
+      aprovador: aprovadorEmail, submitter: f.LancadoPor,
+      motivo: motivoCompletoStr,
+      urlPDF: urlPDFRejeitado
+    });
 
     context.res = {
       status: 200,

@@ -28,6 +28,7 @@
  */
 
 require('isomorphic-fetch');
+const { notificar } = require('../shared/notificar');
 const crypto = require('crypto');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
@@ -327,6 +328,16 @@ module.exports = async function (context, req) {
       };
       throw createErr;
     }
+
+    // Dispara notificacao (nao-bloqueante) pro aprovador
+    diag.step = 'notify';
+    await notificar('lancada', [aprovador.email], {
+      numero, fornecedor: fornecedorRazao, valor, vencimento,
+      unidade, diretoria, aprovador: aprovador.nome,
+      submitter: submitterEmail,
+      urlPDF: uploadResp.webUrl
+    });
+    diag.notificado = true;
 
     context.res = {
       status: 200,
