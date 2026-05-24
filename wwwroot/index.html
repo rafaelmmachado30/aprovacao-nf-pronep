@@ -639,13 +639,17 @@ async function carregarDiretoriasReais() {
 }
 
 async function carregarDadosIniciais() {
-  await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais()]);
-  // Re-renderiza a view atual se for uma que depende desses dados
-  // Re-renderiza qualquer view que dependa de fornecedores/diretorias
-  const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
-  if (viewsQueDependem.includes(currentView)) {
-    showView(currentView);
-  }
+  // Guard contra chamadas simultaneas
+  if (window._carregamentoEmAndamento) return window._carregamentoEmAndamento;
+  window._carregamentoEmAndamento = (async () => {
+    await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais()]);
+    // Re-renderiza qualquer view que dependa de fornecedores/diretorias
+    const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
+    if (viewsQueDependem.includes(currentView)) {
+      showView(currentView);
+    }
+  })();
+  return window._carregamentoEmAndamento;
 }
 
 async function tryAutoLoginFromAzure() {
