@@ -1,13 +1,14 @@
 {
   "name": "pronep-aprovacao-nf-api",
   "version": "1.0.0",
-  "description": "API debug — testando @microsoft/microsoft-graph-client",
+  "description": "API functions para o Sistema de Aprovacao de NF da Pronep",
   "scripts": {
     "test": "echo \"No tests\""
   },
   "dependencies": {
     "isomorphic-fetch": "^3.0.0",
     "@azure/identity": "^4.0.0",
-    "@microsoft/microsoft-graph-client": "^3.0.7"
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "pdf-lib": "^1.17.1"
   }
 }
