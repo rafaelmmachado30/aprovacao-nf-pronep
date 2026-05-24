@@ -332,6 +332,7 @@ module.exports = async function (context, req) {
     // Dispara notificacao (nao-bloqueante) pro aprovador
     diag.step = 'notify';
     await notificar('lancada', [aprovador.email], {
+      itemId: itemResp.id,    // <-- pra gerar links assinados nos botoes
       numero, fornecedor: fornecedorRazao, valor, vencimento,
       unidade, diretoria, aprovador: aprovador.nome,
       submitter: submitterEmail,

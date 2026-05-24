@@ -6,6 +6,7 @@
  */
 
 require('isomorphic-fetch');
+const jwt = require('jsonwebtoken');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -23,6 +24,20 @@ async function getGraphClient() {
     scopes: ['https://graph.microsoft.com/.default']
   });
   return Client.initWithMiddleware({ authProvider });
+}
+
+// Gera links assinados pra aprovar/rejeitar via email
+function gerarLinks(itemId, aprovadorEmail) {
+  const secret = process.env.LINK_APROVACAO_SECRET;
+  if (!secret) return null;
+  const base = 'https://purple-forest-09588fe10.7.azurestaticapps.net';
+  const opts = { expiresIn: '7d' };
+  const tokenAprovar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'aprovar' }, secret, opts);
+  const tokenRejeitar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'rejeitar' }, secret, opts);
+  return {
+    aprovar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenAprovar)}`,
+    rejeitar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenRejeitar)}`
+  };
 }
 
 function escapeHtml(s) {
@@ -43,7 +58,7 @@ function fmtData(s) {
   return d;
 }
 
-function buildEmail(evento, dados) {
+function buildEmail(evento, dados, links) {
   const numero = dados.numero || '';
   const fornecedor = dados.fornecedor || '';
   const valor = fmtBRL(dados.valor);
@@ -95,9 +110,18 @@ function buildEmail(evento, dados) {
             </table>
           </td></tr>
         </table>
+        ${links && evento === 'lancada' ? `
+        <p style="margin-top:24px;text-align:center">
+          <a href="${links.aprovar}" style="background:#2E7D32;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;margin:0 6px;font-size:15px">✓ Aprovar</a>
+          <a href="${links.rejeitar}" style="background:#C62828;color:#fff;padding:14px 32px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;margin:0 6px;font-size:15px">✕ Rejeitar</a>
+        </p>
+        <p style="margin-top:10px;text-align:center;font-size:12px;color:#647883">Click direto aqui aprova ou rejeita. Token expira em 7 dias.</p>
+        <p style="margin-top:20px;text-align:center">
+          <a href="https://purple-forest-09588fe10.7.azurestaticapps.net/" style="background:#fff;color:${corHeader};padding:10px 24px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block;border:1px solid ${corHeader}">Ou abrir o Sistema</a>
+        </p>` : `
         <p style="margin-top:24px;text-align:center">
           <a href="https://purple-forest-09588fe10.7.azurestaticapps.net/" style="background:${corHeader};color:#fff;padding:12px 28px;border-radius:6px;text-decoration:none;font-weight:600;display:inline-block">Abrir Sistema</a>
-        </p>
+        </p>`}
         ${urlPDF ? `<p style="margin-top:16px;font-size:13px;color:#647883;text-align:center">PDF arquivado: <a href="${escapeHtml(urlPDF)}" style="color:${corHeader}">abrir no SharePoint</a></p>` : ''}
       </td></tr>
       <tr><td style="background:#F4F8FB;color:#647883;padding:14px 24px;font-size:11px;text-align:center;border-top:1px solid #DCE3E9">
@@ -112,7 +136,12 @@ function buildEmail(evento, dados) {
 // Envia email via Graph (Mail.Send Application)
 async function enviarEmail(evento, destinatarios, dados, cc) {
   const fromAddress = process.env.EMAIL_FROM_ADDRESS || DEFAULT_FROM;
-  const { assunto, corpo } = buildEmail(evento, dados || {});
+  // Gera links assinados se for evento 'lancada' e tivermos itemId
+  let links = null;
+  if (evento === 'lancada' && dados && dados.itemId && destinatarios[0]) {
+    links = gerarLinks(dados.itemId, destinatarios[0]);
+  }
+  const { assunto, corpo } = buildEmail(evento, dados || {}, links);
   const client = await getGraphClient();
   const mailPayload = {
     message: {

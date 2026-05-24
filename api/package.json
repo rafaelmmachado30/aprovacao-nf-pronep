@@ -9,6 +9,7 @@
     "isomorphic-fetch": "^3.0.0",
     "@azure/identity": "^4.0.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "jsonwebtoken": "^9.0.2"
   }
 }
