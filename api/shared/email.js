@@ -157,9 +157,10 @@ async function enviarEmail(evento, destinatarios, dados, cc) {
 }
 
 // Envia Adaptive Card via Teams Incoming Webhook (se configurado)
-async function enviarTeams(evento, dados) {
+async function enviarTeams(evento, dados, destinatariosEmail) {
   const webhook = process.env.TEAMS_WEBHOOK_URL;
   if (!webhook) return { ok: false, skipped: true, reason: 'TEAMS_WEBHOOK_URL nao setado' };
+
   const numero = dados.numero || '';
   const fornecedor = dados.fornecedor || '';
   const valor = fmtBRL(dados.valor);
@@ -167,10 +168,12 @@ async function enviarTeams(evento, dados) {
   const unidade = dados.unidade || '';
   const diretoria = dados.diretoria || '';
   const motivo = dados.motivo || '';
+
   let titulo = '', cor = 'default';
   if (evento === 'lancada')   { titulo = '📬 Nova NF para aprovação'; cor = 'attention'; }
   if (evento === 'aprovada')  { titulo = '✓ NF aprovada'; cor = 'good'; }
   if (evento === 'rejeitada') { titulo = '✕ NF rejeitada'; cor = 'warning'; }
+
   const facts = [
     { title: 'NF', value: String(numero) },
     { title: 'Fornecedor', value: String(fornecedor) },
@@ -180,6 +183,23 @@ async function enviarTeams(evento, dados) {
     { title: 'Diretoria', value: String(diretoria) }
   ];
   if (evento === 'rejeitada' && motivo) facts.push({ title: 'Motivo', value: String(motivo) });
+
+  // Gera links assinados se for evento 'lancada' (botoes interativos no card)
+  let actions = [
+    { type: 'Action.OpenUrl', title: 'Abrir Sistema',
+      url: 'https://purple-forest-09588fe10.7.azurestaticapps.net/' }
+  ];
+  if (evento === 'lancada' && dados.itemId && destinatariosEmail && destinatariosEmail[0]) {
+    const links = gerarLinks(dados.itemId, destinatariosEmail[0]);
+    if (links) {
+      actions = [
+        { type: 'Action.OpenUrl', title: '✓ Aprovar', url: links.aprovar, style: 'positive' },
+        { type: 'Action.OpenUrl', title: '✕ Rejeitar', url: links.rejeitar, style: 'destructive' },
+        { type: 'Action.OpenUrl', title: 'Abrir Sistema',
+          url: 'https://purple-forest-09588fe10.7.azurestaticapps.net/' }
+      ];
+    }
+  }
 
   const card = {
     type: 'message',
@@ -192,10 +212,7 @@ async function enviarTeams(evento, dados) {
           { type: 'TextBlock', size: 'Large', weight: 'Bolder', color: cor, text: titulo },
           { type: 'FactSet', facts: facts }
         ],
-        actions: [
-          { type: 'Action.OpenUrl', title: 'Abrir Sistema',
-            url: 'https://purple-forest-09588fe10.7.azurestaticapps.net/' }
-        ]
+        actions: actions
       }
     }]
   };
@@ -213,7 +230,7 @@ async function notificar(evento, destinatarios, dados, cc) {
     try { result.email = await enviarEmail(evento, destinatarios, dados, cc); }
     catch (e) { result.email = { ok: false, error: e.message, statusCode: e.statusCode, body: e.body }; }
   }
-  try { result.teams = await enviarTeams(evento, dados); }
+  try { result.teams = await enviarTeams(evento, dados, destinatarios); }
   catch (e) { result.teams = { ok: false, error: e.message }; }
   return result;
 }
