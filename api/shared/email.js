@@ -164,9 +164,29 @@ async function enviarEmail(evento, destinatarios, dados, cc) {
 }
 
 // Envia Adaptive Card via Teams Incoming Webhook (se configurado)
+// Resolve URL do webhook do aprovador especifico (com fallback pro canal central)
+function resolverWebhookUrl(aprovadorEmail) {
+  // App Setting TEAMS_WEBHOOKS deve ser um JSON tipo {"email":"url", ...}
+  const webhooksJson = process.env.TEAMS_WEBHOOKS;
+  if (webhooksJson) {
+    try {
+      const webhooks = JSON.parse(webhooksJson);
+      const url = webhooks[(aprovadorEmail || '').toLowerCase()];
+      if (url) return { url, scope: '1on1', for: aprovadorEmail };
+    } catch (e) { /* JSON invalido, continua */ }
+  }
+  // Fallback: canal central (TEAMS_WEBHOOK_URL)
+  const canalUrl = process.env.TEAMS_WEBHOOK_URL;
+  if (canalUrl) return { url: canalUrl, scope: 'canal', for: 'canal' };
+  return null;
+}
+
 async function enviarTeams(evento, dados, destinatariosEmail) {
-  const webhook = process.env.TEAMS_WEBHOOK_URL;
-  if (!webhook) return { ok: false, skipped: true, reason: 'TEAMS_WEBHOOK_URL nao setado' };
+  // Escolhe webhook por aprovador (1:1) ou cai pro canal central
+  const aprovadorAlvo = (destinatariosEmail && destinatariosEmail[0]) || dados.aprovador || '';
+  const webhookInfo = resolverWebhookUrl(aprovadorAlvo);
+  if (!webhookInfo) return { ok: false, skipped: true, reason: 'Nenhum webhook configurado (nem TEAMS_WEBHOOKS por usuario nem TEAMS_WEBHOOK_URL canal)' };
+  const webhook = webhookInfo.url;
 
   const numero = dados.numero || '';
   const fornecedor = dados.fornecedor || '';
@@ -233,7 +253,7 @@ async function enviarTeams(evento, dados, destinatariosEmail) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(card)
   });
-  return { ok: r.ok, status: r.status };
+  return { ok: r.ok, status: r.status, scope: webhookInfo.scope, sentTo: webhookInfo.for };
 }
 
 // Funcao alto-nivel chamada por outras Functions in-process
