@@ -36,13 +36,15 @@ const { TokenCredentialAuthenticationProvider } =
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
-const cache = { siteId: null, driveId: null, listNotasId: null, listDirId: null, colMap: null };
+const cache = { siteId: null, driveId: null, listNotasId: null, listDirId: null, colMap: null, colTypes: null, colMapCachedAt: 0 };
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
 
 // Descobre mapping displayName -> internalName das colunas da lista NotasFiscais
 // IMPORTANTE: filtra colunas read-only (LinkTitle, Edit, ItemChildCount, etc) e colunas
 // de sistema (_UIVersionString, _ComplianceTag, etc) pra nao bagunçar o mapeamento
 async function getColumnMap(client, siteId, listId) {
-  if (cache.colMap) return cache.colMap;
+  const age = Date.now() - (cache.colMapCachedAt || 0);
+  if (cache.colMap && age < CACHE_TTL_MS) return cache.colMap;
   const resp = await client
     .api(`/sites/${siteId}/lists/${listId}/columns`)
     .get();
@@ -74,6 +76,7 @@ async function getColumnMap(client, siteId, listId) {
   }
   cache.colMap = map;
   cache.colTypes = types;
+  cache.colMapCachedAt = Date.now();
   return map;
 }
 
@@ -288,10 +291,19 @@ module.exports = async function (context, req) {
       UrlPDFAprovado:  null                         // <-- null em vez de ''
     };
     const itemFieldsRaw = buildFieldsObject(colMap, rawFields);
-    // Aplica formatacao por tipo
+    // Aplica formatacao por tipo (com log detalhado pra debug)
     const itemFields = {};
+    diag.formatLog = {};
     for (const [k, v] of Object.entries(itemFieldsRaw)) {
+      const detectedType = (cache.colTypes && cache.colTypes[k]) || 'text';
       const formatted = formatByType(k, v);
+      diag.formatLog[k] = {
+        colType: detectedType,
+        inputValue: v,
+        inputType: typeof v,
+        outputValue: formatted,
+        outputType: typeof formatted
+      };
       if (formatted !== undefined) {
         itemFields[k] = formatted;
       }
