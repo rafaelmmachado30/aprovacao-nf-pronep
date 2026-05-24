@@ -90,6 +90,74 @@ function normalizeFields(fields, invColMap) {
   return out;
 }
 
+// Aplica watermark REJEITADA (vermelho, 4 linhas: REJEITADA + data + por + motivo)
+async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
+  // LAZY require — so carrega pdf-lib quando essa funcao for chamada
+  const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+
+  const pdfDoc = await PDFDocument.load(pdfBuffer);
+  const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  // Data/hora BR
+  const now = new Date();
+  const brOffset = -3 * 60;
+  const local = new Date(now.getTime() + (brOffset + now.getTimezoneOffset()) * 60 * 1000);
+  const pad = n => String(n).padStart(2,'0');
+  const dataStr = `${pad(local.getDate())}/${pad(local.getMonth()+1)}/${local.getFullYear()} ${pad(local.getHours())}:${pad(local.getMinutes())}:${pad(local.getSeconds())}`;
+  const prefixoEmail = aprovadorEmail.split('@')[0];
+
+  // Cor vermelha (#C62828) com transparencia 0.35
+  const vermelho = rgb(0.776, 0.157, 0.157);
+  const alpha = 0.35;
+
+  // Trunca motivo pra caber na pagina (max ~80 chars)
+  const motivoTexto = String(motivo || '').slice(0, 90);
+
+  const pages = pdfDoc.getPages();
+  for (const page of pages) {
+    const { width, height } = page.getSize();
+
+    // Linha 1: REJEITADA (grande, vermelho)
+    const txt1 = 'REJEITADA';
+    const fs1 = Math.min(width / 8, 78);
+    const w1 = helveticaBold.widthOfTextAtSize(txt1, fs1);
+    page.drawText(txt1, {
+      x: (width - w1) / 2, y: height / 2 + 80,
+      size: fs1, font: helveticaBold, color: vermelho, opacity: alpha
+    });
+
+    // Linha 2: data/hora
+    const fs2 = Math.min(width / 22, 24);
+    const w2 = helvetica.widthOfTextAtSize(dataStr, fs2);
+    page.drawText(dataStr, {
+      x: (width - w2) / 2, y: height / 2 + 30,
+      size: fs2, font: helvetica, color: vermelho, opacity: alpha
+    });
+
+    // Linha 3: Por: email
+    const txt3 = `Por: ${prefixoEmail}`;
+    const fs3 = Math.min(width / 24, 20);
+    const w3 = helvetica.widthOfTextAtSize(txt3, fs3);
+    page.drawText(txt3, {
+      x: (width - w3) / 2, y: height / 2,
+      size: fs3, font: helvetica, color: vermelho, opacity: alpha
+    });
+
+    // Linha 4: Motivo
+    const txt4 = `Motivo: ${motivoTexto}`;
+    const fs4 = Math.min(width / 30, 16);
+    const w4 = helvetica.widthOfTextAtSize(txt4, fs4);
+    page.drawText(txt4, {
+      x: (width - w4) / 2, y: height / 2 - 30,
+      size: fs4, font: helvetica, color: vermelho, opacity: alpha
+    });
+  }
+
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
+}
+
 function buildPatchPayload(displayPayload, colMap, colTypes) {
   const fields = {};
   for (const [displayName, value] of Object.entries(displayPayload)) {
@@ -149,7 +217,8 @@ module.exports = async function (context, req) {
 
     diag.step = 'find_pdf';
     const folderPendente = `Notas Fiscais/Pendentes/${f.Unidade}/Diretoria ${f.Diretoria}`;
-    const folderRejeitada = `Notas Fiscais/Rejeitadas/${f.Unidade}/Diretoria ${f.Diretoria}`;
+    // Pasta plana (sem subpastas Unidade/Diretoria) como o Rafa pediu
+    const folderRejeitada = `Notas Fiscais/Rejeitadas`;
     let pdfTarget = null;
     try {
       const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folderPendente}:/children`).get();
@@ -163,17 +232,21 @@ module.exports = async function (context, req) {
       diag.findPdfWarning = e.message;
     }
 
-    diag.step = 'move_pdf';
+    diag.step = 'watermark_and_move';
+    const motivoCompletoStr = observacao ? `${motivo} — ${observacao}` : motivo;
     let urlPDFRejeitado = '';
     if (pdfTarget) {
-      // Move o PDF: copia pra Rejeitadas + deleta original.
-      // Graph nao tem "move" entre pastas em 1 chamada, entao fazemos copy + delete
+      // Baixa, aplica watermark REJEITADA, sobe pra Rejeitadas, deleta original
       const downloadUrl = pdfTarget['@microsoft.graph.downloadUrl'];
       const dlResp = await fetch(downloadUrl);
       const pdfBuffer = Buffer.from(await dlResp.arrayBuffer());
+      diag.pdfSize = pdfBuffer.length;
+
+      const stampedPdf = await aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivoCompletoStr);
+      diag.stampedSize = stampedPdf.length;
 
       const uploadPath = `/sites/${siteId}/drive/root:/${encodeURIComponent(folderRejeitada)}/${encodeURIComponent(pdfTarget.name)}:/content`;
-      const uploadResp = await client.api(uploadPath).header('Content-Type', 'application/pdf').put(pdfBuffer);
+      const uploadResp = await client.api(uploadPath).header('Content-Type', 'application/pdf').put(stampedPdf);
       urlPDFRejeitado = uploadResp.webUrl;
       diag.movedTo = urlPDFRejeitado;
 
@@ -185,10 +258,9 @@ module.exports = async function (context, req) {
     }
 
     diag.step = 'update_list';
-    const motivoCompleto = observacao ? `${motivo} — ${observacao}` : motivo;
     const patchPayload = buildPatchPayload({
       Status: 'Rejeitada',
-      MotivoRejeicao: motivoCompleto,
+      MotivoRejeicao: motivoCompletoStr,
       AprovadoEm: new Date().toISOString()
     }, colMap, colTypes);
     await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(patchPayload);
@@ -196,7 +268,7 @@ module.exports = async function (context, req) {
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: { ok: true, itemId, motivo: motivoCompleto, urlPDFRejeitado, diag }
+      body: { ok: true, itemId, motivo: motivoCompletoStr, urlPDFRejeitado, diag }
     };
   } catch (err) {
     context.log && context.log.error && context.log.error('RejeitarNota error:', err);
