@@ -615,6 +615,61 @@ async function carregarFornecedoresReais() {
   }
 }
 
+async function carregarNotasReais() {
+  try {
+    const r = await fetch('/api/ListarNotas', { credentials: 'include' });
+    if (!r.ok) {
+      console.warn('[ListarNotas] HTTP ' + r.status);
+      return false;
+    }
+    const data = await r.json();
+    if (!data || !Array.isArray(data.notas)) {
+      console.warn('[ListarNotas] payload invalido');
+      return false;
+    }
+    // Adapta o formato SharePoint pro formato esperado pelo front
+    // Tenta achar fornecedor pelo CNPJ pra preencher fornecedorIdx
+    notas = data.notas.map(n => {
+      const cnpj = n.CNPJFornecedor || '';
+      const fornIdx = fornecedores.findIndex(f =>
+        (f.documento || f.cnpj || '').replace(/\D/g,'') === cnpj.replace(/\D/g,'')
+      );
+      const statusMap = { 'Lancada': 'pendente', 'Aprovada': 'aprovada', 'Rejeitada': 'rejeitada' };
+      return {
+        id: 'NF-' + n.id,
+        spId: n.id,
+        numero: String(n.NumeroNF || ''),
+        serie: '',
+        fornecedorIdx: fornIdx >= 0 ? fornIdx : null,
+        fornecedorCnpj: cnpj,
+        fornecedorRazao: (fornIdx >= 0 ? fornecedores[fornIdx].razao : '(fornecedor nao encontrado)'),
+        valor: Number(n.Valor || 0),
+        valorLiquido: Number(n.Valor || 0),
+        vencimento: (n.DataVencimento || '').substring(0,10),
+        emissao: (n.LancadoEm || '').substring(0,10),
+        unidade: n.Unidade || '',
+        diretoria: n.Diretoria || '',
+        status: statusMap[n.Status] || (n.Status || 'pendente').toLowerCase(),
+        descricao: n.Descricao || '',
+        lancadoPor: n.LancadoPor || '',
+        lancadoEm: (n.LancadoEm || '').replace('T',' ').substring(0,16),
+        aprovadoPor: n.AprovadorAtual || '',
+        aprovadoEm: n.AprovadoEm ? (n.AprovadoEm.replace('T',' ').substring(0,16)) : null,
+        motivo: n.MotivoRejeicao || '',
+        hash: (n.HashSHA256 || '').substring(0,16),
+        urlPDF: n.UrlPDF || '',
+        urlPDFAprovado: n.UrlPDFAprovado || ''
+      };
+    });
+    window._dadosCarregados.notas = true;
+    console.log('[ListarNotas] ' + notas.length + ' notas carregadas');
+    return true;
+  } catch (e) {
+    console.warn('[ListarNotas] erro:', e && e.message);
+    return false;
+  }
+}
+
 async function carregarDiretoriasReais() {
   try {
     const r = await fetch('/api/ListarDiretorias', { credentials: 'include' });
@@ -642,7 +697,10 @@ async function carregarDadosIniciais() {
   // Guard contra chamadas simultaneas
   if (window._carregamentoEmAndamento) return window._carregamentoEmAndamento;
   window._carregamentoEmAndamento = (async () => {
+    // Carrega fornecedores+diretorias PRIMEIRO (notas dependem do fornecedores pra mapping)
     await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais()]);
+    // Depois carrega as notas (que mapeiam fornecedorIdx pelo array de fornecedores)
+    await carregarNotasReais();
     // Re-renderiza qualquer view que dependa de fornecedores/diretorias
     const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
     if (viewsQueDependem.includes(currentView)) {
