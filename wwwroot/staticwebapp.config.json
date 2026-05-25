@@ -21,13 +21,9 @@
     { "route": "/vendor/*",                 "allowedRoles": ["anonymous", "authenticated"] },
 
     { "route": "/api/*", "allowedRoles": ["authenticated"] },
-    { "route": "/*",     "allowedRoles": ["authenticated"] }
+    { "route": "/*",     "allowedRoles": ["anonymous", "authenticated"] }
   ],
   "responseOverrides": {
-    "401": {
-      "redirect": "/.auth/login/aad",
-      "statusCode": 302
-    },
     "403": {
       "rewrite": "/sem-acesso.html",
       "statusCode": 403
