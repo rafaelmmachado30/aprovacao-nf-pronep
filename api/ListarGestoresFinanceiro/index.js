@@ -14,7 +14,7 @@ const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
   require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 
-const DEFAULT_GROUP_ID = '6b77405b-ba89-47ee-af21-58ec19bb3ff7'; // PRONEP-NF-Gestor_Financeira
+const DEFAULT_GROUP_ID = 'c2a73d16-4659-4b3c-93a1-0c0fbfaaaa96'; // PRONEP-NF-Financeiro-Gestao (autorizados a aprovar vencimento fora do prazo)
 
 async function getGraphClient() {
   const tenantId = process.env.AAD_TENANT_ID;

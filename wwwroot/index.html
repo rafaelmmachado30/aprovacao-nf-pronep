@@ -2240,7 +2240,10 @@ function renderAprovadasTable() {
             return `
               <tr${vencForaPrazo ? ' style="background:#FFF5F5"' : ''}>
                 <td><b>${n.id||''}</b><br><span class="small muted">Nº ${n.numero||''}</span></td>
-                <td>${(fornecedorOf(n)||{}).razao || '—'}</td>
+                <td>
+                  <b>${(fornecedorOf(n)||{}).razao || '—'}</b>
+                  <br><span class="small muted mono">${(fornecedorOf(n)||{}).cnpj || (fornecedorOf(n)||{}).documento || n.fornecedorCnpj || '—'}</span>
+                </td>
                 <td>${n.unidade ? `<span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span>` : '—'}</td>
                 <td>${n.diretoria||'—'}</td>
                 <td class="num"><b>${fmtBRL(n.valor)}</b></td>
