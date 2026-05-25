@@ -11,6 +11,7 @@ const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
   require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { enviarTeamsAtividade } = require('./teamsActivity');
 
 const DEFAULT_FROM = 'datanalytics@pronep.com.br';
 
@@ -258,13 +259,31 @@ async function enviarTeams(evento, dados, destinatariosEmail) {
 
 // Funcao alto-nivel chamada por outras Functions in-process
 async function notificar(evento, destinatarios, dados, cc) {
-  const result = { email: null, teams: null };
+  const result = { email: null, teamsAtividade: null, teamsWebhook: null };
   if (Array.isArray(destinatarios) && destinatarios.length > 0) {
     try { result.email = await enviarEmail(evento, destinatarios, dados, cc); }
     catch (e) { result.email = { ok: false, error: e.message, statusCode: e.statusCode, body: e.body }; }
   }
-  try { result.teams = await enviarTeams(evento, dados, destinatarios); }
-  catch (e) { result.teams = { ok: false, error: e.message }; }
+
+  // Caminho oficial: sendActivityNotification via Graph (1:1 no Teams do aprovador)
+  const aprovadorAlvo = (destinatarios && destinatarios[0]) || (dados && dados.aprovador) || '';
+  if (aprovadorAlvo) {
+    try { result.teamsAtividade = await enviarTeamsAtividade(evento, dados || {}, aprovadorAlvo); }
+    catch (e) { result.teamsAtividade = { ok: false, error: e.message, body: e.body, statusCode: e.statusCode }; }
+  } else {
+    result.teamsAtividade = { ok: false, skipped: true, reason: 'Sem aprovador para resolver userId' };
+  }
+
+  // Fallback: se o caminho Graph nao tiver funcionado (Teams App nao registrada ainda
+  // ou permissao pendente) E houver webhook de canal central configurado, posta la.
+  // Webhook 1:1 (TEAMS_WEBHOOKS por email) continua disponivel mas DEPRECIADO no codigo.
+  if (!result.teamsAtividade || !result.teamsAtividade.ok) {
+    try { result.teamsWebhook = await enviarTeams(evento, dados || {}, destinatarios); }
+    catch (e) { result.teamsWebhook = { ok: false, error: e.message }; }
+  } else {
+    result.teamsWebhook = { ok: true, skipped: true, reason: 'Atividade Graph enviou com sucesso' };
+  }
+
   return result;
 }
 

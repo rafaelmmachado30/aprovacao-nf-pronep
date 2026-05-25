@@ -1,0 +1,62 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "5c52fce3-bf34-4b8c-a624-06defd5f85f6",
+  "packageName": "br.com.pronep.aprovacao-nf",
+  "developer": {
+    "name": "Pronep Life Care",
+    "websiteUrl": "https://www.pronep.com.br",
+    "privacyUrl": "https://www.pronep.com.br/privacidade",
+    "termsOfUseUrl": "https://www.pronep.com.br/termos"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "Aprovacao NF",
+    "full": "Pronep - Aprovacao de NF"
+  },
+  "description": {
+    "short": "Notificacoes de NF para aprovadores",
+    "full": "Sistema de Aprovacao de Notas Fiscais da Pronep Life Care. Envia notificacoes 1:1 no Teams quando uma NF aguarda aprovacao, foi aprovada ou rejeitada."
+  },
+  "accentColor": "#1F4E79",
+  "staticTabs": [
+    {
+      "entityId": "aprovacao-nf-home",
+      "name": "Aprovacao NF",
+      "contentUrl": "https://purple-forest-09588fe10.7.azurestaticapps.net/",
+      "websiteUrl": "https://purple-forest-09588fe10.7.azurestaticapps.net/",
+      "scopes": ["personal"]
+    }
+  ],
+  "permissions": ["identity"],
+  "validDomains": [
+    "purple-forest-09588fe10.7.azurestaticapps.net"
+  ],
+  "webApplicationInfo": {
+    "id": "85f7fa68-a241-4caf-803f-9991bd1f0eee",
+    "resource": "https://purple-forest-09588fe10.7.azurestaticapps.net"
+  },
+  "activities": {
+    "activityTypes": [
+      {
+        "type": "approvalRequired",
+        "description": "Nova NF aguardando aprovacao",
+        "templateText": "{actor} - NF {nfNumber} aguardando sua aprovacao"
+      },
+      {
+        "type": "nfAprovada",
+        "description": "NF aprovada",
+        "templateText": "Sua NF {nfNumber} foi APROVADA por {actor}"
+      },
+      {
+        "type": "nfRejeitada",
+        "description": "NF rejeitada",
+        "templateText": "Sua NF {nfNumber} foi REJEITADA por {actor}"
+      }
+    ]
+  }
+}
