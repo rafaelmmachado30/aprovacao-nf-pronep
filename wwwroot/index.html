@@ -904,7 +904,11 @@ if (window.Chart) {
   Chart.defaults.font.family = 'Inter, -apple-system, Segoe UI, Roboto, sans-serif';
   Chart.defaults.font.size = 11;
   Chart.defaults.color = '#647883';
-  Chart.defaults.animation = { duration: 900, easing: 'easeOutQuart' };
+  // ANIMACAO DESABILITADA: evita race condition "this._fn is not a function"
+  // quando o chart eh destruido durante o tick de animacao
+  Chart.defaults.animation = false;
+  Chart.defaults.animations = false;
+  Chart.defaults.transitions = { active: { animation: { duration: 0 } } };
 }
 
 // destruir charts ativos antes de remontar (evita vazamento)
@@ -983,6 +987,7 @@ function mountDashboardCharts() {
         }]
       },
       options: {
+        animation: false,
         indexAxis: 'y',
         responsive: true,
         maintainAspectRatio: false,
@@ -1046,6 +1051,7 @@ function mountDashboardCharts() {
       type: 'doughnut',
       data: { labels, datasets: [{ data: values, backgroundColor: colors, borderColor: '#fff', borderWidth: 2 }] },
       options: {
+        animation: false,
         responsive: true,
         maintainAspectRatio: false,
         cutout: '60%',
@@ -1110,6 +1116,7 @@ function mountDashboardCharts() {
         }]
       },
       options: {
+        animation: false,
         responsive: true,
         maintainAspectRatio: false,
         layout: { padding: { top: 20 } },
