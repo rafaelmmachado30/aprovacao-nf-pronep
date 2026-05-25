@@ -1180,12 +1180,15 @@ const views = {
     <div class="view-sub">Preencha os dados da NF e faça upload do PDF. O sistema fará validação automática.</div>
     <div class="card">
       <div class="form-grid">
-        <div class="form-row">
+        <div class="form-row" style="position:relative">
           <label>Fornecedor *</label>
-          <select id="frm-forn" onchange="onFornChange()">
-            <option value="">— Selecione —</option>
-            ${fornecedores.map((f,i) => ({f,i})).filter(x=>x.f.ativo).sort((a,b) => a.f.razao.localeCompare(b.f.razao) || a.f.unidade.localeCompare(b.f.unidade)).map(({f,i}) => `<option value="${i}">${f.razao} (${f.cnpj}) — ${f.unidade}</option>`).join('')}
-          </select>
+          <input id="frm-forn-busca" type="text" autocomplete="off"
+                 placeholder="Digite razão social, CNPJ ou nome fantasia..."
+                 oninput="filtrarFornecedoresLancamento()"
+                 onfocus="filtrarFornecedoresLancamento()"
+                 onblur="setTimeout(fecharDropdownFornecedor, 200)">
+          <input type="hidden" id="frm-forn" value="">
+          <div id="frm-forn-dropdown" class="combobox-dropdown"></div>
         </div>
         <div class="form-row">
           <label>Categoria</label>
@@ -1289,11 +1292,12 @@ const views = {
   `,
 
   aprovadas: () => {
-    // Filtros iniciais — primeiro abrir vem com data de aprovação = hoje
+    // Filtros iniciais — primeiro abrir vem com data de aprovação = hoje (dinamica)
     if (!window._filtroAprovadas) {
+      const hoje = new Date().toISOString().substring(0, 10);
       window._filtroAprovadas = {
         unidade: 'TODAS', diretoria: 'TODAS',
-        aprovadoDe: '2026-05-22', aprovadoAte: '2026-05-22',
+        aprovadoDe: hoje, aprovadoAte: hoje,
         vencimentoDe: '', vencimentoAte: '',
         busca: ''
       };
@@ -1499,14 +1503,6 @@ function descreveEscopoGestor(escopo) {
 
 function renderFornecedoresView() {
   const f = window._filtroFornecedores;
-  let lista = fornecedores.slice();
-  if (f.busca) {
-    const q = f.busca.toLowerCase();
-    lista = lista.filter(x => x.razao.toLowerCase().includes(q) || x.cnpj.toLowerCase().includes(q) || (x.nomeFantasia||'').toLowerCase().includes(q));
-  }
-  if (f.status === 'ATIVOS')   lista = lista.filter(x => x.ativo);
-  if (f.status === 'INATIVOS') lista = lista.filter(x => !x.ativo);
-
   return `
     <h2>Cadastro de Fornecedores</h2>
     <div class="view-sub">Cadastro centralizado. A unidade e diretoria padrão definidas aqui são usadas para roteamento automático no lançamento de NF.</div>
@@ -1530,35 +1526,65 @@ function renderFornecedoresView() {
       </div>
     </div>
 
+    <div id="fornec-table-area">${renderFornecedoresTable()}</div>
+  `;
+}
+
+// Renderiza SO a tabela (parte que muda com filtros). Resto da view fica intocado pra preservar foco do input.
+function renderFornecedoresTable() {
+  const f = window._filtroFornecedores;
+  let lista = fornecedores.slice();
+  if (f.busca) {
+    const q = f.busca.toLowerCase();
+    lista = lista.filter(x =>
+      (x.razao || '').toLowerCase().includes(q) ||
+      (x.cnpj || x.documento || '').toLowerCase().includes(q) ||
+      (x.nomeFantasia || '').toLowerCase().includes(q)
+    );
+  }
+  if (f.status === 'ATIVOS')   lista = lista.filter(x => x.ativo);
+  if (f.status === 'INATIVOS') lista = lista.filter(x => !x.ativo);
+
+  return `
     <div class="card">
       <div class="small muted" style="margin-bottom:8px"><b>${lista.length}</b> de ${fornecedores.length} fornecedor(es)</div>
       <table class="data">
-        <thead><tr><th>CNPJ</th><th>Razão Social</th><th>Nome Fantasia</th><th>UF</th><th>Diretoria</th><th>Categoria</th><th>Status</th><th class="center">Ações</th></tr></thead>
+        <thead><tr><th>CNPJ/CPF</th><th>Razão Social</th><th>Nome Fantasia</th><th>UF</th><th>Diretoria</th><th>Categoria</th><th>Status</th><th class="center">Ações</th></tr></thead>
         <tbody>
           ${lista.length === 0 ? `<tr><td colspan="8" class="center muted" style="padding:30px">Nenhum fornecedor encontrado.</td></tr>` :
-          lista.map((x,i) => `
+          lista.slice(0, 500).map((x,i) => `
             <tr>
-              <td class="mono">${x.cnpj}</td>
-              <td>${x.razao}</td>
+              <td class="mono">${x.cnpj || x.documento || ''}</td>
+              <td>${x.razao || ''}</td>
               <td>${x.nomeFantasia || '—'}</td>
-              <td><span class="tag tag-${x.unidade.toLowerCase()}">${x.unidade}</span></td>
-              <td>${x.diretoria}</td>
-              <td>${x.categoria}</td>
+              <td>${(x.unidade||x.uf) ? `<span class="tag tag-${(x.unidade||x.uf||'').toLowerCase()}">${x.unidade||x.uf}</span>` : '—'}</td>
+              <td>${x.diretoria || '—'}</td>
+              <td>${x.categoria || '—'}</td>
               <td>${x.ativo ? '<span class="status-pill status-aprovada">ATIVO</span>' : '<span class="status-pill status-rejeitada">INATIVO</span>'}</td>
               <td class="center"><button class="icon-btn" onclick="openEditarFornecedor(${fornecedores.indexOf(x)})">Editar</button></td>
             </tr>
           `).join('')}
+          ${lista.length > 500 ? `<tr><td colspan="8" class="center muted" style="padding:14px;font-style:italic">Mostrando primeiros 500 de ${lista.length} resultados. Refine a busca pra ver mais.</td></tr>` : ''}
         </tbody>
       </table>
     </div>
   `;
 }
 
+// Debounce timer (evita lagada com 3300 items)
+let _filtroFornDebounce = null;
 function aplicaFiltroFornecedores() {
   const f = window._filtroFornecedores;
-  f.busca  = document.getElementById('ffr-busca').value;
-  f.status = document.getElementById('ffr-status').value;
-  document.getElementById('content-area').innerHTML = renderFornecedoresView();
+  const inputBusca = document.getElementById('ffr-busca');
+  const selectStatus = document.getElementById('ffr-status');
+  if (inputBusca) f.busca = inputBusca.value;
+  if (selectStatus) f.status = selectStatus.value;
+  // Re-renderiza SO a area da tabela. Input mantem foco e cursor!
+  clearTimeout(_filtroFornDebounce);
+  _filtroFornDebounce = setTimeout(() => {
+    const area = document.getElementById('fornec-table-area');
+    if (area) area.innerHTML = renderFornecedoresTable();
+  }, 150);
 }
 
 function openNovoFornecedor() {
@@ -2342,7 +2368,8 @@ function archDiagramSVG() {
 }
 
 // ============== ACTIONS ==============
-const HOJE = new Date('2026-05-22T00:00:00');  // Data "atual" do protótipo
+// Data atual real (era hardcoded '2026-05-22' do protótipo). Mantemos const pra compatibilidade.
+const HOJE = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
 
 function onFornChange() {
   const idx = document.getElementById('frm-forn').value;
