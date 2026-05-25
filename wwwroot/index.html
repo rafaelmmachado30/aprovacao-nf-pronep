@@ -856,33 +856,18 @@ function showView(id) {
   destroyAllCharts();
   const area = document.getElementById('content-area');
   area.innerHTML = views[id] ? views[id]() : '<div class="card">Tela em construção.</div>';
-  // Anima KPIs - tem que rodar APOS o DOM estar pronto
-  setTimeout(() => animateKPIs(), 30);
-  // Charts do dashboard - precisa de mais tempo pra canvas ter dimensao
+  requestAnimationFrame(() => animateKPIs());
   if (id === 'dashboard') {
-    tentarMontarCharts(0);
+    requestAnimationFrame(() => mountDashboardCharts());
   }
-  // Re-carrega notas em tempo real
-  const viewsQueRecarregamNotas = ['fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','dashboard'];
+  // Refresh de notas — IMPORTANTE: Dashboard NÃO entra aqui porque o refresh
+  // re-chama showView que destrói os charts recém-criados (race condition).
+  // Pro dashboard, usuário pode dar F5 ou navegar fora/volta. KPIs+gráficos
+  // permanecem mostrando o estado do último carregamento de notas.
+  const viewsQueRecarregamNotas = ['fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas'];
   if (viewsQueRecarregamNotas.includes(id) && window._dadosCarregados && window._dadosCarregados.notas) {
     refreshNotasSilencioso();
   }
-}
-
-// Tenta montar charts com retry — espera canvas ter dimensao real (re-renders precisam disso)
-function tentarMontarCharts(tentativas) {
-  const canvas = document.getElementById('chart-diretoria');
-  if (!canvas) {
-    if (tentativas < 10) setTimeout(() => tentarMontarCharts(tentativas+1), 80);
-    return;
-  }
-  const rect = canvas.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) {
-    if (tentativas < 10) setTimeout(() => tentarMontarCharts(tentativas+1), 80);
-    return;
-  }
-  // Canvas pronto — monta charts
-  mountDashboardCharts();
 }
 
 // Recarrega notas em background SEM perder o render atual; re-render a view se houver diff
