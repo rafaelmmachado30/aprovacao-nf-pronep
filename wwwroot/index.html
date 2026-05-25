@@ -6,6 +6,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- Chart.js local (rede da Pronep bloqueia CDNs externos) -->
 <script src="/vendor/chart.umd.min.js"></script>
+<!-- Microsoft Teams JS SDK (pra detectar quando rodando dentro do Teams) -->
+<script src="/vendor/teams-js.min.js"></script>
 <style>
   :root {
     --azul-escuro: #1F4E79;
@@ -595,9 +597,64 @@ function logout() {
 document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('login-email');
   if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') loginCheckEmail(); });
+  // Detecta se estamos rodando dentro do Microsoft Teams (Personal Tab)
+  // Se sim, pega o subEntityId do deep link e marca pra abrir a NF apos login
+  initTeamsContext();
   // Tenta auto-login se o Easy Auth (SWA) ja identificou o usuario
   tryAutoLoginFromAzure();
 });
+
+// =================== INTEGRACAO MICROSOFT TEAMS ===================
+window._teamsContext = { isInTeams: false, subEntityId: null, nfIdToOpen: null };
+
+async function initTeamsContext() {
+  if (!window.microsoftTeams) {
+    console.log('[Teams] SDK nao carregado');
+    return;
+  }
+  try {
+    // initialize() falha rapido se nao estiver no Teams
+    await window.microsoftTeams.app.initialize();
+    const ctx = await window.microsoftTeams.app.getContext();
+    window._teamsContext.isInTeams = true;
+    // SDK v2: ctx.page.subPageId | v1: ctx.subEntityId
+    const sub = (ctx && ctx.page && ctx.page.subPageId) || (ctx && ctx.subEntityId) || null;
+    window._teamsContext.subEntityId = sub;
+    if (sub && sub.indexOf('nf-') === 0) {
+      window._teamsContext.nfIdToOpen = sub.replace('nf-', '');
+    }
+    console.log('[Teams] Rodando dentro do Teams. subEntityId=' + sub + ', nfIdToOpen=' + window._teamsContext.nfIdToOpen);
+  } catch (e) {
+    console.log('[Teams] Nao esta dentro do Teams (rodando no browser):', e && e.message);
+  }
+}
+
+// Apos os dados carregarem e o usuario estar logado, abre a NF que veio do deep link
+function tentarAbrirNFDoTeams() {
+  const ctx = window._teamsContext;
+  if (!ctx || !ctx.nfIdToOpen) return false;
+  const nfId = ctx.nfIdToOpen;
+  // Limpa pra nao re-abrir em outras navegacoes
+  ctx.nfIdToOpen = null;
+  // Vai pra Fila de Aprovacao primeiro pra ter o contexto certo
+  try { showView('fila-aprovacao'); } catch (e) {}
+  // Procura a NF: pode estar como spId (numerico) ou id com prefixo NF-
+  setTimeout(function () {
+    var alvo = null;
+    if (Array.isArray(window.notas)) {
+      alvo = window.notas.find(function (n) {
+        return String(n.spId) === String(nfId) || String(n.id) === 'NF-' + nfId || String(n.id) === String(nfId);
+      });
+    }
+    if (alvo) {
+      console.log('[Teams] Abrindo NF do deep link:', alvo.id);
+      try { openNFDetail(alvo.id); } catch (e) { console.warn('openNFDetail falhou:', e); }
+    } else {
+      console.warn('[Teams] NF id=' + nfId + ' nao encontrada nas notas carregadas');
+    }
+  }, 600);
+  return true;
+}
 
 // =================== INTEGRACAO REAL ENTRA ID / SWA ===================
 // Quando rodando no Azure Static Web Apps, o Easy Auth ja garantiu o login
@@ -719,6 +776,9 @@ async function carregarNotasReais() {
     });
     window._dadosCarregados.notas = true;
     console.log('[ListarNotas] ' + notas.length + ' notas carregadas');
+    window.notas = notas;  // expoe pra tentarAbrirNFDoTeams() encontrar
+    // Se viemos do Teams via deep link com nf-{id}, abre o modal daquela NF
+    try { if (typeof tentarAbrirNFDoTeams === 'function') tentarAbrirNFDoTeams(); } catch (e) {}
     return true;
   } catch (e) {
     console.warn('[ListarNotas] erro:', e && e.message);
