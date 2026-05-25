@@ -594,13 +594,14 @@ function logout() {
 }
 
 // Tecla Enter no input dispara o login
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const el = document.getElementById('login-email');
   if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') loginCheckEmail(); });
-  // Detecta se estamos rodando dentro do Microsoft Teams (Personal Tab)
-  // Se sim, pega o subEntityId do deep link e marca pra abrir a NF apos login
-  initTeamsContext();
-  // Tenta auto-login se o Easy Auth (SWA) ja identificou o usuario
+  // ORDEM IMPORTANTE: detecta Teams PRIMEIRO (await), porque o
+  // tryAutoLoginFromAzure precisa saber se esta no Teams pra decidir entre
+  // popup auth (Teams) e redirect direto (browser).
+  await initTeamsContext();
+  // Agora sim: tenta auto-login. Se sem sessao + Teams: aguarda popup. Se sem sessao + browser: redireciona.
   tryAutoLoginFromAzure();
 });
 
