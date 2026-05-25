@@ -1,14 +1,7 @@
 /**
  * Envio de notificacao Teams 1:1 via Graph API (sendActivityNotification)
- *
- * Substitui o webhook depreciated do Power Automate. Caminho oficial Microsoft:
- *   POST /users/{userId}/teamwork/sendActivityNotification
- *
- * Requer:
- *   - Teams App registrada no tenant com webApplicationInfo.id = nosso App Reg
- *   - Permissao Application "TeamsActivity.Send" + admin consent
- *
- * Documentacao: https://learn.microsoft.com/graph/teams-send-activityfeednotifications
+ * Substitui o webhook depreciated do Power Automate.
+ * Doc: https://learn.microsoft.com/graph/teams-send-activityfeednotifications
  */
 
 require('isomorphic-fetch');
@@ -18,6 +11,18 @@ const { TokenCredentialAuthenticationProvider } =
   require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 
 const BASE_URL = 'https://purple-forest-09588fe10.7.azurestaticapps.net';
+const TEAMS_APP_ID = process.env.TEAMS_APP_ID || '5c52fce3-bf34-4b8c-a624-06defd5f85f6';
+const TEAMS_ENTITY_ID = 'aprovacao-nf-home';
+
+// Microsoft exige topic.webUrl no formato https://teams.microsoft.com/l/...
+function buildTeamsDeepLink(itemId) {
+  const subEntityId = itemId ? 'nf-' + itemId : 'home';
+  const context = JSON.stringify({ subEntityId: subEntityId });
+  const webUrl = BASE_URL + '/';
+  return 'https://teams.microsoft.com/l/entity/' + TEAMS_APP_ID + '/' + TEAMS_ENTITY_ID
+    + '?webUrl=' + encodeURIComponent(webUrl)
+    + '&context=' + encodeURIComponent(context);
+}
 
 async function getGraphClient() {
   const tenantId = process.env.AAD_TENANT_ID;
@@ -31,14 +36,10 @@ async function getGraphClient() {
   return Client.initWithMiddleware({ authProvider });
 }
 
-/**
- * Resolve userId (UUID) a partir do email do aprovador
- */
 async function resolverUserId(client, email) {
   if (!email) throw new Error('Email do aprovador vazio');
-  // /users/{email} aceita UPN diretamente
-  const user = await client.api(`/users/${encodeURIComponent(email)}`).select('id,mail,userPrincipalName').get();
-  if (!user || !user.id) throw new Error(`Usuario nao encontrado: ${email}`);
+  const user = await client.api('/users/' + encodeURIComponent(email)).select('id,mail,userPrincipalName').get();
+  if (!user || !user.id) throw new Error('Usuario nao encontrado: ' + email);
   return user.id;
 }
 
@@ -48,9 +49,6 @@ function fmtBRL(v) {
   catch (e) { return String(v); }
 }
 
-/**
- * Mapeia evento do sistema para o activityType declarado no manifest da Teams App
- */
 function mapearEvento(evento) {
   if (evento === 'lancada')   return 'approvalRequired';
   if (evento === 'aprovada')  return 'nfAprovada';
@@ -58,37 +56,28 @@ function mapearEvento(evento) {
   return null;
 }
 
-/**
- * Monta o payload do sendActivityNotification
- *
- * @param {string} evento - 'lancada' | 'aprovada' | 'rejeitada'
- * @param {object} dados  - { numero, fornecedor, valor, aprovador, motivo, itemId }
- */
 function buildPayload(evento, dados) {
   const activityType = mapearEvento(evento);
   if (!activityType) return null;
 
-  const numero = String(dados.numero || '—');
+  const numero = String(dados.numero || '-');
   const fornecedor = String(dados.fornecedor || '');
   const valor = fmtBRL(dados.valor);
   const aprovador = String(dados.aprovador || 'Sistema NF');
   const motivo = String(dados.motivo || '');
 
-  // Topic: o titulo que aparece na activity feed (sino do Teams)
-  // webUrl: pra onde clicar leva o usuario
   let topicValue, previewText;
   if (evento === 'lancada') {
-    topicValue = `Nova NF ${numero} aguardando sua aprovacao`;
-    previewText = `${fornecedor}${valor ? ' — ' + valor : ''}`;
+    topicValue = 'Nova NF ' + numero + ' aguardando sua aprovacao';
+    previewText = fornecedor + (valor ? ' - ' + valor : '');
   } else if (evento === 'aprovada') {
-    topicValue = `Sua NF ${numero} foi APROVADA`;
-    previewText = `Aprovada por ${aprovador}`;
+    topicValue = 'Sua NF ' + numero + ' foi APROVADA';
+    previewText = 'Aprovada por ' + aprovador;
   } else {
-    topicValue = `Sua NF ${numero} foi REJEITADA`;
-    previewText = motivo ? `Motivo: ${motivo}` : `Rejeitada por ${aprovador}`;
+    topicValue = 'Sua NF ' + numero + ' foi REJEITADA';
+    previewText = motivo ? 'Motivo: ' + motivo : 'Rejeitada por ' + aprovador;
   }
 
-  // templateParameters: substituidos no templateText declarado no manifest
   const templateParameters = [
     { name: 'actor',    value: aprovador },
     { name: 'nfNumber', value: numero }
@@ -98,29 +87,24 @@ function buildPayload(evento, dados) {
     topic: {
       source: 'text',
       value: topicValue,
-      webUrl: BASE_URL + '/'
+      webUrl: buildTeamsDeepLink(dados.itemId)
     },
-    activityType,
+    activityType: activityType,
     previewText: { content: previewText },
-    templateParameters
+    templateParameters: templateParameters
   };
 }
 
-/**
- * Envia notificacao 1:1 via Graph sendActivityNotification.
- * Retorna { ok: bool, status?, error?, sentTo? }
- */
 async function enviarTeamsAtividade(evento, dados, aprovadorEmail) {
   const payload = buildPayload(evento, dados);
-  if (!payload) return { ok: false, skipped: true, reason: `Evento '${evento}' sem mapeamento` };
+  if (!payload) return { ok: false, skipped: true, reason: 'Evento sem mapeamento: ' + evento };
   if (!aprovadorEmail) return { ok: false, skipped: true, reason: 'Email do aprovador vazio' };
 
-  const client = await getGraphClient();
-  const userId = await resolverUserId(client, aprovadorEmail);
-
   try {
-    await client.api(`/users/${userId}/teamwork/sendActivityNotification`).post(payload);
-    return { ok: true, sentTo: aprovadorEmail, userId, activityType: payload.activityType };
+    const client = await getGraphClient();
+    const userId = await resolverUserId(client, aprovadorEmail);
+    await client.api('/users/' + userId + '/teamwork/sendActivityNotification').post(payload);
+    return { ok: true, sentTo: aprovadorEmail, userId: userId, activityType: payload.activityType };
   } catch (err) {
     return {
       ok: false,
@@ -133,4 +117,4 @@ async function enviarTeamsAtividade(evento, dados, aprovadorEmail) {
   }
 }
 
-module.exports = { enviarTeamsAtividade, buildPayload, mapearEvento };
+module.exports = { enviarTeamsAtividade, buildPayload, buildTeamsDeepLink, mapearEvento };
