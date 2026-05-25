@@ -2459,11 +2459,67 @@ function fecharDropdownFornecedor() {
 
 function onFornChange() {
   const idx = document.getElementById('frm-forn').value;
-  if (idx === '') return;
+  if (idx === '') {
+    limparAvisoFornecedor();
+    return;
+  }
   const f = fornecedores[parseInt(idx)];
-  document.getElementById('frm-categoria').value = f.categoria;
-  document.getElementById('frm-unidade').value = f.unidade;
-  document.getElementById('frm-diretoria').value = f.diretoria;
+  if (!f) return;
+  document.getElementById('frm-categoria').value = f.categoria || '';
+  document.getElementById('frm-unidade').value = f.unidade || '';
+  document.getElementById('frm-diretoria').value = f.diretoria || '';
+
+  // Valida se fornecedor tem cadastro completo (UnidadePadrao + DiretoriaPadrao)
+  const faltam = [];
+  if (!f.unidade)   faltam.push('UnidadePadrao');
+  if (!f.diretoria) faltam.push('DiretoriaPadrao');
+  if (faltam.length > 0) {
+    mostrarAvisoFornecedorIncompleto(f, faltam);
+  } else {
+    limparAvisoFornecedor();
+  }
+}
+
+function mostrarAvisoFornecedorIncompleto(f, faltam) {
+  const formMsgs = document.getElementById('form-msgs');
+  if (!formMsgs) return;
+  const linkSharePoint = 'https://pronepadmin.sharepoint.com/sites/Aprovacao-NotasFiscaisServicos/Lists/PRONEPNFFornecedores/AllItems.aspx';
+  formMsgs.innerHTML = `
+    <div class="alert alert-error" style="background:var(--amarelo-bg);border-left:3px solid var(--amarelo);color:#6D4C00;padding:14px 16px;border-radius:6px;margin-top:12px">
+      <div style="display:flex;align-items:flex-start;gap:10px">
+        <div style="font-size:22px;line-height:1">⚠</div>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">Cadastro do fornecedor incompleto</div>
+          <div style="font-size:13px;line-height:1.5">
+            O fornecedor <b>${f.razao || '(sem nome)'}</b> não tem ${faltam.map(x => '<b>'+x+'</b>').join(' nem ')} preenchido(s) no cadastro.<br>
+            <b>O lançamento foi bloqueado.</b> Atualize o fornecedor na lista do SharePoint e tente novamente.
+          </div>
+          <div style="margin-top:10px">
+            <a href="${linkSharePoint}" target="_blank" class="btn btn-secondary" style="text-decoration:none;font-size:13px;padding:8px 14px">⤴ Editar no SharePoint</a>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  // Desabilita botao Enviar
+  const btnEnviar = document.getElementById('btn-enviar-nf');
+  if (btnEnviar) {
+    btnEnviar.disabled = true;
+    btnEnviar.style.opacity = '0.5';
+    btnEnviar.style.cursor = 'not-allowed';
+    btnEnviar.title = 'Fornecedor com cadastro incompleto — atualize no SharePoint';
+  }
+}
+
+function limparAvisoFornecedor() {
+  const formMsgs = document.getElementById('form-msgs');
+  if (formMsgs) formMsgs.innerHTML = '';
+  const btnEnviar = document.getElementById('btn-enviar-nf');
+  if (btnEnviar) {
+    btnEnviar.disabled = false;
+    btnEnviar.style.opacity = '';
+    btnEnviar.style.cursor = '';
+    btnEnviar.title = '';
+  }
 }
 
 function diasEntre(d1, d2) {
@@ -2954,25 +3010,36 @@ async function doReject(id) {
 
 function openApprovedPdf(id) {
   const n = notas.find(x => x.id === id);
-  const stamp = n.aprovadoEm + '';
-  const emailPrefix = n.aprovadoPor.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ /g,'.');
+  if (!n) return;
+  const urlPDF = n.urlPDFAprovado || n.urlPDF;
+  // Caminho amigavel: extrai Unidade + data da aprovação
+  const dataApr = (n.aprovadoEm || '').substring(0,10);
+  const pathLegivel = `SharePoint/Notas Aprovadas/${n.unidade || '—'}/${dataApr}/`;
+
+  if (!urlPDF) {
+    openModal(`
+      <span class="close-x" onclick="closeModal()">×</span>
+      <h3>${n.id} — Aprovada</h3>
+      <div class="alert alert-error" style="margin:14px 0"><span class="ico">!</span><div>PDF nao tem URL armazenada nesta NF. Isso pode acontecer com NFs antigas, antes de gravarmos o link no item da lista.<br><br>Verifique manualmente em <span class="mono">${pathLegivel}</span></div></div>
+      <div class="btn-row"><button class="btn btn-secondary" onclick="closeModal()">Fechar</button></div>
+    `);
+    return;
+  }
+
   openModal(`
     <span class="close-x" onclick="closeModal()">×</span>
     <h3>${n.id} — Aprovada</h3>
-    <p class="muted small">PDF arquivado em <span class="mono">SharePoint/Notas Aprovadas/${n.unidade}/${n.aprovadoEm.substring(0,10).replace(' ','')}/</span></p>
-    <div class="modal-pdf-preview" style="min-height:280px">
-      [ PDF aprovado com watermark ]
-      <div class="watermark-overlay">
-        <div>
-          <div class="l1">APROVADO</div>
-          <div>${stamp}</div>
-          <div>Por: ${emailPrefix}</div>
-        </div>
-      </div>
+    <p class="muted small" style="margin-bottom:8px">PDF arquivado em <span class="mono">${pathLegivel}</span></p>
+
+    <!-- Embed do PDF via iframe direto do SharePoint (autenticacao via cookie do navegador) -->
+    <div style="margin:12px 0;border:1px solid var(--cinza-borda);border-radius:6px;overflow:hidden;background:#fff">
+      <iframe src="${urlPDF}" style="width:100%;height:600px;border:0;display:block" title="PDF aprovado"></iframe>
     </div>
+
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
-      <button class="btn btn-primary" onclick="toast('Download iniciaria via Graph API')">⤓ Baixar PDF</button>
+      <a href="${urlPDF}" target="_blank" rel="noopener" class="btn btn-secondary" style="text-decoration:none">⤴ Abrir em nova aba</a>
+      <a href="${urlPDF}&download=1" download class="btn btn-primary" style="text-decoration:none">⤓ Baixar PDF</a>
     </div>
   `);
 }
