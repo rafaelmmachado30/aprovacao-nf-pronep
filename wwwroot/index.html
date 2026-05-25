@@ -645,28 +645,47 @@ async function garantirSessaoNoTeams() {
       }
     }
   } catch (e) {}
-  console.log('[Teams Auth] Sem sessao no iframe, abrindo popup de login...');
+  console.log('[Teams Auth] Sem sessao no iframe, tentando popup auth...');
+  const popupUrl = window.location.origin + '/teams-login.html';
+  console.log('[Teams Auth] URL do popup:', popupUrl);
   try {
-    await new Promise(function (resolve, reject) {
-      window.microsoftTeams.authentication.authenticate({
-        url: window.location.origin + '/teams-login.html',
-        width: 480,
-        height: 640,
-        successCallback: function (result) {
-          console.log('[Teams Auth] Login OK:', result);
-          resolve(result);
-        },
-        failureCallback: function (err) {
-          console.warn('[Teams Auth] Login falhou:', err);
-          reject(err);
-        }
-      });
+    const result = await window.microsoftTeams.authentication.authenticate({
+      url: popupUrl,
+      width: 480,
+      height: 640,
+      isExternal: false
     });
+    console.log('[Teams Auth] Popup retornou:', result);
     console.log('[Teams Auth] Recarregando iframe com sessao...');
     window.location.reload();
   } catch (popupErr) {
-    console.warn('[Teams Auth] Popup auth falhou. Usuario sem sessao no Teams iframe:', popupErr);
+    console.warn('[Teams Auth] Popup auth falhou:', popupErr);
+    mostrarOverlayLoginTeams();
   }
+}
+
+function mostrarOverlayLoginTeams() {
+  var loginUrl = '/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent('/');
+  var div = document.createElement('div');
+  div.style.cssText = 'position:fixed;inset:0;background:#1F4E79;display:flex;align-items:center;justify-content:center;z-index:99999;font-family:Inter,system-ui,sans-serif';
+  div.innerHTML = '<div style="background:#fff;border-radius:14px;padding:48px 36px;max-width:380px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.18)">'
+    + '<div style="font-size:32px;color:#1F4E79;font-weight:700;margin-bottom:8px">P</div>'
+    + '<h2 style="margin:0 0 12px 0;color:#1F4E79;font-size:20px">Aprovacao NF</h2>'
+    + '<p style="color:#647883;font-size:14px;line-height:1.5;margin-bottom:24px">Pra usar o sistema dentro do Teams, voce precisa fazer login com sua conta Microsoft.</p>'
+    + '<button id="btn-teams-login" style="background:#1F4E79;color:#fff;border:0;padding:14px 28px;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer">Continuar com Microsoft</button>'
+    + '<p style="margin-top:18px;font-size:12px;color:#647883">Vai abrir uma janela do Microsoft.</p>'
+    + '</div>';
+  document.body.appendChild(div);
+  document.getElementById('btn-teams-login').addEventListener('click', function () {
+    try {
+      if (window.microsoftTeams && window.microsoftTeams.app && typeof window.microsoftTeams.app.openLink === 'function') {
+        window.microsoftTeams.app.openLink(window.location.origin + loginUrl);
+        return;
+      }
+    } catch (e) { console.warn('[Teams Auth] openLink falhou:', e); }
+    try { window.top.location.href = loginUrl; }
+    catch (e) { window.location.href = loginUrl; }
+  });
 }
 
 // Apos os dados carregarem e o usuario estar logado, abre a NF que veio do deep link
