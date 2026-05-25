@@ -21,14 +21,18 @@ const { TokenCredentialAuthenticationProvider } =
   require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 
 const BASE_URL = 'https://purple-forest-09588fe10.7.azurestaticapps.net';
-const TEAMS_APP_ID = process.env.TEAMS_APP_ID || '5c52fce3-bf34-4b8c-a624-06defd5f85f6';
+// externalId do manifest da Teams App (usado em filter pra achar o catalog id)
+const TEAMS_APP_EXTERNAL_ID = process.env.TEAMS_APP_ID || '5c52fce3-bf34-4b8c-a624-06defd5f85f6';
 const TEAMS_ENTITY_ID = 'aprovacao-nf-home';
 
-function buildTeamsDeepLink(itemId) {
+// IMPORTANTE: o appId no deep link /l/entity/ NAO eh o externalId do manifest,
+// e sim o catalog app id (gerado pelo Teams quando voce sobe o manifest).
+// Por isso buildTeamsDeepLink recebe o catalogAppId como parametro.
+function buildTeamsDeepLink(itemId, catalogAppId) {
   const subEntityId = itemId ? 'nf-' + itemId : 'home';
   const context = JSON.stringify({ subEntityId: subEntityId });
   const webUrl = BASE_URL + '/';
-  return 'https://teams.microsoft.com/l/entity/' + TEAMS_APP_ID + '/' + TEAMS_ENTITY_ID
+  return 'https://teams.microsoft.com/l/entity/' + catalogAppId + '/' + TEAMS_ENTITY_ID
     + '?webUrl=' + encodeURIComponent(webUrl)
     + '&context=' + encodeURIComponent(context);
 }
@@ -56,11 +60,11 @@ let _catalogAppIdCache = null;
 async function getCatalogAppId(client) {
   if (_catalogAppIdCache) return _catalogAppIdCache;
   const r = await client.api('/appCatalogs/teamsApps')
-    .filter("externalId eq '" + TEAMS_APP_ID + "'")
+    .filter("externalId eq '" + TEAMS_APP_EXTERNAL_ID + "'")
     .select('id,displayName,externalId,distributionMethod')
     .get();
   if (!r || !r.value || r.value.length === 0) {
-    throw new Error('Teams App nao encontrada no catalogo do tenant. externalId=' + TEAMS_APP_ID);
+    throw new Error('Teams App nao encontrada no catalogo do tenant. externalId=' + TEAMS_APP_EXTERNAL_ID);
   }
   _catalogAppIdCache = r.value[0].id;
   return _catalogAppIdCache;
@@ -97,7 +101,7 @@ function mapearEvento(evento) {
   return null;
 }
 
-function buildPayload(evento, dados) {
+function buildPayload(evento, dados, catalogAppId) {
   const activityType = mapearEvento(evento);
   if (!activityType) return null;
 
@@ -123,7 +127,7 @@ function buildPayload(evento, dados) {
     topic: {
       source: 'text',
       value: topicValue,
-      webUrl: buildTeamsDeepLink(dados.itemId)
+      webUrl: buildTeamsDeepLink(dados.itemId, catalogAppId)
     },
     activityType: activityType,
     previewText: { content: previewText },
@@ -134,28 +138,35 @@ function buildPayload(evento, dados) {
 }
 
 async function enviarTeamsAtividade(evento, dados, aprovadorEmail) {
-  const payload = buildPayload(evento, dados);
-  if (!payload) return { ok: false, skipped: true, reason: 'Evento sem mapeamento: ' + evento };
   if (!aprovadorEmail) return { ok: false, skipped: true, reason: 'Email do aprovador vazio' };
+  if (!mapearEvento(evento)) return { ok: false, skipped: true, reason: 'Evento sem mapeamento: ' + evento };
 
   let installStatus = 'not-attempted';
   let userId = null;
+  let catalogAppId = null;
   try {
     const client = await getGraphClient();
     userId = await resolverUserId(client, aprovadorEmail);
 
+    // Busca o catalog app id antes de tudo (precisa pro deep link)
+    catalogAppId = await getCatalogAppId(client);
+
+    // Garante que a Teams App esta instalada pro aprovador
     try {
-      const catalogAppId = await getCatalogAppId(client);
       installStatus = await garantirAppInstalada(client, userId, catalogAppId);
     } catch (instErr) {
       installStatus = 'install-error: ' + (instErr.message || String(instErr));
     }
+
+    // Monta o payload usando o catalogAppId pro deep link
+    const payload = buildPayload(evento, dados, catalogAppId);
 
     await client.api('/users/' + userId + '/teamwork/sendActivityNotification').post(payload);
     return {
       ok: true,
       sentTo: aprovadorEmail,
       userId: userId,
+      catalogAppId: catalogAppId,
       activityType: payload.activityType,
       installStatus: installStatus
     };
@@ -167,7 +178,7 @@ async function enviarTeamsAtividade(evento, dados, aprovadorEmail) {
       body: err.body,
       sentTo: aprovadorEmail,
       userId: userId,
-      activityType: payload.activityType,
+      catalogAppId: catalogAppId,
       installStatus: installStatus
     };
   }
