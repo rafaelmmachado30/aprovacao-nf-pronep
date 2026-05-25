@@ -213,6 +213,37 @@
   .tag-es { background: #FFF3E0; color: #E65100; }
   hr { border: 0; border-top: 1px solid var(--cinza-borda); margin: 18px 0; }
 
+  /* ============= COMBOBOX (autocomplete fornecedor) ============= */
+  .combobox-dropdown {
+    position: absolute;
+    top: calc(100% + 2px);
+    left: 0;
+    right: 0;
+    background: var(--branco);
+    border: 1px solid var(--cinza-borda);
+    border-radius: 6px;
+    max-height: 320px;
+    overflow-y: auto;
+    z-index: 100;
+    box-shadow: 0 4px 16px rgba(31,78,121,0.12);
+    display: none;
+  }
+  .combobox-dropdown.show { display: block; }
+  .combobox-dropdown .dropdown-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #F0F4F7;
+    transition: background 0.1s ease;
+  }
+  .combobox-dropdown .dropdown-item:hover,
+  .combobox-dropdown .dropdown-item.highlighted {
+    background: var(--azul-soft);
+  }
+  .combobox-dropdown .dropdown-item:last-child { border-bottom: 0; }
+  .combobox-dropdown .dropdown-item .name { font-weight: 600; color: var(--azul-escuro); font-size: 13px; }
+  .combobox-dropdown .dropdown-item .meta { font-size: 11px; color: var(--cinza-medio); margin-top: 2px; font-family: monospace; }
+  .combobox-dropdown .empty { padding: 16px; text-align: center; color: var(--cinza-medio); font-size: 13px; }
+
   /* ============= ANIMAÇÕES (Pronep style) ============= */
   @keyframes fadeInUp {
     from { opacity: 0; transform: translateY(12px); }
@@ -2370,6 +2401,61 @@ function archDiagramSVG() {
 // ============== ACTIONS ==============
 // Data atual real (era hardcoded '2026-05-22' do protótipo). Mantemos const pra compatibilidade.
 const HOJE = (() => { const d = new Date(); d.setHours(0,0,0,0); return d; })();
+
+// ====== AUTOCOMPLETE DE FORNECEDOR (Lancamento de NF) ======
+function filtrarFornecedoresLancamento() {
+  const inputBusca = document.getElementById('frm-forn-busca');
+  const dropdown = document.getElementById('frm-forn-dropdown');
+  if (!inputBusca || !dropdown) return;
+  const q = (inputBusca.value || '').toLowerCase().trim();
+
+  let lista = fornecedores.filter(f => f.ativo !== false);
+  if (q.length >= 1) {
+    const qDig = q.replace(/\D/g, '');
+    lista = lista.filter(f => {
+      const razao = (f.razao || '').toLowerCase();
+      const fantasia = (f.nomeFantasia || '').toLowerCase();
+      const doc = (f.documento || f.cnpj || '').toLowerCase();
+      const docDig = doc.replace(/\D/g, '');
+      if (razao.includes(q) || fantasia.includes(q)) return true;
+      if (qDig && docDig && docDig.includes(qDig)) return true;
+      return false;
+    });
+  }
+  lista = lista.slice(0, 50);
+
+  if (lista.length === 0) {
+    dropdown.innerHTML = '<div class="empty">Nenhum fornecedor encontrado</div>';
+  } else {
+    dropdown.innerHTML = lista.map(f => {
+      const idx = fornecedores.indexOf(f);
+      const docDigits = (f.documento || f.cnpj || '').replace(/\D/g, '');
+      const tipo = f.tipoDocumento || (docDigits.length === 11 ? 'CPF' : 'CNPJ');
+      const unid = f.unidade || f.uf || '';
+      const dir = f.diretoria || '';
+      return '<div class="dropdown-item" onmousedown="selecionarFornecedorLancamento(' + idx + ')">' +
+        '<div class="name">' + (f.razao || '(sem razao)') + '</div>' +
+        '<div class="meta">' + tipo + ': ' + (f.documento || f.cnpj || '—') +
+          (unid ? ' · ' + unid : '') + (dir ? ' · ' + dir : '') + '</div>' +
+        '</div>';
+    }).join('');
+  }
+  dropdown.classList.add('show');
+}
+
+function selecionarFornecedorLancamento(idx) {
+  const f = fornecedores[idx];
+  if (!f) return;
+  document.getElementById('frm-forn').value = idx;
+  document.getElementById('frm-forn-busca').value = (f.razao || '') + ' (' + (f.documento || f.cnpj || '') + ')';
+  fecharDropdownFornecedor();
+  onFornChange();
+}
+
+function fecharDropdownFornecedor() {
+  const dropdown = document.getElementById('frm-forn-dropdown');
+  if (dropdown) dropdown.classList.remove('show');
+}
 
 function onFornChange() {
   const idx = document.getElementById('frm-forn').value;
