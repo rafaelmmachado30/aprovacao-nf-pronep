@@ -24,7 +24,6 @@ const BASE_URL = 'https://purple-forest-09588fe10.7.azurestaticapps.net';
 const TEAMS_APP_ID = process.env.TEAMS_APP_ID || '5c52fce3-bf34-4b8c-a624-06defd5f85f6';
 const TEAMS_ENTITY_ID = 'aprovacao-nf-home';
 
-// Microsoft exige topic.webUrl no formato https://teams.microsoft.com/l/...
 function buildTeamsDeepLink(itemId) {
   const subEntityId = itemId ? 'nf-' + itemId : 'home';
   const context = JSON.stringify({ subEntityId: subEntityId });
@@ -53,7 +52,6 @@ async function resolverUserId(client, email) {
   return user.id;
 }
 
-// Cache em memoria pra nao consultar o catalogo a cada notif
 let _catalogAppIdCache = null;
 async function getCatalogAppId(client) {
   if (_catalogAppIdCache) return _catalogAppIdCache;
@@ -69,7 +67,6 @@ async function getCatalogAppId(client) {
 }
 
 async function garantirAppInstalada(client, userId, catalogAppId) {
-  // Lista apps instaladas pro user e procura a nossa
   try {
     const installed = await client.api('/users/' + userId + '/teamwork/installedApps')
       .expand('teamsApp')
@@ -80,10 +77,7 @@ async function garantirAppInstalada(client, userId, catalogAppId) {
       });
       if (ja) return 'already-installed';
     }
-  } catch (e) {
-    // Se a leitura falhar, tenta instalar mesmo assim
-  }
-  // Instala
+  } catch (e) {}
   await client.api('/users/' + userId + '/teamwork/installedApps').post({
     'teamsApp@odata.bind': 'https://graph.microsoft.com/v1.0/appCatalogs/teamsApps/' + catalogAppId
   });
@@ -132,7 +126,10 @@ function buildPayload(evento, dados) {
       webUrl: buildTeamsDeepLink(dados.itemId)
     },
     activityType: activityType,
-    previewText: { content: previewText }
+    previewText: { content: previewText },
+    templateParameters: [
+      { name: 'nfNumber', value: numero }
+    ]
   };
 }
 
@@ -147,13 +144,11 @@ async function enviarTeamsAtividade(evento, dados, aprovadorEmail) {
     const client = await getGraphClient();
     userId = await resolverUserId(client, aprovadorEmail);
 
-    // Garante que a Teams App esta instalada pro aprovador antes de notificar
     try {
       const catalogAppId = await getCatalogAppId(client);
       installStatus = await garantirAppInstalada(client, userId, catalogAppId);
     } catch (instErr) {
       installStatus = 'install-error: ' + (instErr.message || String(instErr));
-      // Continua mesmo assim: pode ser que ja esteja instalada e a leitura falhou
     }
 
     await client.api('/users/' + userId + '/teamwork/sendActivityNotification').post(payload);
