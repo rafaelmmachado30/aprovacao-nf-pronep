@@ -331,7 +331,7 @@ module.exports = async function (context, req) {
 
     // Dispara notificacao (nao-bloqueante) pro aprovador
     diag.step = 'notify';
-    await notificar('lancada', [aprovador.email], {
+    const notifResult = await notificar('lancada', [aprovador.email], {
       itemId: itemResp.id,    // <-- pra gerar links assinados nos botoes
       numero, fornecedor: fornecedorRazao, valor, vencimento,
       unidade, diretoria, aprovador: aprovador.nome,
@@ -339,6 +339,7 @@ module.exports = async function (context, req) {
       urlPDF: uploadResp.webUrl
     });
     diag.notificado = true;
+    diag.notifResult = notifResult;  // <-- expoe detalhe (email, teamsAtividade, teamsWebhook) pra debug
 
     context.res = {
       status: 200,
