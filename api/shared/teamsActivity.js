@@ -125,11 +125,6 @@ function buildPayload(evento, dados) {
     previewText = motivo ? 'Motivo: ' + motivo : 'Rejeitada por ' + aprovador;
   }
 
-  const templateParameters = [
-    { name: 'actor',    value: aprovador },
-    { name: 'nfNumber', value: numero }
-  ];
-
   return {
     topic: {
       source: 'text',
@@ -137,8 +132,7 @@ function buildPayload(evento, dados) {
       webUrl: buildTeamsDeepLink(dados.itemId)
     },
     activityType: activityType,
-    previewText: { content: previewText },
-    templateParameters: templateParameters
+    previewText: { content: previewText }
   };
 }
 
