@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
   "manifestVersion": "1.16",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "id": "5c52fce3-bf34-4b8c-a624-06defd5f85f6",
   "packageName": "br.com.pronep.aprovacao-nf",
   "developer": {
@@ -29,10 +29,14 @@
       "name": "Aprovacao NF",
       "contentUrl": "https://purple-forest-09588fe10.7.azurestaticapps.net/",
       "websiteUrl": "https://purple-forest-09588fe10.7.azurestaticapps.net/",
-      "scopes": ["personal"]
+      "scopes": [
+        "personal"
+      ]
     }
   ],
-  "permissions": ["identity"],
+  "permissions": [
+    "identity"
+  ],
   "validDomains": [
     "purple-forest-09588fe10.7.azurestaticapps.net"
   ],
