@@ -646,6 +646,31 @@ async function carregarFornecedoresReais() {
   }
 }
 
+async function carregarGestoresFinanceiroReais() {
+  try {
+    const r = await fetch('/api/ListarGestoresFinanceiro', { credentials: 'include' });
+    if (!r.ok) {
+      console.warn('[GestoresFinanceiro] HTTP ' + r.status);
+      return false;
+    }
+    const data = await r.json();
+    if (!data || !Array.isArray(data.membros)) return false;
+    // Sobrescreve gruposEntraID['PRONEP-Financeiro-Gestao'].membros com dados reais
+    if (gruposEntraID['PRONEP-Financeiro-Gestao']) {
+      gruposEntraID['PRONEP-Financeiro-Gestao'].membros = data.membros.map(m => ({
+        email: m.email,
+        nome: m.nome,
+        cargo: m.cargo || 'Gestor Financeiro'
+      }));
+    }
+    console.log('[GestoresFinanceiro] ' + data.membros.length + ' carregados');
+    return true;
+  } catch (e) {
+    console.warn('[GestoresFinanceiro] erro:', e && e.message);
+    return false;
+  }
+}
+
 async function carregarNotasReais() {
   try {
     const r = await fetch('/api/ListarNotas', { credentials: 'include' });
@@ -729,7 +754,7 @@ async function carregarDadosIniciais() {
   if (window._carregamentoEmAndamento) return window._carregamentoEmAndamento;
   window._carregamentoEmAndamento = (async () => {
     // Carrega fornecedores+diretorias PRIMEIRO (notas dependem do fornecedores pra mapping)
-    await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais()]);
+    await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais(), carregarGestoresFinanceiroReais()]);
     // Depois carrega as notas (que mapeiam fornecedorIdx pelo array de fornecedores)
     await carregarNotasReais();
     // Re-renderiza qualquer view que dependa de fornecedores/diretorias
@@ -831,16 +856,33 @@ function showView(id) {
   destroyAllCharts();
   const area = document.getElementById('content-area');
   area.innerHTML = views[id] ? views[id]() : '<div class="card">Tela em construção.</div>';
-  requestAnimationFrame(() => animateKPIs());
+  // Anima KPIs - tem que rodar APOS o DOM estar pronto
+  setTimeout(() => animateKPIs(), 30);
+  // Charts do dashboard - precisa de mais tempo pra canvas ter dimensao
   if (id === 'dashboard') {
-    requestAnimationFrame(() => mountDashboardCharts());
+    tentarMontarCharts(0);
   }
-  // Re-carrega notas em tempo real ao entrar em views que dependem do Status atual
-  // (caso o usuario tenha aprovado/rejeitado por email/Teams, sincroniza)
+  // Re-carrega notas em tempo real
   const viewsQueRecarregamNotas = ['fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','dashboard'];
   if (viewsQueRecarregamNotas.includes(id) && window._dadosCarregados && window._dadosCarregados.notas) {
     refreshNotasSilencioso();
   }
+}
+
+// Tenta montar charts com retry — espera canvas ter dimensao real (re-renders precisam disso)
+function tentarMontarCharts(tentativas) {
+  const canvas = document.getElementById('chart-diretoria');
+  if (!canvas) {
+    if (tentativas < 10) setTimeout(() => tentarMontarCharts(tentativas+1), 80);
+    return;
+  }
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) {
+    if (tentativas < 10) setTimeout(() => tentarMontarCharts(tentativas+1), 80);
+    return;
+  }
+  // Canvas pronto — monta charts
+  mountDashboardCharts();
 }
 
 // Recarrega notas em background SEM perder o render atual; re-render a view se houver diff
@@ -1272,7 +1314,7 @@ const views = {
                 </div>
                 <div id="frm-negociou-detalhe" style="display:none;margin-top:10px">
                   <label class="small" style="font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--cinza-medio)">Com qual gestor do Financeiro? *</label>
-                  <select id="frm-negociou-com" style="width:100%;padding:8px 12px;border:1.5px solid var(--cinza-borda);border-radius:5px;font-size:14px;margin-top:4px;background:#fff">
+                  <select id="frm-negociou-com" onchange="validarBotaoEnvio()" style="width:100%;padding:8px 12px;border:1.5px solid var(--cinza-borda);border-radius:5px;font-size:14px;margin-top:4px;background:#fff">
                     <option value="">— Selecione o gestor —</option>
                     ${gruposEntraID['PRONEP-Financeiro-Gestao'].membros.map(m =>
                       `<option value="${m.email}">${m.nome} · ${m.cargo}</option>`
@@ -2097,29 +2139,6 @@ function limpaFiltroFila() {
 
 function renderAprovadasView() {
   const f = window._filtroAprovadas;
-  let lista = notas.filter(n => n.status === 'aprovada');
-
-  // Aplica filtros
-  if (f.unidade !== 'TODAS') lista = lista.filter(n => n.unidade === f.unidade);
-  if (f.diretoria !== 'TODAS') lista = lista.filter(n => n.diretoria === f.diretoria);
-  if (f.aprovadoDe) lista = lista.filter(n => n.aprovadoEm && n.aprovadoEm.substring(0,10) >= f.aprovadoDe);
-  if (f.aprovadoAte) lista = lista.filter(n => n.aprovadoEm && n.aprovadoEm.substring(0,10) <= f.aprovadoAte);
-  if (f.vencimentoDe) lista = lista.filter(n => n.vencimento >= f.vencimentoDe);
-  if (f.vencimentoAte) lista = lista.filter(n => n.vencimento <= f.vencimentoAte);
-  if (f.busca) {
-    const q = f.busca.toLowerCase();
-    lista = lista.filter(n =>
-      n.id.toLowerCase().includes(q) ||
-      n.numero.toLowerCase().includes(q) ||
-      fornecedorOf(n).razao.toLowerCase().includes(q) ||
-      n.valor.toString().includes(q)
-    );
-  }
-  lista.sort((a,b) => b.aprovadoEm.localeCompare(a.aprovadoEm));
-
-  const algumFiltroAtivo = f.unidade !== 'TODAS' || f.diretoria !== 'TODAS' || f.aprovadoDe || f.aprovadoAte || f.vencimentoDe || f.vencimentoAte || f.busca;
-  const totalSemFiltro = notas.filter(n => n.status === 'aprovada').length;
-
   return `
     <h2>Notas Aprovadas</h2>
     <div class="view-sub">Documentos aprovados e arquivados em <span class="mono">SharePoint/Notas Aprovadas/{Unidade}/{Data}/</span>. Por padrão exibe apenas as aprovações do dia atual — limpe os filtros para ver o histórico completo.</div>
@@ -2160,11 +2179,7 @@ function renderAprovadasView() {
         <input id="fap-busca" type="search" placeholder="Nº NF, fornecedor, valor…" value="${f.busca}" oninput="aplicaFiltroAprovadas()">
       </div>
       <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;margin-top:4px">
-        <div class="small muted">
-          ${algumFiltroAtivo
-            ? `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s) com os filtros aplicados <span class="muted">(de ${totalSemFiltro} no total)</span>`
-            : `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s)`}
-        </div>
+        <div id="fap-counter" class="small muted"></div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-secondary" onclick="limpaFiltroAprovadas()">✕ Limpar filtros</button>
           <button class="btn btn-secondary" onclick="exportXlsxStub()">⤓ Excel</button>
@@ -2172,52 +2187,100 @@ function renderAprovadasView() {
       </div>
     </div>
 
+    <div id="fap-table-area">${renderAprovadasTable()}</div>
+  `;
+}
+
+// Filtra notas aprovadas conforme o filtro atual
+function calcularAprovadasFiltradas() {
+  const f = window._filtroAprovadas;
+  let lista = notas.filter(n => n.status === 'aprovada');
+  if (f.unidade !== 'TODAS') lista = lista.filter(n => n.unidade === f.unidade);
+  if (f.diretoria !== 'TODAS') lista = lista.filter(n => n.diretoria === f.diretoria);
+  if (f.aprovadoDe) lista = lista.filter(n => n.aprovadoEm && n.aprovadoEm.substring(0,10) >= f.aprovadoDe);
+  if (f.aprovadoAte) lista = lista.filter(n => n.aprovadoEm && n.aprovadoEm.substring(0,10) <= f.aprovadoAte);
+  if (f.vencimentoDe) lista = lista.filter(n => n.vencimento >= f.vencimentoDe);
+  if (f.vencimentoAte) lista = lista.filter(n => n.vencimento <= f.vencimentoAte);
+  if (f.busca) {
+    const q = f.busca.toLowerCase();
+    lista = lista.filter(n =>
+      (n.id || '').toLowerCase().includes(q) ||
+      (n.numero || '').toLowerCase().includes(q) ||
+      ((fornecedorOf(n)||{}).razao || '').toLowerCase().includes(q) ||
+      String(n.valor || '').includes(q)
+    );
+  }
+  lista.sort((a,b) => (b.aprovadoEm||'').localeCompare(a.aprovadoEm||''));
+  return lista;
+}
+
+// Renderiza so a tabela e o counter (preserva foco do input)
+function renderAprovadasTable() {
+  const f = window._filtroAprovadas;
+  const lista = calcularAprovadasFiltradas();
+  const totalSemFiltro = notas.filter(n => n.status === 'aprovada').length;
+  const algumFiltroAtivo = f.unidade !== 'TODAS' || f.diretoria !== 'TODAS' || f.aprovadoDe || f.aprovadoAte || f.vencimentoDe || f.vencimentoAte || f.busca;
+
+  return `
     <div class="card">
+      <div class="small muted" style="margin-bottom:8px">
+        ${algumFiltroAtivo
+          ? `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s) com filtros aplicados <span class="muted">(de ${totalSemFiltro} no total)</span>`
+          : `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s)`}
+      </div>
       <table class="data">
         <thead><tr><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Solicitante</th><th>Aprovador</th><th>Aprovado em</th><th>Vencimento</th><th class="center">PDF</th></tr></thead>
         <tbody>
           ${lista.length === 0 ? `<tr><td colspan="10" style="text-align:center;padding:30px" class="muted">Nenhuma nota encontrada com os filtros atuais. <a href="#" onclick="event.preventDefault();limpaFiltroAprovadas()">Limpar filtros →</a></td></tr>` :
-          lista.map(n => {
-            // Sinalização: vencimento < D+5 a partir da data de aprovação
-            const apData = new Date(n.aprovadoEm.substring(0,10) + 'T00:00:00');
-            const vencData = new Date(n.vencimento + 'T00:00:00');
-            const diasAteVenc = Math.round((vencData - apData) / (1000*60*60*24));
-            const vencForaPrazo = diasAteVenc < 5;
+          lista.slice(0, 500).map(n => {
+            const apData = n.aprovadoEm ? new Date((n.aprovadoEm||'').substring(0,10) + 'T00:00:00') : null;
+            const vencData = n.vencimento ? new Date(n.vencimento + 'T00:00:00') : null;
+            const diasAteVenc = (apData && vencData) ? Math.round((vencData - apData) / (1000*60*60*24)) : null;
+            const vencForaPrazo = diasAteVenc !== null && diasAteVenc < 5;
             return `
               <tr${vencForaPrazo ? ' style="background:#FFF5F5"' : ''}>
-                <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero}</span></td>
-                <td>${fornecedorOf(n).razao}</td>
-                <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
-                <td>${n.diretoria}</td>
+                <td><b>${n.id||''}</b><br><span class="small muted">Nº ${n.numero||''}</span></td>
+                <td>${(fornecedorOf(n)||{}).razao || '—'}</td>
+                <td>${n.unidade ? `<span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span>` : '—'}</td>
+                <td>${n.diretoria||'—'}</td>
                 <td class="num"><b>${fmtBRL(n.valor)}</b></td>
-                <td><b>${n.lancadoPor}</b><br><span class="small muted">${n.lancadoEm}</span></td>
-                <td>${n.aprovadoPor}</td>
-                <td>${n.aprovadoEm}</td>
-                <td>
-                  ${vencForaPrazo
-                    ? `<b style="color:var(--vermelho)" title="Vencimento ${diasAteVenc} dia(s) após aprovação — fora do prazo D+5">⚠ ${fmtDate(n.vencimento)}</b><br><span class="small" style="color:var(--vermelho)">${diasAteVenc} dia(s) após aprov.</span>`
-                    : `${fmtDate(n.vencimento)}<br><span class="small muted">${diasAteVenc} dia(s) após aprov.</span>`}
+                <td><b>${n.lancadoPor||''}</b><br><span class="small muted">${n.lancadoEm||''}</span></td>
+                <td>${n.aprovadoPor||'—'}</td>
+                <td>${n.aprovadoEm||'—'}</td>
+                <td>${diasAteVenc !== null
+                    ? (vencForaPrazo
+                      ? `<b style="color:var(--vermelho)">⚠ ${fmtDate(n.vencimento)}</b><br><span class="small" style="color:var(--vermelho)">${diasAteVenc} dia(s) após aprov.</span>`
+                      : `${fmtDate(n.vencimento)}<br><span class="small muted">${diasAteVenc} dia(s) após aprov.</span>`)
+                    : (n.vencimento ? fmtDate(n.vencimento) : '—')}
                 </td>
                 <td class="center"><button class="icon-btn" onclick="openApprovedPdf('${n.id}')">Ver</button></td>
               </tr>
             `;
           }).join('')}
+          ${lista.length > 500 ? `<tr><td colspan="10" class="center muted" style="padding:14px;font-style:italic">Mostrando 500 de ${lista.length}. Refine os filtros.</td></tr>` : ''}
         </tbody>
       </table>
     </div>
   `;
 }
 
+let _filtroAprovDebounce = null;
 function aplicaFiltroAprovadas() {
   const f = window._filtroAprovadas;
-  f.unidade      = document.getElementById('fap-unidade').value;
-  f.diretoria    = document.getElementById('fap-diretoria').value;
-  f.aprovadoDe   = document.getElementById('fap-aprovDe').value;
-  f.aprovadoAte  = document.getElementById('fap-aprovAte').value;
-  f.vencimentoDe  = document.getElementById('fap-vencDe').value;
-  f.vencimentoAte = document.getElementById('fap-vencAte').value;
-  f.busca        = document.getElementById('fap-busca').value;
-  document.getElementById('content-area').innerHTML = renderAprovadasView();
+  const id = (i) => document.getElementById(i);
+  if (id('fap-unidade'))   f.unidade      = id('fap-unidade').value;
+  if (id('fap-diretoria')) f.diretoria    = id('fap-diretoria').value;
+  if (id('fap-aprovDe'))   f.aprovadoDe   = id('fap-aprovDe').value;
+  if (id('fap-aprovAte'))  f.aprovadoAte  = id('fap-aprovAte').value;
+  if (id('fap-vencDe'))    f.vencimentoDe  = id('fap-vencDe').value;
+  if (id('fap-vencAte'))   f.vencimentoAte = id('fap-vencAte').value;
+  if (id('fap-busca'))     f.busca        = id('fap-busca').value;
+  // Re-renderiza SO a tabela. Input mantem foco.
+  clearTimeout(_filtroAprovDebounce);
+  _filtroAprovDebounce = setTimeout(() => {
+    const area = document.getElementById('fap-table-area');
+    if (area) area.innerHTML = renderAprovadasTable();
+  }, 150);
 }
 
 function limpaFiltroAprovadas() {
@@ -2535,11 +2598,11 @@ function onVencChange() {
     vencEl.style.borderColor = '';
     info.innerHTML = '';
     blocoForaPrazo.style.display = 'none';
+    validarBotaoEnvio();
     return;
   }
   const venc = new Date(vencEl.value + 'T00:00:00');
   const dias = diasEntre(HOJE, venc);
-
   if (dias < 5) {
     vencEl.style.color = 'var(--vermelho)';
     vencEl.style.borderColor = 'var(--vermelho)';
@@ -2552,10 +2615,10 @@ function onVencChange() {
     vencEl.style.fontWeight = '500';
     info.innerHTML = `<span style="color:var(--verde);font-weight:500">✓ ${dias} dia(s) até o vencimento — dentro do prazo</span>`;
     blocoForaPrazo.style.display = 'none';
-    // limpa rádios
     document.querySelectorAll('input[name="frm-negociou"]').forEach(r => r.checked = false);
     document.getElementById('frm-negociou-detalhe').style.display = 'none';
   }
+  validarBotaoEnvio();
 }
 
 function onNegociouChange() {
@@ -2565,6 +2628,45 @@ function onNegociouChange() {
     detalhe.style.display = 'block';
   } else {
     detalhe.style.display = 'none';
+  }
+  validarBotaoEnvio();
+}
+
+// Valida se botao Enviar deve estar habilitado conforme regras de prazo + negociacao
+function validarBotaoEnvio() {
+  const btn = document.getElementById('btn-enviar-nf');
+  if (!btn) return;
+  const vencEl = document.getElementById('frm-venc');
+  const venc = vencEl && vencEl.value ? new Date(vencEl.value + 'T00:00:00') : null;
+  const dentroDoPrazo = !venc || diasEntre(HOJE, venc) >= 5;
+  let podeEnviar = true;
+  let motivoBloqueio = '';
+  if (!dentroDoPrazo) {
+    const negociou = document.querySelector('input[name="frm-negociou"]:checked');
+    if (!negociou) {
+      podeEnviar = false;
+      motivoBloqueio = 'Vencimento fora do prazo: responda se já negociou com o Financeiro';
+    } else if (negociou.value === 'nao') {
+      podeEnviar = false;
+      motivoBloqueio = 'Vencimento fora do prazo sem negociação prévia — lançamento bloqueado';
+    } else if (negociou.value === 'sim') {
+      const com = document.getElementById('frm-negociou-com');
+      if (!com || !com.value) {
+        podeEnviar = false;
+        motivoBloqueio = 'Selecione com qual gestor do Financeiro negociou';
+      }
+    }
+  }
+  if (podeEnviar) {
+    btn.disabled = false;
+    btn.style.opacity = '';
+    btn.style.cursor = '';
+    btn.title = '';
+  } else {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+    btn.style.cursor = 'not-allowed';
+    btn.title = motivoBloqueio;
   }
 }
 
@@ -2816,9 +2918,14 @@ function openNFDetail(id) {
       <tr><th>Lançado por</th><td>${n.lancadoPor} em ${n.lancadoEm}</td></tr>
       <tr><th>Hash SHA-256</th><td class="mono small">${n.hash}</td></tr>
     </table>
-    <div class="modal-pdf-preview">
-      [ Preview do PDF da NF — em produção renderizado via iframe do Graph API ]
-    </div>
+    ${n.urlPDF ? `
+    <div style="background:var(--azul-soft);border:1px solid var(--cinza-borda);border-radius:8px;padding:24px;text-align:center;margin:14px 0">
+      <div style="font-size:42px;line-height:1;margin-bottom:6px">📄</div>
+      <div style="color:var(--azul-escuro);font-weight:600;margin-bottom:6px">PDF disponível no SharePoint</div>
+      <div class="small muted" style="margin-bottom:12px">Recomendamos visualizar o PDF antes de aprovar ou rejeitar.</div>
+      <a href="${n.urlPDF}" target="_blank" rel="noopener" class="btn btn-primary" style="text-decoration:none">📄 Abrir PDF em nova aba</a>
+    </div>` : `
+    <div class="modal-pdf-preview">[ PDF não disponível — verifique no SharePoint diretamente ]</div>`}
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
       <button class="btn btn-danger" onclick="closeModal();confirmReject('${id}')">✕ Rejeitar</button>
@@ -3031,15 +3138,18 @@ function openApprovedPdf(id) {
     <h3>${n.id} — Aprovada</h3>
     <p class="muted small" style="margin-bottom:8px">PDF arquivado em <span class="mono">${pathLegivel}</span></p>
 
-    <!-- Embed do PDF via iframe direto do SharePoint (autenticacao via cookie do navegador) -->
-    <div style="margin:12px 0;border:1px solid var(--cinza-borda);border-radius:6px;overflow:hidden;background:#fff">
-      <iframe src="${urlPDF}" style="width:100%;height:600px;border:0;display:block" title="PDF aprovado"></iframe>
+    <div style="background:#E8F5E9;border:1px solid #C8E6C9;border-radius:8px;padding:24px;text-align:center;margin:14px 0">
+      <div style="font-size:48px;line-height:1;margin-bottom:8px">📄</div>
+      <div style="color:#2E7D32;font-weight:600;font-size:15px;margin-bottom:4px">PDF aprovado com watermark</div>
+      <div class="small muted" style="margin-bottom:14px">Arquivo armazenado no SharePoint da Pronep · acesso autenticado via Microsoft.</div>
+      <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap">
+        <a href="${urlPDF}" target="_blank" rel="noopener" class="btn btn-primary" style="text-decoration:none">📄 Abrir PDF em nova aba</a>
+        <a href="${urlPDF}" download class="btn btn-secondary" style="text-decoration:none">⤓ Baixar PDF</a>
+      </div>
     </div>
 
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
-      <a href="${urlPDF}" target="_blank" rel="noopener" class="btn btn-secondary" style="text-decoration:none">⤴ Abrir em nova aba</a>
-      <a href="${urlPDF}&download=1" download class="btn btn-primary" style="text-decoration:none">⤓ Baixar PDF</a>
     </div>
   `);
 }
