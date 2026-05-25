@@ -2921,14 +2921,16 @@ function openNFDetail(id) {
       <tr><th>Lançado por</th><td>${n.lancadoPor} em ${n.lancadoEm}</td></tr>
       <tr><th>Hash SHA-256</th><td class="mono small">${n.hash}</td></tr>
     </table>
-    ${n.urlPDF ? `
     <div style="background:var(--azul-soft);border:1px solid var(--cinza-borda);border-radius:8px;padding:24px;text-align:center;margin:14px 0">
       <div style="font-size:42px;line-height:1;margin-bottom:6px">📄</div>
       <div style="color:var(--azul-escuro);font-weight:600;margin-bottom:6px">PDF disponível no SharePoint</div>
       <div class="small muted" style="margin-bottom:12px">Recomendamos visualizar o PDF antes de aprovar ou rejeitar.</div>
-      <a href="${n.urlPDF}" target="_blank" rel="noopener" class="btn btn-primary" style="text-decoration:none">📄 Abrir PDF em nova aba</a>
-    </div>` : `
-    <div class="modal-pdf-preview">[ PDF não disponível — verifique no SharePoint diretamente ]</div>`}
+      ${(n.spId || String(n.id||'').replace(/^NF-/,'')) ? `
+        <a href="/api/AbrirPdfDaNota?id=${n.spId || String(n.id||'').replace(/^NF-/,'')}" target="_blank" rel="noopener" class="btn btn-primary" style="text-decoration:none">📄 Abrir PDF em nova aba</a>
+      ` : `
+        <div class="small muted">NF sem ID do SharePoint — abra direto no SP em SharePoint/Notas Fiscais/Pendentes/${n.unidade||'—'}/Diretoria ${n.diretoria||'—'}/</div>
+      `}
+    </div>
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
       <button class="btn btn-danger" onclick="closeModal();confirmReject('${id}')">✕ Rejeitar</button>
@@ -3127,10 +3129,17 @@ function openApprovedPdf(id) {
   const pathLegivel = `SharePoint/Notas Aprovadas/${n.unidade || '—'}/${dataApr}/`;
 
   if (!urlPDF) {
+    // Fallback: usa /api/AbrirPdfDaNota que acha o PDF nas pastas SP
+    const spId = n.spId || String(n.id||'').replace(/^NF-/,'');
     openModal(`
       <span class="close-x" onclick="closeModal()">×</span>
       <h3>${n.id} — Aprovada</h3>
-      <div class="alert alert-error" style="margin:14px 0"><span class="ico">!</span><div>PDF nao tem URL armazenada nesta NF. Isso pode acontecer com NFs antigas, antes de gravarmos o link no item da lista.<br><br>Verifique manualmente em <span class="mono">${pathLegivel}</span></div></div>
+      <p class="muted small" style="margin-bottom:8px">PDF arquivado em <span class="mono">${pathLegivel}</span></p>
+      <div style="background:#E8F5E9;border:1px solid #C8E6C9;border-radius:8px;padding:24px;text-align:center;margin:14px 0">
+        <div style="font-size:48px;line-height:1;margin-bottom:8px">📄</div>
+        <div style="color:#2E7D32;font-weight:600;font-size:15px;margin-bottom:14px">Buscar PDF no SharePoint</div>
+        ${spId ? `<a href="/api/AbrirPdfDaNota?id=${spId}" target="_blank" rel="noopener" class="btn btn-primary" style="text-decoration:none">📄 Abrir PDF em nova aba</a>` : '<div class="small muted">NF sem ID do SharePoint</div>'}
+      </div>
       <div class="btn-row"><button class="btn btn-secondary" onclick="closeModal()">Fechar</button></div>
     `);
     return;
