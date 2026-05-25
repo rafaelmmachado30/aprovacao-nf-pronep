@@ -16,6 +16,9 @@
 
     { "route": "/sem-acesso",     "allowedRoles": ["anonymous", "authenticated"] },
     { "route": "/sem-acesso.html","allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/teams-login.html",         "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/teams-auth-callback.html", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/vendor/*",                 "allowedRoles": ["anonymous", "authenticated"] },
 
     { "route": "/api/*", "allowedRoles": ["authenticated"] },
     { "route": "/*",     "allowedRoles": ["authenticated"] }

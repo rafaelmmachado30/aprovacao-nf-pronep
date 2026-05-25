@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Aprovacao NF - Login completo</title>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #F4F8FB; color: #2C3E50; margin: 0; padding: 40px; text-align: center; }
+  .box { max-width: 360px; margin: 40px auto; background: #fff; border-radius: 10px; padding: 32px; box-shadow: 0 4px 16px rgba(31,78,121,0.08); }
+  .ok { font-size: 48px; color: #2E7D32; margin: 12px 0; }
+  .msg { color: #647883; font-size: 14px; line-height: 1.5; margin-top: 12px; }
+</style>
+<script src="/vendor/teams-js.min.js"></script>
+</head>
+<body>
+<div class="box">
+  <div class="ok">✓</div>
+  <div style="font-weight:600">Login concluido</div>
+  <div class="msg">Esta janela vai fechar automaticamente.</div>
+</div>
+<script>
+// O Easy Auth nos redirecionou pra ca apos o login com sucesso.
+// Notifica o Teams (que abriu este popup) e fecha.
+window.addEventListener('load', function () {
+  try {
+    microsoftTeams.app.initialize().then(function () {
+      microsoftTeams.authentication.notifySuccess('logged-in');
+    }).catch(function (e) {
+      console.warn('[Teams callback] initialize falhou:', e);
+      // Fallback: tenta v1 API
+      try { microsoftTeams.authentication.notifySuccess('logged-in'); } catch(e2) {}
+      setTimeout(function () { window.close(); }, 1500);
+    });
+  } catch (e) {
+    console.warn('[Teams callback] erro:', e);
+    setTimeout(function () { window.close(); }, 1500);
+  }
+});
+</script>
+</body>
+</html>

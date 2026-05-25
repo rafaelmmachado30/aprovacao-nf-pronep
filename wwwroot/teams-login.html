@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Aprovacao NF - Login Teams</title>
+<style>
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #F4F8FB; color: #2C3E50; margin: 0; padding: 40px; text-align: center; }
+  .box { max-width: 360px; margin: 40px auto; background: #fff; border-radius: 10px; padding: 32px; box-shadow: 0 4px 16px rgba(31,78,121,0.08); }
+  .logo { font-size: 32px; color: #1F4E79; margin-bottom: 8px; font-weight: 700; }
+  .msg { color: #647883; font-size: 14px; line-height: 1.5; }
+  .spinner { display: inline-block; width: 24px; height: 24px; border: 3px solid #E6F2F9; border-top-color: #27AAE1; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 16px 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="logo">P</div>
+  <div style="font-weight:600;margin-bottom:12px">Aprovacao NF</div>
+  <div class="spinner"></div>
+  <div class="msg">Conectando com o Microsoft 365...</div>
+</div>
+<script>
+// Esta pagina eh aberta como POPUP pelo Teams (via authentication.authenticate).
+// Ela redireciona pro Easy Auth login. Quando o login termina,
+// o Easy Auth redireciona pra /teams-auth-callback.html que fecha o popup.
+window.addEventListener('load', function () {
+  var callback = window.location.origin + '/teams-auth-callback.html';
+  // Easy Auth do SWA loga o usuario e redireciona pra URL definida em post_login_redirect_uri
+  window.location.replace('/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(callback));
+});
+</script>
+</body>
+</html>

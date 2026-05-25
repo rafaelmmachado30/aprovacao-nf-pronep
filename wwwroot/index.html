@@ -624,8 +624,47 @@ async function initTeamsContext() {
       window._teamsContext.nfIdToOpen = sub.replace('nf-', '');
     }
     console.log('[Teams] Rodando dentro do Teams. subEntityId=' + sub + ', nfIdToOpen=' + window._teamsContext.nfIdToOpen);
+    // Verifica se ja temos sessao Easy Auth. Se nao, dispara popup de login Teams.
+    await garantirSessaoNoTeams();
   } catch (e) {
     console.log('[Teams] Nao esta dentro do Teams (rodando no browser):', e && e.message);
+  }
+}
+
+// Dentro do iframe do Teams, garante que existe uma sessao Easy Auth.
+// Se nao existir, abre popup pelo SDK do Teams que faz o login e depois fecha.
+async function garantirSessaoNoTeams() {
+  try {
+    const r = await fetch('/.auth/me', { credentials: 'include' });
+    if (r.ok) {
+      const data = await r.json();
+      if (data && data.clientPrincipal && data.clientPrincipal.userId) {
+        console.log('[Teams Auth] Sessao Easy Auth ja existe pra ' + (data.clientPrincipal.userDetails || '?'));
+        return;
+      }
+    }
+  } catch (e) {}
+  console.log('[Teams Auth] Sem sessao no iframe, abrindo popup de login...');
+  try {
+    await new Promise(function (resolve, reject) {
+      window.microsoftTeams.authentication.authenticate({
+        url: window.location.origin + '/teams-login.html',
+        width: 480,
+        height: 640,
+        successCallback: function (result) {
+          console.log('[Teams Auth] Login OK:', result);
+          resolve(result);
+        },
+        failureCallback: function (err) {
+          console.warn('[Teams Auth] Login falhou:', err);
+          reject(err);
+        }
+      });
+    });
+    console.log('[Teams Auth] Recarregando iframe com sessao...');
+    window.location.reload();
+  } catch (popupErr) {
+    console.warn('[Teams Auth] Popup auth falhou. Usuario sem sessao no Teams iframe:', popupErr);
   }
 }
 

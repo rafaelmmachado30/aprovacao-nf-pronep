@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
   "manifestVersion": "1.16",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "id": "5c52fce3-bf34-4b8c-a624-06defd5f85f6",
   "packageName": "br.com.pronep.aprovacao-nf",
   "developer": {
@@ -38,24 +38,24 @@
   ],
   "webApplicationInfo": {
     "id": "85f7fa68-a241-4caf-803f-9991bd1f0eee",
-    "resource": "https://purple-forest-09588fe10.7.azurestaticapps.net"
+    "resource": "api://purple-forest-09588fe10.7.azurestaticapps.net/85f7fa68-a241-4caf-803f-9991bd1f0eee"
   },
   "activities": {
     "activityTypes": [
       {
         "type": "approvalRequired",
         "description": "Nova NF aguardando aprovacao",
-        "templateText": "{actor} - NF {nfNumber} aguardando sua aprovacao"
+        "templateText": "NF {nfNumber} aguardando sua aprovacao"
       },
       {
         "type": "nfAprovada",
         "description": "NF aprovada",
-        "templateText": "Sua NF {nfNumber} foi APROVADA por {actor}"
+        "templateText": "Sua NF {nfNumber} foi APROVADA"
       },
       {
         "type": "nfRejeitada",
         "description": "NF rejeitada",
-        "templateText": "Sua NF {nfNumber} foi REJEITADA por {actor}"
+        "templateText": "Sua NF {nfNumber} foi REJEITADA"
       }
     ]
   }
