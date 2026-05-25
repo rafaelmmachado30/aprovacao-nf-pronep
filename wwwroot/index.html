@@ -929,8 +929,20 @@ function destroyChart(id) {
 }
 
 function mountDashboardCharts() {
-  if (!window.Chart || !window._dashData) return;
+  console.log('[Charts] mountDashboardCharts chamado');
+  if (!window.Chart) { console.warn('[Charts] window.Chart eh undefined - Chart.js nao carregou'); return; }
+  if (!window._dashData) { console.warn('[Charts] window._dashData eh undefined'); return; }
   const data = window._dashData;
+  console.log('[Charts] _dashData:', JSON.stringify({
+    barEntries: data.barEntries.length, byUnit: Object.keys(data.byUnit), monthly: data.monthly.length
+  }));
+  const canvas = document.getElementById('chart-diretoria');
+  if (canvas) {
+    const rect = canvas.getBoundingClientRect();
+    console.log('[Charts] canvas chart-diretoria existe. Dimensao:', rect.width, 'x', rect.height);
+  } else {
+    console.warn('[Charts] canvas chart-diretoria NAO existe no DOM');
+  }
 
   // === BAR HORIZONTAL: Valor por Diretoria ===
   const canvasBar = document.getElementById('chart-diretoria');
