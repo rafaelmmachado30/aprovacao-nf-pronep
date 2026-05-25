@@ -1,6 +1,16 @@
 /**
  * Envio de notificacao Teams 1:1 via Graph API (sendActivityNotification)
  * Substitui o webhook depreciated do Power Automate.
+ *
+ * Garante que a Teams App esteja instalada no Teams pessoal do aprovador
+ * antes de enviar a notificacao (requerido pelo sendActivityNotification).
+ *
+ * Permissoes Application requeridas:
+ *   - TeamsActivity.Send
+ *   - TeamsAppInstallation.ReadWriteForUser.All
+ *   - AppCatalog.Read.All
+ *   - User.Read.All
+ *
  * Doc: https://learn.microsoft.com/graph/teams-send-activityfeednotifications
  */
 
@@ -41,6 +51,43 @@ async function resolverUserId(client, email) {
   const user = await client.api('/users/' + encodeURIComponent(email)).select('id,mail,userPrincipalName').get();
   if (!user || !user.id) throw new Error('Usuario nao encontrado: ' + email);
   return user.id;
+}
+
+// Cache em memoria pra nao consultar o catalogo a cada notif
+let _catalogAppIdCache = null;
+async function getCatalogAppId(client) {
+  if (_catalogAppIdCache) return _catalogAppIdCache;
+  const r = await client.api('/appCatalogs/teamsApps')
+    .filter("externalId eq '" + TEAMS_APP_ID + "'")
+    .select('id,displayName,externalId,distributionMethod')
+    .get();
+  if (!r || !r.value || r.value.length === 0) {
+    throw new Error('Teams App nao encontrada no catalogo do tenant. externalId=' + TEAMS_APP_ID);
+  }
+  _catalogAppIdCache = r.value[0].id;
+  return _catalogAppIdCache;
+}
+
+async function garantirAppInstalada(client, userId, catalogAppId) {
+  // Lista apps instaladas pro user e procura a nossa
+  try {
+    const installed = await client.api('/users/' + userId + '/teamwork/installedApps')
+      .expand('teamsApp')
+      .get();
+    if (installed && installed.value) {
+      const ja = installed.value.find(function (x) {
+        return x.teamsApp && x.teamsApp.id === catalogAppId;
+      });
+      if (ja) return 'already-installed';
+    }
+  } catch (e) {
+    // Se a leitura falhar, tenta instalar mesmo assim
+  }
+  // Instala
+  await client.api('/users/' + userId + '/teamwork/installedApps').post({
+    'teamsApp@odata.bind': 'https://graph.microsoft.com/v1.0/appCatalogs/teamsApps/' + catalogAppId
+  });
+  return 'just-installed';
 }
 
 function fmtBRL(v) {
@@ -100,11 +147,29 @@ async function enviarTeamsAtividade(evento, dados, aprovadorEmail) {
   if (!payload) return { ok: false, skipped: true, reason: 'Evento sem mapeamento: ' + evento };
   if (!aprovadorEmail) return { ok: false, skipped: true, reason: 'Email do aprovador vazio' };
 
+  let installStatus = 'not-attempted';
+  let userId = null;
   try {
     const client = await getGraphClient();
-    const userId = await resolverUserId(client, aprovadorEmail);
+    userId = await resolverUserId(client, aprovadorEmail);
+
+    // Garante que a Teams App esta instalada pro aprovador antes de notificar
+    try {
+      const catalogAppId = await getCatalogAppId(client);
+      installStatus = await garantirAppInstalada(client, userId, catalogAppId);
+    } catch (instErr) {
+      installStatus = 'install-error: ' + (instErr.message || String(instErr));
+      // Continua mesmo assim: pode ser que ja esteja instalada e a leitura falhou
+    }
+
     await client.api('/users/' + userId + '/teamwork/sendActivityNotification').post(payload);
-    return { ok: true, sentTo: aprovadorEmail, userId: userId, activityType: payload.activityType };
+    return {
+      ok: true,
+      sentTo: aprovadorEmail,
+      userId: userId,
+      activityType: payload.activityType,
+      installStatus: installStatus
+    };
   } catch (err) {
     return {
       ok: false,
@@ -112,9 +177,18 @@ async function enviarTeamsAtividade(evento, dados, aprovadorEmail) {
       error: err.message,
       body: err.body,
       sentTo: aprovadorEmail,
-      activityType: payload.activityType
+      userId: userId,
+      activityType: payload.activityType,
+      installStatus: installStatus
     };
   }
 }
 
-module.exports = { enviarTeamsAtividade, buildPayload, buildTeamsDeepLink, mapearEvento };
+module.exports = {
+  enviarTeamsAtividade,
+  buildPayload,
+  buildTeamsDeepLink,
+  mapearEvento,
+  getCatalogAppId,
+  garantirAppInstalada
+};

@@ -8,15 +8,20 @@ Quando funcionar, o aprovador recebe uma notificação no sino do Teams (bell ic
 
 ## 3 ações que VOCÊ precisa fazer
 
-### Ação 1 — Adicionar permissão no App Registration
+### Ação 1 — Adicionar permissões no App Registration
 
 1. Abre o Azure Portal → **Microsoft Entra ID** → **App registrations**
-2. Procura o App Reg que já usa (o do `AAD_CLIENT_ID`)
+2. Procura o App Reg que já usa (Client ID `85f7fa68-a241-4caf-803f-9991bd1f0eee`)
 3. Lateral esquerda → **API permissions** → **Add a permission**
 4. Escolhe **Microsoft Graph** → **Application permissions**
-5. Procura `TeamsActivity.Send` → marca → **Add permissions**
+5. Adiciona **3 permissões** (uma de cada vez):
+   - `TeamsActivity.Send`
+   - `TeamsAppInstallation.ReadWriteForUser.All`
+   - `AppCatalog.Read.All`
 6. De volta na tela de permissions, clica **Grant admin consent for Pronep** (botão azul no topo)
-7. Confirma. A permissão deve ficar com check verde ✓ na coluna "Status"
+7. Confirma. As 3 permissões devem ficar com check verde ✓ na coluna "Status"
+
+> Se você já tinha adicionado só `TeamsActivity.Send` antes, precisa adicionar as outras 2 agora. Elas são pra instalar automaticamente a Teams App no Teams pessoal de cada aprovador quando for notificá-lo (requerido pelo Microsoft Graph).
 
 ### Ação 2 — Anotar o Client ID do App Reg
 
