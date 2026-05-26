@@ -697,8 +697,9 @@ function instalarInterceptorFetch() {
       if (isApi && window._teamsAuthToken) {
         init = init || {};
         init.headers = new Headers(init.headers || {});
-        if (!init.headers.has('Authorization')) {
-          init.headers.set('Authorization', 'Bearer ' + window._teamsAuthToken);
+        // X-Teams-Token: header custom pra evitar que SWA Easy Auth sobrescreva
+        if (!init.headers.has('X-Teams-Token')) {
+          init.headers.set('X-Teams-Token', window._teamsAuthToken);
         }
       }
     } catch (e) { console.warn('[fetch interceptor] erro:', e); }

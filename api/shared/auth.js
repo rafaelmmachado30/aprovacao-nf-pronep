@@ -93,9 +93,18 @@ function userFromEasyAuth(req) {
 }
 
 async function userFromTeamsToken(req) {
-  const auth = req.headers && (req.headers.authorization || req.headers.Authorization);
-  if (!auth || !auth.startsWith('Bearer ')) return null;
-  const token = auth.substring(7).trim();
+  // IMPORTANTE: SWA Easy Auth SUBSTITUI o header Authorization por token interno do Azure
+  // (aud=azurewebsites.net/azurefunctions). Por isso usamos header custom X-Teams-Token
+  // pra o token MSAL do Teams passar intacto.
+  let token = null;
+  if (req.headers) {
+    token = req.headers['x-teams-token'] || req.headers['X-Teams-Token'] || null;
+  }
+  // Fallback: tentar Authorization Bearer (caso o SWA nao toque no header)
+  if (!token && req.headers) {
+    const auth = req.headers.authorization || req.headers.Authorization;
+    if (auth && auth.startsWith('Bearer ')) token = auth.substring(7).trim();
+  }
   if (!token) return null;
   // Decodifica payload sem validar (pra log/debug)
   let unverifiedPayload = null;
