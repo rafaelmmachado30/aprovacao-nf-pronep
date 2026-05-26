@@ -76,7 +76,20 @@ async function getColumnMap(client, siteId, listId) {
     else if (col.calculated)     detectedType = 'calculated';
     else if (col.lookup)         detectedType = 'lookup';
     else if (col.text)           detectedType = 'text';
+
+    // OVERRIDE HARDCODED: Graph API as vezes nao retorna hyperlinkOrPicture truthy pra
+    // colunas Hyperlink criadas via UI classica. Forcar hyperlink pelo nome conhecido.
+    if (col.name === 'UrlPDF' || col.name === 'UrlPDFAprovado'
+        || col.displayName === 'UrlPDF' || col.displayName === 'UrlPDFAprovado') {
+      detectedType = 'hyperlink';
+    }
+
     types[col.name] = detectedType;
+    // Debug: guardar as propriedades RAW dessas 2 colunas pra inspecionar via diag
+    if (col.name === 'UrlPDF' || col.name === 'UrlPDFAprovado') {
+      if (!cache.colRaw) cache.colRaw = {};
+      cache.colRaw[col.name] = Object.keys(col);
+    }
   }
   cache.colMap = map;
   cache.colTypes = types;
@@ -267,6 +280,7 @@ module.exports = async function (context, req) {
     const colMap = await getColumnMap(client, siteId, listNotasId);
     diag.colMap = colMap;
     diag.colTypes = cache.colTypes;
+    diag.colRaw = cache.colRaw;
 
     diag.step = 'create_list_item';
     // Title = "NF {numero}" ou descricao se nao tem numero
