@@ -112,8 +112,17 @@ function formatByType(internalName, value) {
   const t = (cache.colTypes && cache.colTypes[internalName]) || 'text';
   if (value === null || value === undefined || value === '') return undefined;
   switch (t) {
-    case 'hyperlink':
-      return { Url: String(value), Description: '' };
+    case 'hyperlink': {
+      const url = String(value);
+      // Extrai filename pra Description (Graph rejeita Description vazia em alguns casos)
+      let descr = 'Ver PDF';
+      try {
+        const decoded = decodeURIComponent(url);
+        const m = decoded.match(/\/([^\/?#]+\.pdf)(?:[?#]|$)/i);
+        if (m && m[1]) descr = m[1].substring(0, 100);
+      } catch (e) {}
+      return { Url: url, Description: descr };
+    }
     case 'currency':
     case 'number': {
       const num = Number(value);
