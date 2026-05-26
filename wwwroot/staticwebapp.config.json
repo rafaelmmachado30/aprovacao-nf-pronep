@@ -11,17 +11,62 @@
     }
   },
   "routes": [
-    { "route": "/login",  "rewrite": "/.auth/login/aad" },
-    { "route": "/logout", "redirect": "/.auth/logout" },
-
-    { "route": "/sem-acesso",     "allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/sem-acesso.html","allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/teams-login.html",         "allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/teams-auth-callback.html", "allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/vendor/*",                 "allowedRoles": ["anonymous", "authenticated"] },
-
-    { "route": "/api/*", "allowedRoles": ["authenticated"] },
-    { "route": "/*",     "allowedRoles": ["anonymous", "authenticated"] }
+    {
+      "route": "/login",
+      "rewrite": "/.auth/login/aad"
+    },
+    {
+      "route": "/logout",
+      "redirect": "/.auth/logout"
+    },
+    {
+      "route": "/sem-acesso",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/sem-acesso.html",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/teams-login.html",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/teams-auth-callback.html",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/vendor/*",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/api/*",
+      "allowedRoles": [
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/*",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    }
   ],
   "responseOverrides": {
     "403": {
@@ -30,7 +75,7 @@
     }
   },
   "globalHeaders": {
-    "Content-Security-Policy": "frame-ancestors 'self' https://teams.microsoft.com https://*.teams.microsoft.com https://*.teams.cloud.microsoft https://*.skype.com https://*.microsoftonline.com",
+    "Content-Security-Policy": "frame-ancestors 'self' https://teams.microsoft.com https://*.teams.microsoft.com https://teams.cloud.microsoft https://*.teams.cloud.microsoft https://teams.live.com https://*.teams.live.com https://*.skype.com https://*.microsoftonline.com https://*.office.com",
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "strict-origin-when-cross-origin"
   },
