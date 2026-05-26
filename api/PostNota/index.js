@@ -337,14 +337,27 @@ module.exports = async function (context, req) {
     }
     diag.itemFieldsUsados = Object.keys(itemFields);
     diag.itemFieldsPayload = itemFields;
+
+    // QUIRK do Graph API: campos do tipo Hyperlink nao podem vir no payload de
+    // criacao inicial - precisa criar item primeiro SEM eles, depois PATCH separado.
+    // Separa hyperlinks pra patch posterior.
+    const hyperlinkFields = {};
+    const baseFields = {};
+    for (const [k, v] of Object.entries(itemFields)) {
+      const t = (cache.colTypes && cache.colTypes[k]) || 'text';
+      if (t === 'hyperlink') hyperlinkFields[k] = v;
+      else                   baseFields[k] = v;
+    }
+    diag.hyperlinkFields = Object.keys(hyperlinkFields);
+
     let itemResp;
     try {
+      // Passo 1: cria item SEM hyperlinks
       itemResp = await client
         .api(`/sites/${siteId}/lists/${listNotasId}/items`)
-        .post({ fields: itemFields });
+        .post({ fields: baseFields });
       diag.itemId = itemResp.id;
     } catch (createErr) {
-      // Re-throw com info mais util no diag
       diag.createListError = {
         message: createErr.message,
         statusCode: createErr.statusCode,
@@ -352,6 +365,23 @@ module.exports = async function (context, req) {
         code: createErr.code
       };
       throw createErr;
+    }
+
+    // Passo 2: PATCH separado pra adicionar hyperlinks (se houver)
+    if (Object.keys(hyperlinkFields).length > 0) {
+      try {
+        await client
+          .api(`/sites/${siteId}/lists/${listNotasId}/items/${itemResp.id}/fields`)
+          .patch(hyperlinkFields);
+        diag.hyperlinkPatchOk = true;
+      } catch (patchErr) {
+        // Nao falha o lancamento se o PATCH do hyperlink der erro - item ja foi criado
+        diag.hyperlinkPatchError = {
+          message: patchErr.message,
+          statusCode: patchErr.statusCode,
+          body: patchErr.body
+        };
+      }
     }
 
     // Dispara notificacao (nao-bloqueante) pro aprovador
