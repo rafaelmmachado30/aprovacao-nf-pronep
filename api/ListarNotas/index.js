@@ -70,6 +70,11 @@ function readClientPrincipal(req) {
   catch (e) { return null; }
 }
 
+function readClientPrincipalRoles(req) {
+  const principal = readClientPrincipal(req);
+  return (principal && principal.userRoles) || [];
+}
+
 function normalizeItem(item, invColMap) {
   const f = item.fields || {};
   const out = { id: item.id };
