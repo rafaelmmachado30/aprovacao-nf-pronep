@@ -53,6 +53,14 @@ function validateTeamsToken(token) {
   });
 }
 
+// Formata GUID sem hifens pro formato padrao 8-4-4-4-12
+function formatGuid(s) {
+  if (!s) return s;
+  const v = String(s).replace(/-/g, '').toLowerCase();
+  if (v.length !== 32) return String(s);
+  return v.slice(0,8) + '-' + v.slice(8,12) + '-' + v.slice(12,16) + '-' + v.slice(16,20) + '-' + v.slice(20);
+}
+
 function userFromEasyAuth(req) {
   const header = req.headers && (req.headers['x-ms-client-principal'] || req.headers['X-MS-CLIENT-PRINCIPAL']);
   if (!header) return null;
@@ -60,10 +68,23 @@ function userFromEasyAuth(req) {
     const decoded = Buffer.from(header, 'base64').toString('utf-8');
     const principal = JSON.parse(decoded);
     if (!principal || !principal.userId) return null;
+    // IMPORTANTE: principal.userId eh o ID interno do SWA, NAO o oid do Entra ID.
+    // O oid real vem dos claims (claim 'oid' ou objectidentifier).
+    const claims = principal.claims || [];
+    let realOid = null;
+    for (const c of claims) {
+      if (!c || !c.val) continue;
+      if (c.typ === 'http://schemas.microsoft.com/identity/claims/objectidentifier' || c.typ === 'oid') {
+        if (/^[0-9a-f-]{32,36}$/i.test(c.val)) {
+          realOid = formatGuid(c.val);
+          break;
+        }
+      }
+    }
     return {
       email: (principal.userDetails || '').toLowerCase(),
       name: principal.userDetails || '',
-      oid: principal.userId,
+      oid: realOid || principal.userId, // fallback so se nao achar oid claim
       source: 'easy-auth'
     };
   } catch (e) {
