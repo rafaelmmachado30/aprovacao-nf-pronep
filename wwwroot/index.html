@@ -928,28 +928,48 @@ async function carregarDadosIniciais() {
 
 async function tryAutoLoginFromAzure() {
   try {
-    const meResp = await fetch('/.auth/me', { credentials: 'include' });
-    if (!meResp.ok) {
-      // Sem sessao Easy Auth. Se Teams: initTeamsContext cuida via popup. Se browser: redireciona.
-      if (window._teamsContext && window._teamsContext.isInTeams) {
-        console.log('[Auto-login] Sem sessao no Teams - aguardando popup auth');
-        return;
+    let principal = null;
+
+    // Caminho A: Teams SSO. Pula /.auth/me, decodifica o token MSAL e cria principal sintetico.
+    if (window._teamsAuthToken) {
+      console.log('[Auto-login] Detectado token Teams SSO - construindo principal a partir das claims do JWT');
+      try {
+        const parts = window._teamsAuthToken.split('.');
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        principal = {
+          userId: payload.oid || payload.sub,
+          userDetails: payload.preferred_username || payload.upn || payload.email || '',
+          claims: Object.entries(payload).map(function (kv) { return { typ: kv[0], val: String(kv[1]) }; })
+        };
+        console.log('[Auto-login] Principal Teams criado:', principal.userDetails, 'oid:', principal.userId);
+      } catch (decodeErr) {
+        console.warn('[Auto-login] Falha ao decodificar token Teams:', decodeErr);
       }
-      console.log('[Auto-login] Sem sessao no browser - redirecionando pra /.auth/login/aad');
-      window.location.replace('/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(window.location.pathname));
-      return;
     }
-    const meJson = await meResp.json();
-    const principal = meJson && (meJson.clientPrincipal || (Array.isArray(meJson) && meJson[0]));
-    if (!principal || !principal.userId) {
-      // Idem: sem clientPrincipal eh equivalente a sem sessao
-      if (window._teamsContext && window._teamsContext.isInTeams) {
-        console.log('[Auto-login] /.auth/me sem principal no Teams - aguardando popup auth');
+
+    // Caminho B: Easy Auth (browser). So tenta se ainda nao temos principal do Teams.
+    if (!principal) {
+      const meResp = await fetch('/.auth/me', { credentials: 'include' });
+      if (!meResp.ok) {
+        if (window._teamsContext && window._teamsContext.isInTeams) {
+          console.log('[Auto-login] Sem sessao no Teams e sem token SSO - aguardando popup auth');
+          return;
+        }
+        console.log('[Auto-login] Sem sessao no browser - redirecionando pra /.auth/login/aad');
+        window.location.replace('/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(window.location.pathname));
         return;
       }
-      console.log('[Auto-login] /.auth/me sem principal no browser - redirecionando pra login');
-      window.location.replace('/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(window.location.pathname));
-      return;
+      const meJson = await meResp.json();
+      principal = meJson && (meJson.clientPrincipal || (Array.isArray(meJson) && meJson[0]));
+      if (!principal || !principal.userId) {
+        if (window._teamsContext && window._teamsContext.isInTeams) {
+          console.log('[Auto-login] /.auth/me sem principal no Teams - aguardando popup auth');
+          return;
+        }
+        console.log('[Auto-login] /.auth/me sem principal no browser - redirecionando pra login');
+        window.location.replace('/.auth/login/aad?post_login_redirect_uri=' + encodeURIComponent(window.location.pathname));
+        return;
+      }
     }
 
     const gruposResp = await fetch('/api/MeusGrupos', { credentials: 'include' });

@@ -15,6 +15,7 @@
  */
 
 require('isomorphic-fetch');
+const { getUser } = require('../shared/auth');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -93,48 +94,41 @@ module.exports = async function (context, req) {
     }
 
     diag.step = 'principal';
-    const principal = readClientPrincipal(req);
-    if (!principal) {
+    const user = await getUser(req);
+    if (!user) {
       context.res = {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
-        body: { error: 'x-ms-client-principal ausente — usuário não autenticado.' }
+        body: { error: 'Nao autenticado (nem Easy Auth nem Bearer Teams).' }
       };
       return;
     }
+    diag.authSource = user.source;
 
     diag.step = 'identify_user';
-    // Estrategia robusta:
-    //  1) Claim 'oid' do token JWT — fonte autoritativa do Entra ID
-    //  2) userDetails (email/UPN) — Graph aceita /users/email
-    //  principal.userId NAO eh confiavel (ID interno do SWA, nao do AAD)
-    const claims = principal.claims || [];
-    const oidFromClaim = claims.find(c =>
-      c.typ === 'http://schemas.microsoft.com/identity/claims/objectidentifier' ||
-      c.typ === 'oid'
-    );
-
+    // Prioridade: oid do JWT (autoritativo do Entra ID) > email
     let userKey = null;
     let userKeyKind = null;
-    if (oidFromClaim && oidFromClaim.val && /^[0-9a-f-]{32,36}$/i.test(oidFromClaim.val)) {
-      userKey = formatGuid(oidFromClaim.val);
-      userKeyKind = 'oid_claim';
-    } else if (principal.userDetails && /@/.test(principal.userDetails)) {
-      userKey = principal.userDetails;
-      userKeyKind = 'userDetails_email';
+    if (user.oid && /^[0-9a-f-]{32,36}$/i.test(user.oid)) {
+      userKey = formatGuid(user.oid);
+      userKeyKind = user.source === 'teams-sso' ? 'oid_teams_token' : 'oid_claim';
+    } else if (user.email && /@/.test(user.email)) {
+      userKey = user.email;
+      userKeyKind = 'email';
     } else {
       context.res = {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
         body: {
-          error: 'Nao foi possivel identificar o usuario (nem oid claim nem email).',
-          principal,
-          claimsResumo: claims.map(c => ({ typ: c.typ, val: (c.val||'').slice(0,40) }))
+          error: 'Nao foi possivel identificar o usuario (sem oid nem email).',
+          user: user
         }
       };
       return;
     }
     diag.userKey = userKey;
+    // Cria principal sintetico pra compatibilidade com codigo existente
+    const principal = { userDetails: user.email, userId: user.oid, claims: (user.claims ? Object.entries(user.claims).map(function(kv){ return { typ: kv[0], val: String(kv[1]) }; }) : []) };
     diag.userKeyKind = userKeyKind;
 
     diag.step = 'credential';
