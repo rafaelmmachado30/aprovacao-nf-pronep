@@ -288,9 +288,8 @@ module.exports = async function (context, req) {
       AprovadoEm:      null,                        // <-- null em vez de '' (campo data)
       MotivoRejeicao:  '',
       HashSHA256:      hash,
-      // DEBUG: UrlPDF/UrlPDFAprovado removidos temporariamente pra isolar problema de campo Hyperlink
-      // UrlPDF:          uploadResp.webUrl || '',
-      // UrlPDFAprovado:  null
+      UrlPDF:          uploadResp.webUrl || '',  // formatByType detecta Hyperlink e formata { Url, Description }
+      UrlPDFAprovado:  null                       // preenchido na aprovacao
     };
     const itemFieldsRaw = buildFieldsObject(colMap, rawFields);
     // Aplica formatacao por tipo (com log detalhado pra debug)

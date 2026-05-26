@@ -8,6 +8,8 @@
 <script src="/vendor/chart.umd.min.js"></script>
 <!-- Microsoft Teams JS SDK (pra detectar quando rodando dentro do Teams) -->
 <script src="/vendor/teams-js.min.js"></script>
+<!-- SheetJS pra parser XLSX no browser (importacao de fornecedores) -->
+<script src="/vendor/xlsx.full.min.js"></script>
 <style>
   :root {
     --azul-escuro: #1F4E79;
@@ -2038,7 +2040,7 @@ async function buscarCNPJ() {
   }
 }
 
-function salvarFornecedor(idx) {
+async function salvarFornecedor(idx) {
   const razao = document.getElementById('frn-razao').value.trim();
   const fantasia = document.getElementById('frn-fantasia').value.trim();
   const cnpj = document.getElementById('frn-cnpj').value.trim();
@@ -2047,22 +2049,78 @@ function salvarFornecedor(idx) {
   const diretoria = document.getElementById('frn-diretoria').value;
   const ativo = document.getElementById('frn-ativo').checked;
   if (!razao || !cnpj || !unidade || !diretoria) {
-    toast('Preencha todos os campos obrigatórios (Razão, CNPJ, UF e Diretoria).', 'error');
+    toast('Preencha todos os campos obrigatorios (Razao, CNPJ, UF e Diretoria).', 'error');
     return;
   }
-  if (idx === null) {
-    if (fornecedores.some(x => x.cnpj === cnpj)) {
-      toast('Já existe um fornecedor cadastrado com este CNPJ.', 'error');
-      return;
+
+  // Tenta inferir tipoDocumento e UF a partir dos dados existentes ou novos
+  const onlyDigits = (s) => String(s||'').replace(/\D/g, '');
+  const digits = onlyDigits(cnpj);
+  const tipoDocumento = digits.length === 14 ? 'CNPJ' : (digits.length === 11 ? 'CPF' : '');
+
+  // Desabilita botoes pra evitar duplo-clique
+  document.querySelectorAll('.modal .btn').forEach(b => b.disabled = true);
+  toast('Salvando fornecedor...', 'info');
+
+  try {
+    if (idx === null) {
+      // CREATE
+      if (fornecedores.some(x => (x.cnpj || x.documento) === cnpj || (x.cnpj || x.documento) === digits)) {
+        toast('Ja existe um fornecedor cadastrado com este CNPJ/CPF.', 'error');
+        document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+        return;
+      }
+      const r = await fetch('/api/AdicionarFornecedor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 409) {
+        toast('Fornecedor com este documento ja existe (id ' + (data.existing && data.existing.id) + ').', 'error');
+        document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+        return;
+      }
+      if (!r.ok) {
+        toast('Erro ao adicionar: ' + (data.error || ('HTTP ' + r.status)), 'error');
+        document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+        return;
+      }
+      // Sucesso: adiciona localmente E recarrega da fonte (pra ter id real)
+      fornecedores.push({ id: data.id, spId: data.id, cnpj: digits, documento: cnpj, razao, nomeFantasia: fantasia, unidade, diretoria, uf: unidade, categoria, ativo, tipoDocumento });
+      toast('Fornecedor "' + razao + '" cadastrado (id ' + data.id + ').', 'success');
+    } else {
+      // UPDATE
+      const fAtual = fornecedores[idx];
+      const spId = fAtual.id || fAtual.spId;
+      if (!spId) {
+        toast('Fornecedor sem id do SharePoint - nao foi possivel editar.', 'error');
+        document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+        return;
+      }
+      const r = await fetch('/api/EditarFornecedor', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ id: spId, razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        toast('Erro ao editar: ' + (data.error || ('HTTP ' + r.status)), 'error');
+        document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+        return;
+      }
+      // Sucesso: atualiza localmente
+      Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, cnpj: digits, documento: cnpj, unidade, diretoria, uf: unidade, categoria, ativo, tipoDocumento });
+      toast('Fornecedor "' + razao + '" atualizado.', 'success');
     }
-    fornecedores.push({ cnpj, razao, nomeFantasia: fantasia, unidade, diretoria, categoria, ativo });
-    toast(`Fornecedor "${razao}" cadastrado.`, 'success');
-  } else {
-    Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, unidade, diretoria, categoria, ativo });
-    toast(`Fornecedor "${razao}" atualizado.`, 'success');
+    closeModal();
+    showView('fornecedores');
+  } catch (e) {
+    toast('Falha ao comunicar com servidor: ' + (e && e.message), 'error');
+    document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
   }
-  closeModal();
-  showView('fornecedores');
 }
 
 function excluirFornecedor(idx) {
@@ -2135,64 +2193,196 @@ function baixarTemplateFornecedores() {
   toast('Template baixado. Preencha e suba novamente neste modal.', 'success');
 }
 
-function fakeImportUpload() {
-  // Simula leitura — em produção: SheetJS lê .xlsx, papaparse lê .csv
-  const linhasMock = [
-    { ok: true,  razao: 'Hospital Vida Plena LTDA',         fantasia: 'Vida Plena',     cnpj: '45.678.901/0001-23', categoria: 'Serviços',     uf: 'RJ', diretoria: 'Técnica',     ativo: 'Sim' },
-    { ok: true,  razao: 'TecnoLab Manutenção',              fantasia: 'TecnoLab',       cnpj: '78.901.234/0001-56', categoria: 'Serviços',     uf: 'SP', diretoria: 'Tecnologia',  ativo: 'Sim' },
-    { ok: true,  razao: 'Farma Solutions Distribuidora',    fantasia: 'Farma Solutions',cnpj: '89.012.345/0001-67', categoria: 'Medicamentos', uf: 'ES', diretoria: 'Suprimentos', ativo: 'Sim' },
-    { ok: true,  razao: 'Limpa Mais Higienização',          fantasia: 'Limpa Mais',     cnpj: '90.123.456/0001-78', categoria: 'Serviços',     uf: 'RJ', diretoria: 'Suprimentos', ativo: 'Sim' },
-    { ok: false, razao: 'CNPJ inválido (DV errado)',        fantasia: 'XYZ',            cnpj: '11.111.111/1111-11', categoria: 'Outros',       uf: 'SP', diretoria: 'Outros',      ativo: 'Sim', erro: 'CNPJ com dígito verificador inválido' },
-    { ok: false, razao: 'TNC-GAN Terapia Nutricional',      fantasia: 'TNC-GAN',        cnpj: '32.554.883/0001-78', categoria: 'Serviços',     uf: 'RJ', diretoria: 'Técnica',     ativo: 'Sim', erro: 'CNPJ já cadastrado no sistema' },
-  ];
-  document.getElementById('frn-file-drop').classList.add('has-file');
-  document.getElementById('frn-fd-main').textContent = '✓ fornecedores_pronep.xlsx';
-  document.getElementById('frn-fd-sub').textContent = '128 KB · 6 linhas detectadas · clique para trocar';
-  window._importPreview = linhasMock;
-  document.getElementById('frn-import-btn').disabled = false;
+// Validacao CNPJ (digitos verificadores)
+function _validaCNPJ(cnpj) {
+  const d = String(cnpj || '').replace(/\D/g, '');
+  if (d.length !== 14) return false;
+  if (/^(\d)\1{13}$/.test(d)) return false;
+  const calc = (base) => {
+    let pos = base.length - 7, sum = 0;
+    for (let i = base.length; i >= 1; i--) { sum += parseInt(base[base.length - i]) * pos--; if (pos < 2) pos = 9; }
+    const r = sum % 11; return r < 2 ? 0 : 11 - r;
+  };
+  const dig1 = calc(d.slice(0,12));
+  const dig2 = calc(d.slice(0,12) + dig1);
+  return dig1 === parseInt(d[12]) && dig2 === parseInt(d[13]);
+}
 
-  const okCount = linhasMock.filter(l => l.ok).length;
-  const erroCount = linhasMock.filter(l => !l.ok).length;
+// Le arquivo (CSV ou XLSX) e dispara preview da importacao
+function fakeImportUpload() {
+  // Cria input file invisivel e dispara click
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.xlsx,.xls,.csv';
+  input.style.display = 'none';
+  input.addEventListener('change', async function (ev) {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    document.getElementById('frn-fd-main').textContent = 'Lendo ' + file.name + '...';
+    document.getElementById('frn-fd-sub').textContent = '';
+    try {
+      const linhas = await _parseArquivoFornecedores(file);
+      _renderPreviewImportacao(file, linhas);
+    } catch (e) {
+      toast('Erro ao ler arquivo: ' + e.message, 'error');
+      document.getElementById('frn-fd-main').textContent = 'Clique para selecionar o arquivo (.xlsx ou .csv)';
+      document.getElementById('frn-fd-sub').textContent = 'ou arraste e solte aqui';
+    }
+  });
+  document.body.appendChild(input);
+  input.click();
+  setTimeout(() => input.remove(), 1000);
+}
+
+async function _parseArquivoFornecedores(file) {
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const buf = await file.arrayBuffer();
+  let rows = [];
+  if (ext === 'csv') {
+    const text = new TextDecoder('utf-8').decode(buf);
+    rows = _parseCSV(text);
+  } else if (ext === 'xlsx' || ext === 'xls') {
+    if (!window.XLSX) throw new Error('SheetJS nao carregou (verifique vendor/xlsx.full.min.js)');
+    const wb = window.XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    rows = window.XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+  } else {
+    throw new Error('Formato nao suportado. Use .xlsx ou .csv');
+  }
+
+  // Normaliza nomes de colunas (case-insensitive, sem acento)
+  const norm = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const linhas = rows.map((row, idx) => {
+    // Aceita varios alias pros nomes de coluna
+    const get = (...keys) => {
+      for (const k of keys) {
+        for (const key of Object.keys(row)) {
+          if (norm(key) === norm(k)) return String(row[key] || '').trim();
+        }
+      }
+      return '';
+    };
+    const razao     = get('RazaoSocial', 'Razao', 'Razao Social');
+    const fantasia  = get('NomeFantasia', 'Fantasia');
+    const cnpj      = get('CNPJ', 'Documento', 'CPF');
+    const categoria = get('Categoria');
+    const uf        = (get('UF', 'Unidade') || '').toUpperCase();
+    const diretoria = get('Diretoria');
+    const ativo     = get('Ativo') || 'Sim';
+    let erro = null;
+    if (!razao)     erro = 'RazaoSocial obrigatoria';
+    else if (!cnpj) erro = 'CNPJ/Documento obrigatorio';
+    else if (cnpj.replace(/\D/g,'').length === 14 && !_validaCNPJ(cnpj)) erro = 'CNPJ com digito verificador invalido';
+    else if (!uf || !['SP','RJ','ES'].includes(uf)) erro = 'UF deve ser SP, RJ ou ES';
+    else if (!diretoria) erro = 'Diretoria obrigatoria';
+    else if (fornecedores.some(x => (x.cnpj || x.documento || '').replace(/\D/g,'') === cnpj.replace(/\D/g,''))) erro = 'CNPJ ja cadastrado no sistema';
+    return { ok: !erro, razao, fantasia, cnpj, categoria, uf, diretoria, ativo, erro, linha: idx + 2 };
+  });
+  return linhas;
+}
+
+function _parseCSV(text) {
+  // Parser simples: separador ; ou , - aceita aspas
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length);
+  if (!lines.length) return [];
+  const sep = (lines[0].split(';').length > lines[0].split(',').length) ? ';' : ',';
+  const headers = lines[0].split(sep).map(h => h.replace(/^["']|["']$/g, '').trim());
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(sep).map(c => c.replace(/^["']|["']$/g, '').trim());
+    const row = {};
+    headers.forEach((h, j) => { row[h] = cols[j] || ''; });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function _renderPreviewImportacao(file, linhas) {
+  document.getElementById('frn-file-drop').classList.add('has-file');
+  document.getElementById('frn-fd-main').textContent = 'OK ' + file.name;
+  document.getElementById('frn-fd-sub').textContent = Math.round(file.size/1024) + ' KB . ' + linhas.length + ' linhas . clique para trocar';
+  window._importPreview = linhas;
+  const okCount = linhas.filter(l => l.ok).length;
+  const erroCount = linhas.filter(l => !l.ok).length;
+  document.getElementById('frn-import-btn').disabled = okCount === 0;
   document.getElementById('frn-import-preview').style.display = 'block';
+  const rowsHtml = linhas.map(l => `
+    <tr style="background:${l.ok ? 'var(--verde-bg)' : 'var(--vermelho-bg)'}">
+      <td>${l.ok ? 'OK' : 'X'}</td>
+      <td>${l.linha}</td>
+      <td>${l.razao || '-'}</td>
+      <td class="mono">${l.cnpj || '-'}</td>
+      <td>${l.uf || '-'}</td>
+      <td>${l.diretoria || '-'}</td>
+      <td>${l.ok
+        ? '<span class="small" style="color:var(--verde)">Pronto</span>'
+        : '<span class="small" style="color:var(--vermelho)">' + l.erro + '</span>'}</td>
+    </tr>`).join('');
   document.getElementById('frn-import-preview').innerHTML = `
-    <h3 style="font-size:14px;margin-bottom:8px;color:var(--azul-escuro)">Preview da importação</h3>
+    <h3 style="font-size:14px;margin-bottom:8px;color:var(--azul-escuro)">Preview da importacao</h3>
     <div class="alert ${erroCount > 0 ? 'alert-warning' : 'alert-success'}" style="margin-bottom:10px">
-      <span class="ico">${erroCount > 0 ? '⚠' : '✓'}</span>
-      <div><b>${okCount}</b> linha(s) prontas para importar · <b>${erroCount}</b> com erro (serão ignoradas)</div>
+      <span class="ico">${erroCount > 0 ? '!' : '+'}</span>
+      <div><b>${okCount}</b> linha(s) prontas para importar &middot; <b>${erroCount}</b> com erro (serao ignoradas)</div>
     </div>
     <div style="max-height:240px;overflow-y:auto">
       <table class="data" style="font-size:12px">
-        <thead><tr><th></th><th>Razão</th><th>CNPJ</th><th>UF</th><th>Diretoria</th><th>Categoria</th><th>Status</th></tr></thead>
-        <tbody>
-          ${linhasMock.map(l => `
-            <tr style="background:${l.ok?'var(--verde-bg)':'var(--vermelho-bg)'}">
-              <td>${l.ok?'✓':'✕'}</td>
-              <td>${l.razao}</td>
-              <td class="mono">${l.cnpj}</td>
-              <td>${l.uf}</td>
-              <td>${l.diretoria}</td>
-              <td>${l.categoria}</td>
-              <td>${l.ok ? '<span class="small" style="color:var(--verde)">Pronto</span>' : `<span class="small" style="color:var(--vermelho)">${l.erro}</span>`}</td>
-            </tr>
-          `).join('')}
-        </tbody>
+        <thead><tr><th></th><th>Linha</th><th>Razao</th><th>CNPJ</th><th>UF</th><th>Diretoria</th><th>Status</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
       </table>
-    </div>
-  `;
+    </div>`;
 }
 
-function confirmarImportacao() {
+async function confirmarImportacao() {
   const linhas = window._importPreview || [];
   const validas = linhas.filter(l => l.ok);
-  validas.forEach(l => {
-    fornecedores.push({
-      cnpj: l.cnpj, razao: l.razao, nomeFantasia: l.fantasia,
-      unidade: l.uf, diretoria: l.diretoria, categoria: l.categoria,
-      ativo: (l.ativo||'Sim').toLowerCase().startsWith('s')
-    });
-  });
-  toast(`${validas.length} fornecedor(es) importado(s) com sucesso.`, 'success');
+  if (validas.length === 0) {
+    toast('Nenhuma linha valida pra importar.', 'error');
+    return;
+  }
+  document.querySelectorAll('.modal .btn').forEach(b => b.disabled = true);
+  let okCount = 0, errCount = 0;
+  const erros = [];
+  for (let i = 0; i < validas.length; i++) {
+    const l = validas[i];
+    toast('Importando ' + (i+1) + '/' + validas.length + ': ' + l.razao + '...', 'info');
+    try {
+      const tipoDocumento = String(l.cnpj || '').replace(/\D/g,'').length === 14 ? 'CNPJ' : 'CPF';
+      const r = await fetch('/api/AdicionarFornecedor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          razao: l.razao, nomeFantasia: l.fantasia, documento: l.cnpj, tipoDocumento,
+          unidade: l.uf, diretoria: l.diretoria, uf: l.uf, ativo: (l.ativo||'Sim').toLowerCase().startsWith('s')
+        })
+      });
+      if (r.ok || r.status === 201) {
+        const data = await r.json().catch(() => ({}));
+        fornecedores.push({
+          id: data.id, spId: data.id,
+          cnpj: l.cnpj.replace(/\D/g,''), documento: l.cnpj,
+          razao: l.razao, nomeFantasia: l.fantasia,
+          unidade: l.uf, diretoria: l.diretoria, uf: l.uf,
+          ativo: (l.ativo||'Sim').toLowerCase().startsWith('s'), tipoDocumento
+        });
+        okCount++;
+      } else {
+        const data = await r.json().catch(() => ({}));
+        errCount++;
+        erros.push(l.razao + ': ' + (data.error || ('HTTP ' + r.status)));
+      }
+    } catch (e) {
+      errCount++;
+      erros.push(l.razao + ': ' + (e && e.message));
+    }
+  }
   closeModal();
+  if (errCount === 0) {
+    toast(okCount + ' fornecedor(es) importado(s) com sucesso!', 'success');
+  } else {
+    toast(okCount + ' importado(s), ' + errCount + ' com erro. Confira o console.', 'warning');
+    console.warn('[Importacao] Erros:', erros);
+  }
   showView('fornecedores');
 }
 

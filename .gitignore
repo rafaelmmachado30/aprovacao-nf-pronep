@@ -31,3 +31,10 @@ Thumbs.db
 # Build outputs
 dist/
 build/
+
+# Arquivos de dados/templates exportados (nao commitar)
+PRONEP-NF-*.xlsx
+PRONEP-NF-*.csv
+
+# Zips da Teams App (gerados pra upload no Teams Admin)
+teams-app/*.zip
