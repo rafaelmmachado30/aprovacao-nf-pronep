@@ -62,17 +62,20 @@ async function getColumnMap(client, siteId, listId) {
     // Captura o TIPO da coluna pra logica especifica
     // Possiveis: text, number, dateTime, boolean, choice, hyperlinkOrPicture,
     //            personOrGroup, currency, calculated, lookup, ...
+    // ORDEM IMPORTANTE: tipos especificos primeiro porque o SP API as vezes retorna
+    // multiplas propriedades (ex: col.text presente mesmo em coluna Hyperlink).
+    // text fica como fallback.
     let detectedType = 'text';
-    if (col.text)                detectedType = 'text';
-    else if (col.number)         detectedType = 'number';
+    if (col.hyperlinkOrPicture)  detectedType = 'hyperlink';
+    else if (col.currency)       detectedType = 'currency';
     else if (col.dateTime)       detectedType = 'dateTime';
+    else if (col.number)         detectedType = 'number';
     else if (col.boolean)        detectedType = 'boolean';
     else if (col.choice)         detectedType = 'choice';
-    else if (col.hyperlinkOrPicture) detectedType = 'hyperlink';
     else if (col.personOrGroup)  detectedType = 'person';
-    else if (col.currency)       detectedType = 'currency';
     else if (col.calculated)     detectedType = 'calculated';
     else if (col.lookup)         detectedType = 'lookup';
+    else if (col.text)           detectedType = 'text';
     types[col.name] = detectedType;
   }
   cache.colMap = map;
