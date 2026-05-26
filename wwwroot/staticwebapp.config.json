@@ -57,6 +57,7 @@
     {
       "route": "/api/*",
       "allowedRoles": [
+        "anonymous",
         "authenticated"
       ]
     },

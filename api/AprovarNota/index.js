@@ -18,6 +18,7 @@
  */
 
 require('isomorphic-fetch');
+const { getUser } = require('../shared/auth');
 const { notificar } = require('../shared/notificar');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
@@ -198,13 +199,14 @@ module.exports = async function (context, req) {
     diag.itemId = itemId;
 
     diag.step = 'principal';
-    const principal = readClientPrincipal(req);
-    if (!principal) {
+    const user = await getUser(req);
+    if (!user) {
       context.res = { status: 401, body: { error: 'Nao autenticado' } };
       return;
     }
-    const aprovadorEmail = (principal.userDetails || '').toLowerCase();
+    const aprovadorEmail = (user.email || '').toLowerCase();
     diag.aprovador = aprovadorEmail;
+    diag.authSource = user.source;
 
     diag.step = 'graph';
     const client = await getGraphClient();

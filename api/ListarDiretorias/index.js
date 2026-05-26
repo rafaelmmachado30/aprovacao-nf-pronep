@@ -10,6 +10,7 @@
  */
 
 require('isomorphic-fetch');
+const { getUser } = require('../shared/auth');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =

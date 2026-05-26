@@ -645,9 +645,28 @@ async function garantirSessaoNoTeams() {
       }
     }
   } catch (e) {}
-  console.log('[Teams Auth] Sem sessao no iframe, tentando popup auth...');
+  // === SSO real via getAuthToken (silencioso, sem popup) ===
+  // Esse caminho funciona dentro do iframe Teams pq nao depende de cookies (que sao particionados).
+  // Frontend pega token, inclui em Authorization: Bearer pra cada fetch /api/*, backend valida JWT.
+  console.log('[Teams Auth] Tentando SSO real (getAuthToken)...');
+  const SCOPE = 'api://purple-forest-09588fe10.7.azurestaticapps.net/85f7fa68-a241-4caf-803f-9991bd1f0eee/access_as_user';
+  try {
+    const token = await window.microsoftTeams.authentication.getAuthToken({
+      resources: [SCOPE]
+    });
+    if (token) {
+      window._teamsAuthToken = token;
+      console.log('[Teams Auth] Token SSO obtido (length=' + token.length + '). Instalando interceptor fetch.');
+      instalarInterceptorFetch();
+      // Nao precisa recarregar - o token vai junto em todos os proximos fetches
+      return;
+    }
+  } catch (ssoErr) {
+    console.warn('[Teams Auth] getAuthToken falhou:', ssoErr && (ssoErr.message || ssoErr));
+  }
+  // Fallback: popup auth (so funciona se nao tiver cookie partitioning)
+  console.log('[Teams Auth] Caindo no popup auth como fallback...');
   const popupUrl = window.location.origin + '/teams-login.html';
-  console.log('[Teams Auth] URL do popup:', popupUrl);
   try {
     const result = await window.microsoftTeams.authentication.authenticate({
       url: popupUrl,
@@ -656,12 +675,34 @@ async function garantirSessaoNoTeams() {
       isExternal: false
     });
     console.log('[Teams Auth] Popup retornou:', result);
-    console.log('[Teams Auth] Recarregando iframe com sessao...');
     window.location.reload();
   } catch (popupErr) {
     console.warn('[Teams Auth] Popup auth falhou:', popupErr);
     mostrarOverlayLoginTeams();
   }
+}
+
+// Intercepta window.fetch e adiciona Authorization: Bearer em todas as chamadas /api/*
+// quando temos token Teams SSO disponivel.
+function instalarInterceptorFetch() {
+  if (window._fetchInterceptorInstalado) return;
+  window._fetchInterceptorInstalado = true;
+  const origFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      const isApi = url.indexOf('/api/') === 0 || url.indexOf('/api/') >= 0;
+      if (isApi && window._teamsAuthToken) {
+        init = init || {};
+        init.headers = new Headers(init.headers || {});
+        if (!init.headers.has('Authorization')) {
+          init.headers.set('Authorization', 'Bearer ' + window._teamsAuthToken);
+        }
+      }
+    } catch (e) { console.warn('[fetch interceptor] erro:', e); }
+    return origFetch(input, init);
+  };
+  console.log('[fetch interceptor] instalado');
 }
 
 function mostrarOverlayLoginTeams() {

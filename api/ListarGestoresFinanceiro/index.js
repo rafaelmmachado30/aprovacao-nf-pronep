@@ -9,6 +9,7 @@
  */
 
 require('isomorphic-fetch');
+const { getUser } = require('../shared/auth');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -30,6 +31,11 @@ async function getGraphClient() {
 
 module.exports = async function (context, req) {
   try {
+    const user = await getUser(req);
+    if (!user) {
+      context.res = { status: 401, headers: { 'Content-Type': 'application/json' }, body: { error: 'Nao autenticado' } };
+      return;
+    }
     const groupId = process.env.GESTOR_FINANCEIRO_GROUP_ID || DEFAULT_GROUP_ID;
     const client = await getGraphClient();
     const resp = await client

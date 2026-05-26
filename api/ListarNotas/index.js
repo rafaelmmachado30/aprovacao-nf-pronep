@@ -10,6 +10,7 @@
  */
 
 require('isomorphic-fetch');
+const { getUser } = require('../shared/auth');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -83,13 +84,13 @@ module.exports = async function (context, req) {
   const diag = { step: 'start' };
   try {
     diag.step = 'principal';
-    const principal = readClientPrincipal(req);
-    if (!principal) {
+    const user = await getUser(req);
+    if (!user) {
       context.res = { status: 401, body: { error: 'Nao autenticado' } };
       return;
     }
-    const userEmail = (principal.userDetails || '').toLowerCase();
-    const userRoles = principal.userRoles || [];
+    const userEmail = (user.email || '').toLowerCase();
+    const userRoles = (user.claims && user.claims.roles) || (user.source === 'easy-auth' ? readClientPrincipalRoles(req) : []);
     diag.userEmail = userEmail;
     diag.userRoles = userRoles;
 
