@@ -103,6 +103,37 @@ Tambem preciso confirmar:
 
 ---
 
+## IMPORTANTE - Limitacao do SWA com Authorization header
+
+**Bug nao documentado da Microsoft:** o Easy Auth do Azure Static Web Apps SUBSTITUI o header `Authorization: Bearer` que o frontend envia, trocando pelo proprio token interno do Azure Functions runtime (aud=azurewebsites.net/azurefunctions).
+
+**Sintoma:** o backend recebe um token diferente do que o frontend mandou. O `validateTeamsToken` falha porque o aud/iss nao bate.
+
+**Workaround usado neste projeto:** usar header custom `X-Teams-Token` em vez de `Authorization: Bearer`. SWA nao interfere em headers nao-padrao.
+
+```js
+// Frontend (interceptor fetch):
+init.headers.set('X-Teams-Token', window._teamsAuthToken);
+
+// Backend (shared/auth.js):
+const token = req.headers['x-teams-token'];
+```
+
+---
+
+## IMPORTANTE - Configuracao adicional pra Standard SKU
+
+Se o SWA esta no plano **Standard** (custom authentication ativada via bloco `auth` no `staticwebapp.config.json`), o App Reg precisa:
+
+1. App Registration -> **Autenticacao** -> bloco "Concessao implicita e fluxos hibridos"
+2. Marca **"Tokens de ID (usados para fluxos implicitos e hibridos)"**
+3. Deixa "Tokens de acesso" DESMARCADO (nao precisa, mais seguro)
+4. Salva
+
+> **Por que:** o Easy Auth do SWA Standard exige ID token no flow de autenticacao OAuth. O SKU Free ignora essa exigencia, o Standard valida e da 401 no callback se estiver desmarcado. **Sintoma:** `https://<seu-app>.azurestaticapps.net/.auth/login/aad/callback` retorna `401: Unauthorized`.
+
+---
+
 ## Como funcionara depois
 
 1. Voce lanca NF -> notif Teams chega (ja funciona)
