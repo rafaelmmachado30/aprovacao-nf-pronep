@@ -107,7 +107,16 @@ function buildPatchPayload(displayNamePayload, colMap, colTypes) {
     if (value === null || value === undefined) continue;
     const t = colTypes[internal] || 'text';
     let formatted = value;
-    if (t === 'hyperlink') formatted = { Url: String(value), Description: '' };
+    if (t === 'hyperlink') {
+      const url = String(value);
+      let descr = 'Ver PDF';
+      try {
+        const decoded = decodeURIComponent(url);
+        const m = decoded.match(/\/([^\/?#]+\.pdf)(?:[?#]|$)/i);
+        if (m && m[1]) descr = m[1].substring(0, 100);
+      } catch (e) {}
+      formatted = { Url: url, Description: descr };
+    }
     else if (t === 'number' || t === 'currency') formatted = Number(value);
     else if (t === 'boolean') formatted = (value === true || value === 'Sim');
     else if (t === 'dateTime') formatted = value;
@@ -283,12 +292,29 @@ module.exports = async function (context, req) {
     await client.api(`/sites/${siteId}/drive/items/${target.id}`).delete();
 
     diag.step = 'update_list';
-    const patchPayload = buildPatchPayload({
+    // QUIRK Graph API: hyperlinks misturados com outros campos no mesmo PATCH as vezes
+    // dao 400. Separa em 2 PATCHes: primeiro campos base, depois hyperlinks.
+    const basePayload = buildPatchPayload({
       Status: 'Aprovada',
-      AprovadoEm: new Date().toISOString(),
+      AprovadoEm: new Date().toISOString()
+    }, colMap, colTypes);
+    await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(basePayload);
+
+    diag.step = 'update_list_hyperlink';
+    const hyperlinkPayload = buildPatchPayload({
       UrlPDFAprovado: uploadResp.webUrl
     }, colMap, colTypes);
-    await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(patchPayload);
+    try {
+      await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(hyperlinkPayload);
+      diag.urlPDFAprovadoPatchOk = true;
+    } catch (urlErr) {
+      // Nao falha a aprovacao se o PATCH do hyperlink der erro
+      diag.urlPDFAprovadoPatchError = {
+        message: urlErr.message,
+        statusCode: urlErr.statusCode,
+        body: urlErr.body
+      };
+    }
 
     // Dispara notificacao pro submitter (quem lancou)
     diag.step = 'notify';

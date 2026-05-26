@@ -168,7 +168,16 @@ function buildPatchPayload(displayPayload, colMap, colTypes) {
     if (value === null || value === undefined) continue;
     const t = colTypes[internal] || 'text';
     let formatted = value;
-    if (t === 'hyperlink') formatted = { Url: String(value), Description: '' };
+    if (t === 'hyperlink') {
+      const url = String(value);
+      let descr = 'Ver PDF';
+      try {
+        const decoded = decodeURIComponent(url);
+        const m = decoded.match(/\/([^\/?#]+\.pdf)(?:[?#]|$)/i);
+        if (m && m[1]) descr = m[1].substring(0, 100);
+      } catch (e) {}
+      formatted = { Url: url, Description: descr };
+    }
     else if (t === 'number' || t === 'currency') formatted = Number(value);
     else if (t === 'boolean') formatted = (value === true || value === 'Sim');
     else if (t === 'dateTime') formatted = value;

@@ -3335,7 +3335,7 @@ function openNFDetail(id) {
 function confirmApprove(id) {
   const n = notas.find(x => x.id === id);
   if (!n) return;
-  const now = new Date('2026-05-22T15:42:00');
+  const now = new Date();
   const stamp = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
   const emailPrefix = currentPersona.name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ /g,'.');
   openModal(`
