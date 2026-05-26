@@ -288,8 +288,11 @@ module.exports = async function (context, req) {
       AprovadoEm:      null,                        // <-- null em vez de '' (campo data)
       MotivoRejeicao:  '',
       HashSHA256:      hash,
-      UrlPDF:          uploadResp.webUrl || '',  // formatByType detecta Hyperlink e formata { Url, Description }
-      UrlPDFAprovado:  null                       // preenchido na aprovacao
+      // UrlPDF/UrlPDFAprovado: temporariamente desabilitados pois colunas no SP ainda sao text.
+      // Quando mudar pra Hyperlink (ver SETUP_TIPOS_COLUNA_SHAREPOINT.md), re-habilitar.
+      // PDF eh acessado via /api/AbrirPdfDaNota que busca no SharePoint direto pelo NumeroNF.
+      // UrlPDF:          uploadResp.webUrl || '',
+      // UrlPDFAprovado:  null
     };
     const itemFieldsRaw = buildFieldsObject(colMap, rawFields);
     // Aplica formatacao por tipo (com log detalhado pra debug)
