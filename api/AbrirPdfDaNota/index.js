@@ -86,40 +86,61 @@ module.exports = async function (context, req) {
     }
 
     // Determina pasta baseado no Status
+    const aprovadoEm = fields.AprovadoEm || '';
+    const dataAprovada = aprovadoEm ? String(aprovadoEm).substring(0, 10) : '';
     let folder;
-    if (status === 'Aprovada') {
-      // Aprovada usa data — sem saber a data exata, tenta /Notas Aprovadas/{Unidade}/* (varia por dia)
-      // Estrategia: lista todas as datas e busca em cada uma
+    if (status === 'Aprovada' && dataAprovada) {
+      // Vai DIRETO na pasta da data de aprovacao (otimizacao - evita listar todas as subpastas)
+      folder = `Notas Fiscais/Notas Aprovadas/${unidade}/${dataAprovada}`;
+    } else if (status === 'Aprovada') {
+      // Sem data de aprovacao - fallback: lista todas as subpastas (mais lento)
       folder = `Notas Fiscais/Notas Aprovadas/${unidade}`;
     } else if (status === 'Rejeitada') {
       folder = `Notas Fiscais/Rejeitadas`;
     } else {
-      // Lancada (padrao)
       folder = `Notas Fiscais/Pendentes/${unidade}/Diretoria ${diretoria}`;
     }
 
     // Lista arquivos da pasta
     let arquivos = [];
     try {
-      if (status === 'Aprovada') {
-        // Procura recursivo nas subpastas de data
+      if (status === 'Aprovada' && !dataAprovada) {
+        // Fallback: itera subpastas de data (lento, evitamos quando possivel)
         const subRespUnidade = await client.api(`/sites/${siteId}/drive/root:/${folder}:/children`).get();
         for (const subfolder of (subRespUnidade.value || []).filter(x => x.folder)) {
           try {
             const filesResp = await client.api(`/sites/${siteId}/drive/items/${subfolder.id}/children`).get();
-            for (const f of (filesResp.value || [])) {
-              if (f.file) arquivos.push(f);
-            }
+            for (const f of (filesResp.value || [])) { if (f.file) arquivos.push(f); }
           } catch (e) { /* ignora pastas vazias */ }
         }
       } else {
+        // Caminho rapido: direto na pasta especifica
         const resp = await client.api(`/sites/${siteId}/drive/root:/${folder}:/children`).get();
         arquivos = (resp.value || []).filter(x => x.file);
       }
     } catch (e) {
-      context.res = { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        body: htmlErro('Pasta nao encontrada', `Nao encontrei a pasta: <span style="font-family:monospace">${folder}</span>`, e.message) };
-      return;
+      // Pasta nao encontrada - se Aprovada com data, tenta sem data (NF pode ter sido aprovada em outra data)
+      if (status === 'Aprovada' && dataAprovada) {
+        const fallbackFolder = `Notas Fiscais/Notas Aprovadas/${unidade}`;
+        try {
+          const subRespUnidade = await client.api(`/sites/${siteId}/drive/root:/${fallbackFolder}:/children`).get();
+          for (const subfolder of (subRespUnidade.value || []).filter(x => x.folder)) {
+            try {
+              const filesResp = await client.api(`/sites/${siteId}/drive/items/${subfolder.id}/children`).get();
+              for (const f of (filesResp.value || [])) { if (f.file) arquivos.push(f); }
+            } catch (e2) {}
+          }
+          folder = fallbackFolder;
+        } catch (e2) {
+          context.res = { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            body: htmlErro('Pasta nao encontrada', `Nao encontrei a pasta: <span style="font-family:monospace">${folder}</span>`, (e.message || '') + ' | fallback: ' + (e2.message || '')) };
+          return;
+        }
+      } else {
+        context.res = { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' },
+          body: htmlErro('Pasta nao encontrada', `Nao encontrei a pasta: <span style="font-family:monospace">${folder}</span>`, e.message) };
+        return;
+      }
     }
 
     // Acha o arquivo pelo NumeroNF como prefixo (formato do PostNota: {numero}_{razao}_{timestamp}_*.pdf)
