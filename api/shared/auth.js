@@ -76,6 +76,14 @@ async function userFromTeamsToken(req) {
   if (!auth || !auth.startsWith('Bearer ')) return null;
   const token = auth.substring(7).trim();
   if (!token) return null;
+  // Decodifica payload sem validar (pra log/debug)
+  let unverifiedPayload = null;
+  try {
+    const parts = token.split('.');
+    if (parts.length === 3) {
+      unverifiedPayload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
+    }
+  } catch (e) {}
   try {
     const claims = await validateTeamsToken(token);
     return {
@@ -86,7 +94,25 @@ async function userFromTeamsToken(req) {
       claims: claims
     };
   } catch (e) {
-    return null;
+    // Anexa info de debug no erro pra Functions logarem
+    const debug = unverifiedPayload ? {
+      aud: unverifiedPayload.aud,
+      iss: unverifiedPayload.iss,
+      scp: unverifiedPayload.scp,
+      tid: unverifiedPayload.tid,
+      appid: unverifiedPayload.appid,
+      preferred_username: unverifiedPayload.preferred_username,
+      ver: unverifiedPayload.ver
+    } : null;
+    const err = new Error('Teams token rejeitado: ' + (e.message || e));
+    err.tokenDebug = debug;
+    err.expectedAudiences = ACCEPTED_AUDIENCES;
+    err.expectedIssuers = [
+      'https://login.microsoftonline.com/' + TENANT_ID + '/v2.0',
+      'https://sts.windows.net/' + TENANT_ID + '/'
+    ];
+    err.original = e.message;
+    throw err;
   }
 }
 
@@ -95,8 +121,20 @@ async function getUser(req) {
   const easy = userFromEasyAuth(req);
   if (easy) return easy;
   // 2. Teams SSO Bearer (dentro do iframe Teams)
-  const teams = await userFromTeamsToken(req);
-  if (teams) return teams;
+  try {
+    const teams = await userFromTeamsToken(req);
+    if (teams) return teams;
+  } catch (e) {
+    // Salva no req pra Function poder retornar info de debug ao front
+    if (req) req._authError = {
+      message: e.message,
+      tokenDebug: e.tokenDebug,
+      expectedAudiences: e.expectedAudiences,
+      expectedIssuers: e.expectedIssuers,
+      original: e.original
+    };
+    return null;
+  }
   return null;
 }
 

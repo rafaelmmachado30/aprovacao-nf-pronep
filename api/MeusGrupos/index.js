@@ -99,7 +99,10 @@ module.exports = async function (context, req) {
       context.res = {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
-        body: { error: 'Nao autenticado (nem Easy Auth nem Bearer Teams).' }
+        body: {
+          error: 'Nao autenticado (nem Easy Auth nem Bearer Teams).',
+          authError: req._authError || null
+        }
       };
       return;
     }
