@@ -506,6 +506,18 @@ const menuItems = [
 // ============== HELPERS ==============
 function fmtBRL(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function fmtDate(s) { if (!s) return '—'; const d = new Date(s + 'T00:00:00'); return d.toLocaleDateString('pt-BR'); }
+// Converte ISO UTC (ex: "2026-05-27T13:54:00.000Z") em formato BRT "2026-05-27 10:54"
+function fmtDateTimeBRT(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso).replace('T',' ').substring(0,16);
+    // Formato pt-BR mostra no fuso local do browser (que ja eh BRT no Brasil)
+    const pad = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate())
+      + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  } catch (e) { return String(iso).replace('T',' ').substring(0,16); }
+}
 function fornecedorOf(n) { return fornecedores[n.fornecedorIdx] || { razao: '—', cnpj: '—' }; }
 function statusPill(s, n) {
   // Se a NF estiver no 2o nivel, mostra um badge diferente (azul) em vez de amarelo de pendente
@@ -891,9 +903,9 @@ async function carregarNotasReais() {
         rawStatus: n.Status || '',
         descricao: n.Descricao || '',
         lancadoPor: n.LancadoPor || '',
-        lancadoEm: (n.LancadoEm || '').replace('T',' ').substring(0,16),
+        lancadoEm: fmtDateTimeBRT(n.LancadoEm || ''),
         aprovadoPor: n.AprovadorAtual || '',
-        aprovadoEm: n.AprovadoEm ? (n.AprovadoEm.replace('T',' ').substring(0,16)) : null,
+        aprovadoEm: n.AprovadoEm ? fmtDateTimeBRT(n.AprovadoEm) : null,
         motivo: n.MotivoRejeicao || '',
         hash: (n.HashSHA256 || '').substring(0,16),
         urlPDF: n.UrlPDF || '',
