@@ -2332,7 +2332,8 @@ async function salvarFornecedor(idx) {
   const unidade = document.getElementById('frn-unidade').value;
   const diretoria = document.getElementById('frn-diretoria').value;
   const ativo = document.getElementById('frn-ativo').checked;
-  if (!razao || !cnpj || !unidade || !diretoria) {
+  const atendeTodas = (document.getElementById('frn-atende-todas') || {}).checked || false;
+  if (!razao || !cnpj || !diretoria) {
     toast('Preencha todos os campos obrigatorios (Razao, CNPJ, UF e Diretoria).', 'error');
     return;
   }
