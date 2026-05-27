@@ -47,12 +47,15 @@ async function resolveSiteAndList(client) {
 }
 
 async function findConfigItem(client, siteId, listId) {
+  // SP nao deixa filtrar Title sem indice. Lista todos (lista tem 1 ou 2 items) e filtra local.
   const resp = await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
     .expand('fields')
-    .filter("fields/Title eq '" + CONFIG_TITLE + "'")
-    .top(1)
+    .top(20)
     .get();
-  return (resp.value && resp.value[0]) || null;
+  if (!resp.value) return null;
+  return resp.value.find(function (x) {
+    return x.fields && (x.fields.Title === CONFIG_TITLE);
+  }) || null;
 }
 
 // Validacao defensiva do payload
