@@ -127,7 +127,12 @@ module.exports = async function (context, req) {
         cep:               f.field_11 || '',
         apareceNoHistorico: String(f.field_12 || '').toLowerCase() === 'sim',
         qtdNFsHistorico:   parseInt(f.field_13 || '0', 10) || 0,
-        atendeTodas:       (f.AtendeTodas === true) || String(f.AtendeTodas || '').toLowerCase() === 'true' || String(f.AtendeTodas || '').toLowerCase() === 'sim'
+        atendeTodas:       (function(v){
+          if (v === true || v === 1) return true;
+          if (v === false || v === 0 || v === null || v === undefined) return false;
+          const s = String(v).toLowerCase().trim();
+          return s === 'true' || s === 'sim' || s === 'yes' || s === '1';
+        })(f.AtendeTodas)
       };
     });
 

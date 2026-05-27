@@ -2396,10 +2396,12 @@ async function salvarFornecedor(idx) {
         return;
       }
       // Sucesso: atualiza localmente
-      Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, cnpj: digits, documento: cnpj, unidade, diretoria, uf: unidade, categoria, ativo, tipoDocumento });
+      Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, cnpj: digits, documento: cnpj, unidade, diretoria, uf: unidade, categoria, ativo, tipoDocumento, atendeTodas });
       toast('Fornecedor "' + razao + '" atualizado.', 'success');
     }
     closeModal();
+    // Forca reload dos fornecedores do SP pra garantir consistencia das flags (atendeTodas etc)
+    try { await carregarFornecedoresReais(); } catch (e) { console.warn('reload apos save falhou:', e); }
     showView('fornecedores');
   } catch (e) {
     toast('Falha ao comunicar com servidor: ' + (e && e.message), 'error');
@@ -3265,6 +3267,7 @@ function onFornChange() {
     if (di) di.value = '';
   }
   document.getElementById('frm-diretoria').value = f.diretoria || '';
+  console.log('[selecionarFornecedor] fornecedor:', f.razao, 'atendeTodas:', f.atendeTodas, '(tipo:', typeof f.atendeTodas, ')');
 
   // Trata fornecedor multi-unidade: troca input por radio de UF
   const unidadeInput = document.getElementById('frm-unidade');
