@@ -1233,6 +1233,39 @@ function renderConfiguracoesView() {
         <button class="btn btn-primary" onclick="salvarConfigSistema()">Salvar configurações</button>
       </div>
     </div>
+
+    <div class="card" style="max-width:880px;margin-top:18px">
+      <h3 style="margin-top:0">Gerenciar usuarios (Entra ID)</h3>
+      <p class="small muted" style="margin-bottom:14px">
+        Adicione, remova ou ajuste permissoes de usuarios diretamente no Microsoft Entra ID.
+        Os grupos abaixo controlam o acesso e o perfil de cada usuario no sistema.
+      </p>
+
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px">
+        <a href="https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups/menuId/AllGroups/searchKey/PRONEP-NF"
+           target="_blank" rel="noopener" class="btn btn-primary" style="text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:10px;max-width:380px">
+          + Adicionar novo usuario (abre Entra ID)
+        </a>
+        <div class="small muted">Abre o portal Azure ja filtrando os grupos PRONEP-NF. Voce escolhe o grupo e adiciona o membro.</div>
+      </div>
+
+      <div class="small muted" style="margin-bottom:6px;font-weight:600;color:var(--azul-escuro)">Atalhos diretos por perfil:</div>
+      <table class="data" style="font-size:13px">
+        <thead><tr><th>Perfil</th><th>Grupo no Entra ID</th><th class="center">Abrir</th></tr></thead>
+        <tbody>
+          <tr><td>Administrador</td><td class="mono">PRONEP-NF-Admin</td><td class="center"><a href="https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups/menuId/AllGroups/searchKey/PRONEP-NF-Admin" target="_blank" rel="noopener">Abrir</a></td></tr>
+          <tr><td>Financeiro</td><td class="mono">PRONEP-NF-Financeiro</td><td class="center"><a href="https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups/menuId/AllGroups/searchKey/PRONEP-NF-Financeiro" target="_blank" rel="noopener">Abrir</a></td></tr>
+          <tr><td>Gestor (por diretoria)</td><td class="mono">PRONEP-NF-Gestor_*</td><td class="center"><a href="https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups/menuId/AllGroups/searchKey/PRONEP-NF-Gestor" target="_blank" rel="noopener">Abrir</a></td></tr>
+          <tr><td>Solicitante</td><td class="mono">PRONEP-NF-Submitter</td><td class="center"><a href="https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups/menuId/AllGroups/searchKey/PRONEP-NF-Submitter" target="_blank" rel="noopener">Abrir</a></td></tr>
+          <tr><td>Gestor Master Financeiro (2º nivel)</td><td class="mono">PRONEP-NF-Financeiro-Gestao</td><td class="center"><a href="https://portal.azure.com/#view/Microsoft_AAD_IAM/GroupsManagementMenuBlade/~/AllGroups/menuId/AllGroups/searchKey/PRONEP-NF-Financeiro-Gestao" target="_blank" rel="noopener">Abrir</a></td></tr>
+        </tbody>
+      </table>
+
+      <div class="alert" style="background:var(--azul-soft);border-left:3px solid var(--azul-claro);padding:12px 14px;border-radius:6px;margin-top:14px;font-size:13px;line-height:1.5">
+        <b style="color:var(--azul-escuro)">💡 Dica:</b> Mudancas no Entra ID podem demorar ate 5 minutos pra refletir no sistema (cache de tokens).
+        Se o usuario nao conseguir acessar logo apos a adicao, peca pra ele <b>sair e entrar novamente</b>.
+      </div>
+    </div>
   `;
 }
 
