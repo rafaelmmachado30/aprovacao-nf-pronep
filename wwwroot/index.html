@@ -507,7 +507,11 @@ const menuItems = [
 function fmtBRL(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
 function fmtDate(s) { if (!s) return '—'; const d = new Date(s + 'T00:00:00'); return d.toLocaleDateString('pt-BR'); }
 function fornecedorOf(n) { return fornecedores[n.fornecedorIdx] || { razao: '—', cnpj: '—' }; }
-function statusPill(s) {
+function statusPill(s, n) {
+  // Se a NF estiver no 2o nivel, mostra um badge diferente (azul) em vez de amarelo de pendente
+  if (n && n.aguardandoN2) {
+    return '<span class="status-pill" style="background:#E6F2F9;color:#1F4E79">🔼 2º NÍVEL</span>';
+  }
   const map = { pendente: 'PENDENTE', aprovada: 'APROVADA', rejeitada: 'REJEITADA', duplicada: 'DUPLICADA' };
   return `<span class="status-pill status-${s}">${map[s] || s}</span>`;
 }
@@ -597,7 +601,23 @@ function logout() {
 }
 
 // Tecla Enter no input dispara o login
+// Overlay de loading inicial: aparece enquanto Functions acordam (cold start)
+function mostrarLoadingInicial() {
+  if (document.getElementById('loading-inicial-overlay')) return;
+  const div = document.createElement('div');
+  div.id = 'loading-inicial-overlay';
+  div.style.cssText = 'position:fixed;inset:0;background:#1F4E79;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:99998;font-family:Inter,system-ui,sans-serif;color:#fff';
+  div.innerHTML = '<div style="text-align:center"><div style="width:48px;height:48px;border:4px solid rgba(255,255,255,0.2);border-top-color:#27AAE1;border-radius:50%;animation:spinL 0.8s linear infinite;margin:0 auto 18px"></div><h2 style="margin:0;font-size:18px;font-weight:600">Carregando sistema...</h2><p style="margin:8px 0 0;font-size:13px;opacity:0.85">Conectando com Microsoft 365 e SharePoint</p></div><style>@keyframes spinL{to{transform:rotate(360deg)}}</style>';
+  document.body.appendChild(div);
+}
+function esconderLoadingInicial() {
+  const el = document.getElementById('loading-inicial-overlay');
+  if (el) { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(()=>el.remove(), 350); }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
+  mostrarLoadingInicial();
+
   const el = document.getElementById('login-email');
   if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') loginCheckEmail(); });
   // ORDEM IMPORTANTE: detecta Teams PRIMEIRO (await), porque o
@@ -851,7 +871,7 @@ async function carregarNotasReais() {
       const fornIdx = fornecedores.findIndex(f =>
         (f.documento || f.cnpj || '').replace(/\D/g,'') === cnpj.replace(/\D/g,'')
       );
-      const statusMap = { 'Lancada': 'pendente', 'Aprovada': 'aprovada', 'Rejeitada': 'rejeitada' };
+      const statusMap = { 'Lancada': 'pendente', 'AguardandoN2': 'pendente', 'Aprovada': 'aprovada', 'Rejeitada': 'rejeitada' };
       return {
         id: 'NF-' + n.id,
         spId: n.id,
@@ -867,6 +887,8 @@ async function carregarNotasReais() {
         unidade: n.Unidade || '',
         diretoria: n.Diretoria || '',
         status: statusMap[n.Status] || (n.Status || 'pendente').toLowerCase(),
+        aguardandoN2: (n.Status === 'AguardandoN2'),
+        rawStatus: n.Status || '',
         descricao: n.Descricao || '',
         lancadoPor: n.LancadoPor || '',
         lancadoEm: (n.LancadoEm || '').replace('T',' ').substring(0,16),
@@ -926,6 +948,7 @@ async function carregarDadosIniciais() {
     if (viewsQueDependem.includes(currentView)) {
       showView(currentView);
     }
+    esconderLoadingInicial();
   })();
   return window._carregamentoEmAndamento;
 }
@@ -1644,7 +1667,7 @@ const views = {
                 <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span> · ${n.diretoria}</td>
                 <td>${fmtDate(n.vencimento)}</td>
                 <td class="num"><b>${fmtBRL(n.valor)}</b></td>
-                <td>${statusPill(n.status)}${n.motivo ? `<br><span class="small muted">${n.motivo}</span>` : ''}</td>
+                <td>${statusPill(n.status, n)}${n.motivo ? `<br><span class="small muted">${n.motivo}</span>` : ''}</td>
                 <td>${n.lancadoEm}</td>
               </tr>
             `).join('') || '<tr><td colspan="7" class="muted center">Você ainda não lançou nenhuma NF.</td></tr>'}
@@ -1800,7 +1823,7 @@ const views = {
                 <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
                 <td>${n.diretoria}</td>
                 <td class="num"><b>${fmtBRL(n.valor)}</b></td>
-                <td>${statusPill(n.status)}</td>
+                <td>${statusPill(n.status, n)}</td>
                 <td>${n.motivo || '—'}</td>
                 <td>${n.lancadoPor}<br><span class="small muted">${n.lancadoEm}</span></td>
               </tr>
@@ -3512,7 +3535,7 @@ function openNFDetail(id) {
       <tr><th>Unidade · Diretoria</th><td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span> · ${n.diretoria}</td></tr>
       <tr><th>Vencimento</th><td>${fmtDate(n.vencimento)}</td></tr>
       <tr><th>Valor</th><td><b>${fmtBRL(n.valor)}</b></td></tr>
-      <tr><th>Status</th><td>${statusPill(n.status)}</td></tr>
+      <tr><th>Status</th><td>${statusPill(n.status, n)}</td></tr>
       <tr><th>Lançado por</th><td>${n.lancadoPor} em ${n.lancadoEm}</td></tr>
       <tr><th>Hash SHA-256</th><td class="mono small">${n.hash}</td></tr>
     </table>

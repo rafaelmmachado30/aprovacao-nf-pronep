@@ -150,10 +150,12 @@ module.exports = async function (context, req) {
     if (qDiretoria) notasFiltradas = notasFiltradas.filter(n => (n.Diretoria || '') === qDiretoria);
 
     // Ordena: pendentes primeiro, depois mais recentes
+    // Pendentes (Lancada ou AguardandoN2) primeiro, depois ordenado por data
+    function isPendente(s) { return s === 'Lancada' || s === 'AguardandoN2'; }
     notasFiltradas.sort((a, b) => {
-      const sa = (a.Status || ''); const sb = (b.Status || '');
-      if (sa === 'Lancada' && sb !== 'Lancada') return -1;
-      if (sb === 'Lancada' && sa !== 'Lancada') return 1;
+      const pa = isPendente(a.Status); const pb = isPendente(b.Status);
+      if (pa && !pb) return -1;
+      if (pb && !pa) return 1;
       return (b.LancadoEm || '').localeCompare(a.LancadoEm || '');
     });
 

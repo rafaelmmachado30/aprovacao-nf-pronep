@@ -26,6 +26,49 @@ const { TokenCredentialAuthenticationProvider } =
   require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
+const LIST_CONFIG = 'PRONEP-NF-Config';
+const CONFIG_TITLE = 'global';
+const configCache = { config: null, ts: 0 };
+const CONFIG_TTL = 5 * 60 * 1000;
+
+async function getConfigSistema(client, siteId) {
+  if (configCache.config && (Date.now() - configCache.ts) < CONFIG_TTL) return configCache.config;
+  try {
+    const lists = await client.api('/sites/' + siteId + '/lists')
+      .filter("displayName eq '" + LIST_CONFIG + "'")
+      .get();
+    if (!lists.value || !lists.value.length) {
+      configCache.config = { multiNivel: { habilitado: false } };
+      configCache.ts = Date.now();
+      return configCache.config;
+    }
+    const listId = lists.value[0].id;
+    const items = await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
+      .expand('fields').top(20).get();
+    const item = (items.value || []).find(function (x) { return x.fields && x.fields.Title === CONFIG_TITLE; });
+    if (item && item.fields && item.fields.ConfigJson) {
+      try { configCache.config = JSON.parse(item.fields.ConfigJson); }
+      catch (e) { configCache.config = { multiNivel: { habilitado: false } }; }
+    } else {
+      configCache.config = { multiNivel: { habilitado: false } };
+    }
+    configCache.ts = Date.now();
+    return configCache.config;
+  } catch (e) {
+    return { multiNivel: { habilitado: false } };
+  }
+}
+
+// Resolve quem eh o gestor master do 2o nivel
+function resolverGestorMaster(config, diretoria) {
+  if (!config || !config.multiNivel || !config.multiNivel.habilitado) return null;
+  const mn = config.multiNivel;
+  if (mn.modoAprovador === 'global') return mn.gestorMasterGlobal || null;
+  if (mn.modoAprovador === 'porDiretoria') {
+    return (mn.gestoresPorDiretoria || {})[diretoria] || null;
+  }
+  return null;
+}
 const cache = { siteId: null, driveId: null, listNotasId: null, colMap: null, invColMap: null, colTypes: null, colMapCachedAt: 0 };
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -250,6 +293,74 @@ module.exports = async function (context, req) {
       context.res = { status: 409, body: { error: 'NF foi rejeitada, nao pode ser aprovada' } };
       return;
     }
+
+    // === LOGICA MULTI-NIVEL: verifica se precisa encaminhar pro 2o aprovador ===
+    diag.step = 'check_multinivel';
+    const config = await getConfigSistema(client, siteId);
+    diag.configMultiNivel = config && config.multiNivel ? {
+      habilitado: config.multiNivel.habilitado,
+      valorLimite: config.multiNivel.valorLimite,
+      modoAprovador: config.multiNivel.modoAprovador
+    } : null;
+    const valorNF = Number(f.Valor || 0);
+    const jaEstaNoSegundoNivel = (f.Status === 'AguardandoN2');
+    const precisaSegundoNivel = !jaEstaNoSegundoNivel
+      && config && config.multiNivel && config.multiNivel.habilitado
+      && valorNF > Number(config.multiNivel.valorLimite || 0);
+
+    if (precisaSegundoNivel) {
+      const gestorMaster = resolverGestorMaster(config, f.Diretoria);
+      diag.gestorMaster = gestorMaster;
+      if (!gestorMaster) {
+        context.res = { status: 400, body: {
+          error: 'Aprovacao multi-nivel habilitada mas nao tem gestor master definido pra diretoria ' + f.Diretoria,
+          diag: diag
+        }};
+        return;
+      }
+      if (gestorMaster === aprovadorEmail) {
+        // Auto-escalation: o gestor master eh o mesmo que aprovou primeiro - segue como aprovacao final
+        diag.autoEscalation = true;
+      } else {
+        // Encaminha pro 2o nivel: NAO faz watermark, NAO move PDF.
+        // Apenas muda status pra AguardandoN2 + troca AprovadorAtual + notifica gestor master.
+        diag.step = 'encaminhar_n2';
+        const patchFields = buildPatchPayload({
+          Status: 'AguardandoN2',
+          AprovadorAtual: gestorMaster
+        }, colMap, colTypes);
+        await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(patchFields);
+
+        diag.step = 'notify_n2';
+        try {
+          await notificar('lancada', [gestorMaster], {
+            itemId: itemId,
+            numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor,
+            vencimento: f.DataVencimento, unidade: f.Unidade, diretoria: f.Diretoria,
+            aprovador: 'Aprovacao 2o nivel - acima do limite',
+            submitter: f.LancadoPor,
+            urlPDF: f.UrlPDF
+          });
+        } catch (notifErr) {
+          diag.notifyN2Error = notifErr.message;
+        }
+
+        context.res = {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: {
+            ok: true,
+            encaminhado: true,
+            mensagem: 'NF encaminhada para aprovacao do 2o nivel',
+            proximoAprovador: gestorMaster,
+            itemId: itemId,
+            diag: diag
+          }
+        };
+        return;
+      }
+    }
+    // === FIM lógica multi-nivel — segue fluxo de aprovacao final ===
 
     diag.step = 'find_pdf';
     // Encontra o PDF em /Pendentes/{Unidade}/Diretoria {Diretoria}/
