@@ -34,8 +34,7 @@ const ADMIN_GROUP_ID = '480a1595-bdc3-492a-9ef2-317f148a237e';
 // pre-existente do SharePoint da Pronep e contem historico legacy da empresa. ENQUANTO
 // nao migrarmos pra uma pasta nova exclusiva do projeto (ex: "Aprovados"), ela NAO entra
 // na limpeza — apagariamos historico real.
-// PDFs aprovados criados pelo sistema vao ficar orfaos la temporariamente. Quando migrar,
-// reincluir 'Notas Fiscais/Notas Aprovadas' (ou o nome novo) neste array.
+// Quando migrar pra pasta exclusiva, reincluir o caminho neste array.
 const PASTAS = [
   'Notas Fiscais/Pendentes',
   // 'Notas Fiscais/Notas Aprovadas', // DESABILITADO ate migracao da pasta legacy
