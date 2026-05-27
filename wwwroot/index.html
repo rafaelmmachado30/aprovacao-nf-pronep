@@ -1305,7 +1305,105 @@ function renderConfiguracoesView() {
         Se o usuario nao conseguir acessar logo apos a adicao, peca pra ele <b>sair e entrar novamente</b>.
       </div>
     </div>
+
+    ${currentPersona && currentPersona.role === 'admin' ? `
+    <div class="card" style="max-width:880px;margin-top:18px;border:2px solid #C62828;background:#FFF8F8">
+      <h3 style="margin-top:0;color:#C62828;display:flex;align-items:center;gap:8px">
+        <span style="font-size:22px">⚠</span> Zona de risco — Reset da base
+      </h3>
+      <p class="small" style="color:#6D2020;margin-bottom:14px;line-height:1.55">
+        Apaga <b>TODAS</b> as NFs da base (Fila, Notas Aprovadas e Rejeitadas) e remove os PDFs das pastas
+        <span class="mono">Pendentes</span> e <span class="mono">Rejeitadas</span> no SharePoint.<br>
+        <b>NAO mexe</b> em Fornecedores, Diretorias, Configuracoes nem na pasta
+        <span class="mono">Notas Aprovadas</span> (contem historico legacy da Pronep — preservado por seguranca ate migrarmos pra pasta exclusiva do projeto).<br>
+        Use apenas pra preparar o sistema pra producao ou em situacoes excepcionais de reset.<br>
+        <b style="color:#C62828">Esta acao eh IRREVERSIVEL.</b>
+      </p>
+      <button class="btn" style="background:#C62828;color:#fff;border-color:#C62828" onclick="abrirModalLimparBase()">
+        🗑 Limpar base de NFs
+      </button>
+    </div>
+    ` : ''}
   `;
+}
+
+// Modal de confirmacao dupla — so admin chega aqui
+function abrirModalLimparBase() {
+  if (!currentPersona || currentPersona.role !== 'admin') {
+    toast('Acesso restrito a administradores.', 'error');
+    return;
+  }
+  openModal(`
+    <span class="close-x" onclick="closeModal()">×</span>
+    <h3 style="color:#C62828;display:flex;align-items:center;gap:8px">
+      <span style="font-size:24px">⚠</span> Tem certeza que deseja limpar a base?
+    </h3>
+    <div style="background:#FFF5F5;border:1px solid #FFCDD2;border-radius:8px;padding:14px;margin:12px 0;font-size:14px;line-height:1.6;color:#6D2020">
+      Esta acao vai apagar <b>permanentemente</b>:
+      <ul style="margin:8px 0 0 18px;padding:0">
+        <li>Todos os registros de NFs da lista (Fila, Aprovadas e Rejeitadas somem das telas)</li>
+        <li>Todos os PDFs na pasta <span class="mono">Pendentes</span></li>
+        <li>Todos os PDFs na pasta <span class="mono">Rejeitadas</span></li>
+      </ul>
+      <div style="margin-top:10px;padding:8px 10px;background:#E8F5E9;border-left:3px solid #2E7D32;border-radius:4px;color:#1B5E20;font-size:13px">
+        <b>Preservado:</b> a pasta <span class="mono">Notas Aprovadas</span> NAO sera tocada (contem historico legacy da Pronep). PDFs aprovados antigos vao ficar la como arquivos orfaos ate migrarmos pra pasta exclusiva.
+      </div>
+      <div style="margin-top:10px"><b>Nao sera possivel recuperar os dados.</b></div>
+    </div>
+    <div class="form-row">
+      <label style="font-weight:600">Pra confirmar, digite <span class="mono" style="background:#FFE5E5;padding:2px 6px;border-radius:4px;color:#C62828">LIMPAR</span> abaixo:</label>
+      <input type="text" id="confirma-limpar" placeholder="Digite LIMPAR" autocomplete="off"
+             oninput="document.getElementById('btn-confirma-limpar').disabled = (this.value !== 'LIMPAR')"
+             style="margin-top:6px;width:100%">
+    </div>
+    <div class="btn-row" style="margin-top:18px;display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button id="btn-confirma-limpar" class="btn" style="background:#C62828;color:#fff;border-color:#C62828" disabled
+              onclick="executarLimparBase()">🗑 Confirmar e limpar</button>
+    </div>
+  `);
+}
+
+async function executarLimparBase() {
+  const btn = document.getElementById('btn-confirma-limpar');
+  const input = document.getElementById('confirma-limpar');
+  if (!btn || !input) return;
+  if (input.value !== 'LIMPAR') {
+    toast('Digite LIMPAR pra confirmar.', 'error');
+    return;
+  }
+  btn.disabled = true;
+  btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:8px"></span>Limpando base...';
+  try {
+    const r = await fetch('/api/AdminLimparBase', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmacao: 'LIMPAR' })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 403) {
+      toast('Acesso negado: ' + (data.error || 'precisa ser administrador'), 'error');
+      closeModal();
+      return;
+    }
+    if (!r.ok) {
+      toast('Erro ao limpar base: ' + (data.error || 'HTTP ' + r.status), 'error');
+      btn.disabled = false;
+      btn.textContent = '🗑 Confirmar e limpar';
+      return;
+    }
+    const rem = data.removidos || {};
+    closeModal();
+    toast('Base limpa: ' + (rem.notas || 0) + ' NFs + ' + ((rem.pdfsPendentes||0)+(rem.pdfsRejeitadas||0)) + ' PDFs removidos (pasta Notas Aprovadas preservada).', 'success');
+    // Recarrega notas (vai vir vazio)
+    notas = [];
+    showView('configuracoes');
+  } catch (e) {
+    toast('Falha de comunicacao: ' + (e && e.message), 'error');
+    btn.disabled = false;
+    btn.textContent = '🗑 Confirmar e limpar';
+  }
 }
 
 function renderConfigCamposGestor(modo) {
