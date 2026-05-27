@@ -61,6 +61,7 @@ function buildFieldsPayload(body) {
   if (body.email !== undefined)         fields.field_9  = String(body.email || '').trim().toLowerCase();
   if (body.cidade !== undefined)        fields.field_10 = String(body.cidade || '').trim();
   if (body.cep !== undefined)           fields.field_11 = String(body.cep || '').trim();
+  if (body.atendeTodas !== undefined)   fields.AtendeTodas = !!body.atendeTodas;
   return fields;
 }
 

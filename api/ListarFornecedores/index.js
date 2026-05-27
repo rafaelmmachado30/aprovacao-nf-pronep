@@ -126,7 +126,8 @@ module.exports = async function (context, req) {
         cidade:            f.field_10 || '',
         cep:               f.field_11 || '',
         apareceNoHistorico: String(f.field_12 || '').toLowerCase() === 'sim',
-        qtdNFsHistorico:   parseInt(f.field_13 || '0', 10) || 0
+        qtdNFsHistorico:   parseInt(f.field_13 || '0', 10) || 0,
+        atendeTodas:       (f.AtendeTodas === true) || String(f.AtendeTodas || '').toLowerCase() === 'true' || String(f.AtendeTodas || '').toLowerCase() === 'sim'
       };
     });
 
