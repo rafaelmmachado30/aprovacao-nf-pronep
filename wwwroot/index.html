@@ -953,7 +953,7 @@ async function carregarDadosIniciais() {
   if (window._carregamentoEmAndamento) return window._carregamentoEmAndamento;
   window._carregamentoEmAndamento = (async () => {
     // Carrega fornecedores+diretorias PRIMEIRO (notas dependem do fornecedores pra mapping)
-    await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais(), carregarGestoresFinanceiroReais(), carregarConfigSistema()]);
+    await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais(), carregarGestoresFinanceiroReais(), carregarConfigSistema(), carregarFeriadosBR()]);
     // Depois carrega as notas (que mapeiam fornecedorIdx pelo array de fornecedores)
     await carregarNotasReais();
     // Re-renderiza qualquer view que dependa de fornecedores/diretorias
@@ -1739,7 +1739,7 @@ const views = {
           <input id="frm-valor" type="number" step="0.01" placeholder="0,00">
         </div>
         <div class="form-row">
-          <label>Vencimento * <span class="small muted" style="font-weight:400">(mínimo: D+5)</span></label>
+          <label>Vencimento * <span class="small muted" style="font-weight:400">(mínimo: D+5 dias úteis)</span></label>
           <input id="frm-venc" type="date" onchange="onVencChange()" oninput="onVencChange()">
           <div id="frm-venc-info" class="small" style="margin-top:4px"></div>
         </div>
@@ -2738,7 +2738,7 @@ function renderFilaAprovacaoView() {
             // Calcula dias ate o vencimento (BRT)
             const hoje = new Date(); hoje.setHours(0,0,0,0);
             const dVenc = new Date((n.vencimento || '') + 'T00:00:00');
-            const diasAteVenc = Math.round((dVenc - hoje) / 86400000);
+            const diasAteVenc = isNaN(dVenc.getTime()) ? NaN : diasEntre(hoje, dVenc);
             const venceForaPrazo = !isNaN(diasAteVenc) && diasAteVenc < 5;
             const trStyle = venceForaPrazo ? 'background:var(--vermelho-bg)' : '';
             return `
@@ -2918,7 +2918,7 @@ function renderAprovadasTable() {
           lista.slice(0, 500).map(n => {
             const apData = n.aprovadoEm ? new Date((n.aprovadoEm||'').substring(0,10) + 'T00:00:00') : null;
             const vencData = n.vencimento ? new Date(n.vencimento + 'T00:00:00') : null;
-            const diasAteVenc = (apData && vencData) ? Math.round((vencData - apData) / (1000*60*60*24)) : null;
+            const diasAteVenc = (apData && vencData) ? diasEntre(apData, vencData) : null;
             const vencForaPrazo = diasAteVenc !== null && diasAteVenc < 5;
             const trBg = n.processado ? 'background:#F0F4F7;opacity:0.75' : (vencForaPrazo ? 'background:#FFF5F5' : '');
             return `
@@ -3301,8 +3301,79 @@ function limparAvisoFornecedor() {
   }
 }
 
+// === FERIADOS NACIONAIS BR + DIAS UTEIS ===
+window._feriadosBR = null;
+async function carregarFeriadosBR() {
+  if (window._feriadosBR) return window._feriadosBR;
+  const ano = new Date().getFullYear();
+  // Tenta localStorage
+  try {
+    const cached = JSON.parse(localStorage.getItem('feriadosBR') || 'null');
+    if (cached && cached.ano === ano && Array.isArray(cached.feriados)) {
+      window._feriadosBR = cached.feriados;
+      return cached.feriados;
+    }
+  } catch (e) {}
+  // Busca Brasilapi (2 anos: corrente + seguinte) com fallback hardcoded
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch('https://brasilapi.com.br/api/feriados/v1/' + ano),
+      fetch('https://brasilapi.com.br/api/feriados/v1/' + (ano + 1))
+    ]);
+    const f1 = r1.ok ? await r1.json() : [];
+    const f2 = r2.ok ? await r2.json() : [];
+    const feriados = [...f1, ...f2].map(f => f.date);
+    window._feriadosBR = feriados;
+    try { localStorage.setItem('feriadosBR', JSON.stringify({ ano, feriados })); } catch (e) {}
+    return feriados;
+  } catch (e) {
+    // Fallback: feriados nacionais fixos (sem moveis - Pascoa, Corpus Christi sao dinamicos)
+    console.warn('[Feriados] Brasilapi falhou, usando fallback fixo');
+    const fixos = [];
+    for (const a of [ano, ano + 1]) {
+      fixos.push(a + '-01-01', a + '-04-21', a + '-05-01', a + '-09-07', a + '-10-12',
+                 a + '-11-02', a + '-11-15', a + '-12-25');
+    }
+    window._feriadosBR = fixos;
+    return fixos;
+  }
+}
+
+function ehDiaUtil(date) {
+  const d = new Date(date);
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) return false; // domingo, sabado
+  const iso = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  if (window._feriadosBR && window._feriadosBR.includes(iso)) return false;
+  return true;
+}
+
+// Conta DIAS UTEIS entre d1 (exclusivo) e d2 (inclusivo). Se d2 < d1, retorna negativo.
 function diasEntre(d1, d2) {
-  return Math.round((d2 - d1) / (1000*60*60*24));
+  if (!(d1 instanceof Date)) d1 = new Date(d1);
+  if (!(d2 instanceof Date)) d2 = new Date(d2);
+  d1 = new Date(d1); d1.setHours(0,0,0,0);
+  d2 = new Date(d2); d2.setHours(0,0,0,0);
+  if (d1.getTime() === d2.getTime()) return 0;
+  const sentido = d2 > d1 ? 1 : -1;
+  let dias = 0;
+  const cur = new Date(d1);
+  while (cur.getTime() !== d2.getTime()) {
+    cur.setDate(cur.getDate() + sentido);
+    if (ehDiaUtil(cur)) dias += sentido;
+  }
+  return dias;
+}
+
+// Adiciona N dias UTEIS a uma data (usado pra calcular minDate de vencimento)
+function addDiasUteis(date, n) {
+  const result = new Date(date);
+  let added = 0;
+  while (added < n) {
+    result.setDate(result.getDate() + 1);
+    if (ehDiaUtil(result)) added++;
+  }
+  return result;
 }
 
 function onVencChange() {
