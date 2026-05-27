@@ -2,8 +2,21 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>Pronep — Aprovação de NF (Protótipo)</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aprovacao NF Pronep</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Sistema de aprovacao de notas fiscais da Pronep Life Care.">
+<!-- PWA: tema + manifest + ios -->
+<meta name="theme-color" content="#1F4E79">
+<meta name="color-scheme" content="light">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="256x256" href="/favicon-256.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<!-- iOS Safari PWA -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="NF Pronep">
+<meta name="mobile-web-app-capable" content="yes">
 <!-- Chart.js local (rede da Pronep bloqueia CDNs externos) -->
 <script src="/vendor/chart.umd.min.js"></script>
 <!-- Microsoft Teams JS SDK (pra detectar quando rodando dentro do Teams) -->
@@ -672,7 +685,55 @@ document.addEventListener('DOMContentLoaded', async () => {
   await initTeamsContext();
   // Agora sim: tenta auto-login. Se sem sessao + Teams: aguarda popup. Se sem sessao + browser: redireciona.
   tryAutoLoginFromAzure();
+
+  // PWA: registra Service Worker (so quando rodando fora do iframe Teams)
+  registrarServiceWorker();
 });
+
+// Registra o Service Worker pra habilitar instalacao como app + cache do shell offline.
+// Importante: NAO registramos dentro do iframe Teams (window !== window.top) — Teams
+// gerencia o ciclo de vida da tab dele e nao faz sentido competir.
+function registrarServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  // Dentro do iframe Teams: skip
+  try { if (window.top !== window.self) return; } catch (e) { return; }
+  // Localhost com http: skip (SW exige HTTPS ou localhost)
+  if (location.protocol !== 'https:' && location.hostname !== 'localhost') return;
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' })
+      .then(reg => {
+        console.log('[PWA] SW registrado:', reg.scope);
+        // Se ja tem um SW novo aguardando, ativa imediatamente no proximo reload
+        if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        // Detecta novas versoes (deploy novo) e avisa o user
+        reg.addEventListener('updatefound', () => {
+          const sw = reg.installing;
+          if (!sw) return;
+          sw.addEventListener('statechange', () => {
+            if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+              // Nova versao instalada e ja existe SW antigo controlando: oferece reload
+              console.log('[PWA] Nova versao disponivel');
+              if (typeof toast === 'function') {
+                toast('Nova versao disponivel — recarregue a pagina (Ctrl+F5) pra atualizar.', 'info');
+              }
+              sw.postMessage({ type: 'SKIP_WAITING' });
+            }
+          });
+        });
+      })
+      .catch(err => console.warn('[PWA] Falha ao registrar SW:', err));
+  });
+
+  // Quando o SW ativa, recarrega a pagina pra pegar assets novos (apenas 1x por sessao)
+  let recarregou = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (recarregou) return;
+    recarregou = true;
+    // Em desenvolvimento isso eh agressivo; em prod ajuda a evitar usuario preso em versao velha
+    console.log('[PWA] SW assumiu controle.');
+  });
+}
 
 // =================== INTEGRACAO MICROSOFT TEAMS ===================
 window._teamsContext = { isInTeams: false, subEntityId: null, nfIdToOpen: null };
