@@ -2177,6 +2177,12 @@ function abrirModalFornecedor(idx) {
           <input id="frn-ativo" type="checkbox" ${x.ativo?'checked':''} style="width:auto"> Fornecedor ativo (permite lançamento de NF)
         </label>
       </div>
+      <div class="form-row" style="grid-column:1/-1">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:500;text-transform:none">
+          <input id="frn-atende-todas" type="checkbox" ${x.atendeTodas?'checked':''} style="width:auto"> Atende as 3 unidades (SP, RJ, ES)
+        </label>
+        <div class="small muted" style="margin-top:4px">Quando marcado, ao lançar NF o usuário escolherá a unidade na hora (em vez de usar a unidade padrão do cadastro).</div>
+      </div>
     </div>
     <div class="small muted" style="margin-top:10px"><b>Diretoria padrão:</b> determina automaticamente para qual gestor a NF será roteada quando este fornecedor for selecionado no lançamento.</div>
     <div class="btn-row">
