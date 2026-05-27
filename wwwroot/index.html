@@ -829,6 +829,11 @@ async function carregarFornecedoresReais() {
       cnpj: f.documento,
       categoria: 'Serviços'
     }));
+    const comAtendeTodas = fornecedores.filter(f => f.atendeTodas === true);
+    console.log('[ListarFornecedores] ' + fornecedores.length + ' carregados, ' + comAtendeTodas.length + ' com atendeTodas=true');
+    if (comAtendeTodas.length > 0) {
+      console.log('[ListarFornecedores] fornecedores multi-unidade:', comAtendeTodas.map(f => f.razao + ' (' + (f.documento||f.cnpj) + ')'));
+    }
     window._dadosCarregados.fornecedores = true;
     console.log('[ListarFornecedores] ' + fornecedores.length + ' carregados');
     return true;
@@ -2355,11 +2360,13 @@ async function salvarFornecedor(idx) {
         document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
         return;
       }
+      const payloadAdd = { razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas };
+      console.log('[salvarFornecedor] ADD payload:', payloadAdd);
       const r = await fetch('/api/AdicionarFornecedor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo })
+        body: JSON.stringify(payloadAdd)
       });
       const data = await r.json().catch(() => ({}));
       if (r.status === 409) {
@@ -2384,13 +2391,16 @@ async function salvarFornecedor(idx) {
         document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
         return;
       }
+      const payload = { id: spId, razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas };
+      console.log('[salvarFornecedor] EDIT payload:', payload);
       const r = await fetch('/api/EditarFornecedor', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ id: spId, razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo })
+        body: JSON.stringify(payload)
       });
       const data = await r.json().catch(() => ({}));
+      console.log('[salvarFornecedor] EDIT response:', data);
       if (!r.ok) {
         toast('Erro ao editar: ' + (data.error || ('HTTP ' + r.status)), 'error');
         document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
