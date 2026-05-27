@@ -143,18 +143,30 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Acha o arquivo pelo NumeroNF como prefixo (formato do PostNota: {numero}_{razao}_{timestamp}_*.pdf)
+    // Acha o arquivo pelo NumeroNF como prefixo (formato PostNota: {numero}_{razao}_{timestamp}_*.pdf)
+    // SEGURANCA: SEM fallback "mais recente" - retorna erro se nao achar match exato pelo NumeroNF.
     let target = null;
     if (numero) {
+      // 1. Match exato: comeca com "{numero}_"
       target = arquivos.find(a => a.name && a.name.startsWith(numero + '_'));
+      // 2. Reforco: contem "_{numero}_" em qualquer parte (caso o numero seja parte do nome)
+      if (!target) {
+        target = arquivos.find(a => a.name && a.name.indexOf('_' + numero + '_') >= 0);
+      }
+      // 3. Match no fileSize+hash poderia ser feito aqui se persistido — TODO
     }
     if (!target) {
-      // Fallback: pega o mais recente
-      target = arquivos.sort((a, b) => (b.lastModifiedDateTime||'').localeCompare(a.lastModifiedDateTime||''))[0];
-    }
-    if (!target) {
+      const filenames = arquivos.map(a => a.name).slice(0, 10);
       context.res = { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        body: htmlErro('PDF nao encontrado', `Nao encontrei o PDF da NF ${numero} na pasta.`, `Pasta: ${folder}<br>Arquivos: ${arquivos.length}`) };
+        body: htmlErro(
+          'PDF nao encontrado',
+          `Nao encontrei o PDF da NF <b>${numero}</b> nesta pasta.<br>` +
+          `Pode ser que o arquivo foi renomeado ou apagado fora do sistema. ` +
+          `Procure manualmente no SharePoint.`,
+          `Pasta procurada: <span style="font-family:monospace">${folder}</span><br>` +
+          `Arquivos disponiveis (${arquivos.length}): ${filenames.length ? filenames.join('<br>') : '(nenhum)'}`
+        )
+      };
       return;
     }
 
