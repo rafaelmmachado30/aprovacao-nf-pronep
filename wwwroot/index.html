@@ -1754,9 +1754,14 @@ const views = {
                  oninput="this.value = this.value.toUpperCase()">
         </div>
 
-        <div class="form-row">
+        <div class="form-row" id="frm-unidade-row">
           <label>Unidade *</label>
-          <input id="frm-unidade" readonly placeholder="Auto-preenchido do cadastro">
+          <div id="frm-unidade-radios" style="display:flex;gap:14px;margin-top:6px;flex-wrap:wrap">
+            <label class="frm-unidade-opt" data-uf="SP" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border:1px solid var(--cinza-300);border-radius:6px;background:#fff"><input type="radio" name="frm-unidade-radio" value="SP" disabled style="width:auto;cursor:pointer"> SP</label>
+            <label class="frm-unidade-opt" data-uf="RJ" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border:1px solid var(--cinza-300);border-radius:6px;background:#fff"><input type="radio" name="frm-unidade-radio" value="RJ" disabled style="width:auto;cursor:pointer"> RJ</label>
+            <label class="frm-unidade-opt" data-uf="ES" style="display:flex;align-items:center;gap:6px;cursor:pointer;padding:6px 12px;border:1px solid var(--cinza-300);border-radius:6px;background:#fff"><input type="radio" name="frm-unidade-radio" value="ES" disabled style="width:auto;cursor:pointer"> ES</label>
+          </div>
+          <div id="frm-unidade-hint" class="small muted" style="margin-top:6px">Selecione um fornecedor para habilitar as unidades.</div>
         </div>
         <div class="form-row">
           <label>Diretoria *</label>
@@ -3280,26 +3285,8 @@ function onFornChange() {
   document.getElementById('frm-diretoria').value = f.diretoria || '';
   console.log('[selecionarFornecedor] fornecedor:', f.razao, 'atendeTodas:', f.atendeTodas, '(tipo:', typeof f.atendeTodas, ')');
 
-  // Trata fornecedor multi-unidade: troca input por radio de UF
-  const unidadeInput = document.getElementById('frm-unidade');
-  const unidadeRow = unidadeInput ? unidadeInput.closest('.form-row') : null;
-  if (f.atendeTodas && unidadeRow) {
-    unidadeRow.innerHTML = `
-      <label>Unidade * <span class="small muted" style="font-weight:400">(fornecedor atende as 3 unidades - selecione)</span></label>
-      <div id="frm-unidade-radios" style="display:flex;gap:14px;margin-top:6px">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="frm-unidade-radio" value="SP" onchange="document.getElementById('frm-unidade-hidden').value=this.value"> SP</label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="frm-unidade-radio" value="RJ" onchange="document.getElementById('frm-unidade-hidden').value=this.value"> RJ</label>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="radio" name="frm-unidade-radio" value="ES" onchange="document.getElementById('frm-unidade-hidden').value=this.value"> ES</label>
-      </div>
-      <input type="hidden" id="frm-unidade-hidden" value="">
-    `;
-  } else if (unidadeRow) {
-    // Restaura input readonly normal se nao for atende todas
-    unidadeRow.innerHTML = `
-      <label>Unidade *</label>
-      <input id="frm-unidade" readonly placeholder="Auto-preenchido do cadastro" value="${f.unidade || ''}">
-    `;
-  }
+  // Configura radios de unidade: pre-seleciona + desabilita conforme cadastro
+  configurarRadiosUnidade(f);
 
   // Valida se fornecedor tem cadastro completo (UnidadePadrao + DiretoriaPadrao)
   const faltam = [];
@@ -3309,6 +3296,69 @@ function onFornChange() {
     mostrarAvisoFornecedorIncompleto(f, faltam);
   } else {
     limparAvisoFornecedor();
+  }
+}
+
+function configurarRadiosUnidade(f) {
+  // Sempre renderiza os 3 radios. Regra:
+  //   atendeTodas=true  -> 3 livres, nada pre-marcado
+  //   single-unidade    -> pre-marca o radio da unidade do cadastro, desabilita os outros 2
+  //   sem unidade nem atendeTodas -> tudo desabilitado (cadastro incompleto, ja bloqueado)
+  const radios = document.querySelectorAll('input[name="frm-unidade-radio"]');
+  const hint = document.getElementById('frm-unidade-hint');
+  const unidadeCadastro = (f.unidade || '').toUpperCase();
+  const multi = !!f.atendeTodas;
+
+  radios.forEach(r => {
+    r.checked = false;
+    if (multi) {
+      r.disabled = false;
+    } else if (unidadeCadastro) {
+      r.disabled = (r.value !== unidadeCadastro);
+      if (r.value === unidadeCadastro) r.checked = true;
+    } else {
+      r.disabled = true;
+    }
+    const lbl = r.closest('.frm-unidade-opt');
+    if (lbl) {
+      if (r.disabled) {
+        lbl.style.opacity = '0.45';
+        lbl.style.cursor = 'not-allowed';
+        lbl.style.background = '#F8FAFC';
+        lbl.title = multi ? '' : ('Fornecedor exclusivo de ' + unidadeCadastro + ' — pra liberar outras unidades, edite o cadastro');
+      } else {
+        lbl.style.opacity = '1';
+        lbl.style.cursor = 'pointer';
+        lbl.style.background = r.checked ? 'var(--azul-soft)' : '#fff';
+        lbl.style.borderColor = r.checked ? 'var(--azul-claro)' : 'var(--cinza-300)';
+        lbl.title = '';
+        if (!r._wired) {
+          r.addEventListener('change', () => {
+            document.querySelectorAll('input[name="frm-unidade-radio"]').forEach(rr => {
+              const ll = rr.closest('.frm-unidade-opt');
+              if (ll && !rr.disabled) {
+                ll.style.background = rr.checked ? 'var(--azul-soft)' : '#fff';
+                ll.style.borderColor = rr.checked ? 'var(--azul-claro)' : 'var(--cinza-300)';
+              }
+            });
+          });
+          r._wired = true;
+        }
+      }
+    }
+  });
+
+  if (hint) {
+    if (multi) {
+      hint.textContent = 'Fornecedor atende as 3 unidades — selecione a unidade desta NF.';
+      hint.style.color = 'var(--azul-escuro)';
+    } else if (unidadeCadastro) {
+      hint.textContent = 'Fornecedor exclusivo de ' + unidadeCadastro + ' (definido no cadastro).';
+      hint.style.color = 'var(--cinza-600, #647883)';
+    } else {
+      hint.textContent = 'Cadastro do fornecedor sem unidade — edite o fornecedor no SharePoint.';
+      hint.style.color = 'var(--vermelho, #C62828)';
+    }
   }
 }
 
@@ -3648,6 +3698,21 @@ async function submitNF() {
     msgs.innerHTML = '<div class="alert alert-info" style="background:var(--azul-soft);border-left:3px solid var(--azul-claro);color:var(--azul-escuro);padding:10px;border-radius:4px"><span class="ico">⏳</span><div>Convertendo PDF e enviando ao SharePoint...</div></div>';
 
     const dataURL = await fileToDataURL(file);
+
+    // Resolve unidade: SEMPRE le do radio checked (single ou multi-unidade usam o mesmo controle)
+    const checkedRadio = document.querySelector('input[name="frm-unidade-radio"]:checked');
+    const unidadeFinal = checkedRadio ? checkedRadio.value : '';
+    if (!unidadeFinal) {
+      const msgFalta = forn.atendeTodas
+        ? '<b>Selecione a unidade da NF</b> — este fornecedor atende as 3 unidades (SP, RJ, ES).'
+        : '<b>Unidade nao definida</b> — o cadastro do fornecedor esta incompleto. Edite no SharePoint.';
+      msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div>' + msgFalta + '</div></div>';
+      btn.disabled = false;
+      btn.textContent = labelOriginal;
+      return;
+    }
+    console.log('[submitNF] forn.atendeTodas=' + forn.atendeTodas + ' | forn.unidade=' + forn.unidade + ' | unidadeFinal=' + unidadeFinal);
+
     const payload = {
       fornecedorCNPJ:  forn.documento || forn.cnpj,
       fornecedorRazao: forn.razao,
@@ -3655,7 +3720,7 @@ async function submitNF() {
       serie:           document.getElementById('frm-serie').value || '1',
       valor:           valor,
       vencimento:      venc,
-      unidade:         forn.unidade,
+      unidade:         unidadeFinal,
       diretoria:       forn.diretoria,
       negociadoCom:    negociouComEmail || null,
       descricao:       descricao,
@@ -3695,7 +3760,7 @@ async function submitNF() {
       valor: valor,
       vencimento: venc,
       emissao: agora.substring(0,10),
-      unidade: forn.unidade,
+      unidade: unidadeFinal,
       diretoria: forn.diretoria,
       status: 'pendente',
       foraPrazo: diff < 5,
