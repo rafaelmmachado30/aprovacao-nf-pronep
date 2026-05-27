@@ -191,22 +191,34 @@ async function resolveAprovador(client, siteId, listDirId, unidade, diretoria) {
 }
 
 // Checa duplicata: hash igual OU (CNPJ + numero + serie iguais)
-async function verificaDuplicata(client, siteId, listNotasId, hash, cnpj, numero, serie) {
-  // Le todas as notas atuais (TODO paginacao se muito grande)
+// IGNORA NFs com status 'Rejeitada' — afinal foram rejeitadas justamente porque tinham
+// problema, entao o fluxo natural eh o user corrigir e reenviar. Bloquear isso seria
+// um falso positivo.
+async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj, numero, serie) {
   const resp = await client
     .api(`/sites/${siteId}/lists/${listNotasId}/items?expand=fields&$top=999`)
     .get();
+  // Resolve internal names dinamicamente; se nao tiver no map, cai pros displayNames padrao
+  const colStatus  = (colMap && colMap['Status']) || 'Status';
+  const colHash    = (colMap && colMap['HashSHA256']) || 'HashSHA256';
+  const colCNPJ    = (colMap && colMap['CNPJFornecedor']) || 'CNPJFornecedor';
+  const colNumero  = (colMap && colMap['NumeroNF']) || 'NumeroNF';
+
   for (const item of (resp.value || [])) {
     const f = item.fields || {};
-    // field_X reais sao mapeados conforme ListarNotas — provisoriamente comparamos fields conhecidos
-    const itemHash   = f.HashSHA256 || f.field_14 || '';  // ajustaremos quando soubermos os field_N
-    const itemDoc    = f.CNPJFornecedor || f.field_2 || '';
-    const itemNum    = f.NumeroNF || f.field_1 || '';
+    const itemStatus = f[colStatus] || f.Status || '';
+    // Pula NFs rejeitadas — usuario pode reenviar com a NF corrigida
+    if (String(itemStatus).toLowerCase() === 'rejeitada') continue;
+
+    const itemHash = f[colHash] || f.HashSHA256 || '';
+    const itemDoc  = f[colCNPJ] || f.CNPJFornecedor || '';
+    const itemNum  = f[colNumero] || f.NumeroNF || '';
+
     if (hash && itemHash && hash === itemHash) {
-      return { motivo: 'hash', notaId: item.id, status: f.Status || f.field_8 };
+      return { motivo: 'hash', notaId: item.id, status: itemStatus };
     }
     if (cnpj && numero && itemDoc === cnpj && itemNum === numero) {
-      return { motivo: 'cnpj_numero', notaId: item.id, status: f.Status || f.field_8 };
+      return { motivo: 'cnpj_numero', notaId: item.id, status: itemStatus };
     }
   }
   return null;
@@ -263,8 +275,16 @@ module.exports = async function (context, req) {
     }
     diag.aprovador = aprovador.email;
 
+    // Resolve colMap ANTES da verificacao de duplicata — precisamos do internal name
+    // do Status pra filtrar NFs rejeitadas corretamente
+    diag.step = 'discover_columns';
+    const colMap = await getColumnMap(client, siteId, listNotasId);
+    diag.colMap = colMap;
+    diag.colTypes = cache.colTypes;
+    diag.colRaw = cache.colRaw;
+
     diag.step = 'check_duplicate';
-    const dup = await verificaDuplicata(client, siteId, listNotasId, hash, fornecedorCNPJ, numero, serie);
+    const dup = await verificaDuplicata(client, siteId, listNotasId, colMap, hash, fornecedorCNPJ, numero, serie);
     if (dup) {
       context.res = { status: 409, headers: { 'Content-Type': 'application/json' },
         body: { error: 'Duplicidade detectada', motivo: dup.motivo, notaId: dup.notaId, status: dup.status, diag } };
@@ -284,12 +304,6 @@ module.exports = async function (context, req) {
       .put(pdfBuffer);
     diag.driveItemId = uploadResp.id;
     diag.webUrl = uploadResp.webUrl;
-
-    diag.step = 'discover_columns';
-    const colMap = await getColumnMap(client, siteId, listNotasId);
-    diag.colMap = colMap;
-    diag.colTypes = cache.colTypes;
-    diag.colRaw = cache.colRaw;
 
     diag.step = 'create_list_item';
     // Title = "NF {numero}" ou descricao se nao tem numero

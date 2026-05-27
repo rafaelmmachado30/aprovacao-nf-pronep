@@ -3738,8 +3738,10 @@ async function submitNF() {
     const data = await resp.json().catch(() => ({}));
 
     if (resp.status === 409) {
-      // Duplicidade
-      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">⚠</span><div><b>Duplicidade detectada.</b> Esta NF ja foi lancada anteriormente. Motivo: <b>${data.motivo}</b> · Status atual: <b>${data.status || '—'}</b>. O lancamento foi bloqueado e o arquivo NAO foi gravado no SharePoint.</div></div>`;
+      // Duplicidade — backend ja ignora NFs rejeitadas
+      const motivoLabel = data.motivo === 'hash' ? 'arquivo PDF identico' : (data.motivo === 'cnpj_numero' ? 'mesmo CNPJ + numero da NF' : (data.motivo || '—'));
+      const statusBadge = data.status ? `<b>${data.status}</b>` : '<b>—</b>';
+      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">⚠</span><div><b>Duplicidade detectada.</b> Esta NF ja foi lancada anteriormente.<br>Motivo: <b>${motivoLabel}</b> · Status atual: ${statusBadge}.<br>O lancamento foi bloqueado e o arquivo NAO foi gravado no SharePoint.<br><span class="small muted">Obs: NFs rejeitadas nao bloqueiam — voce pode reenviar a NF corrigida.</span></div></div>`;
       return;
     }
 
