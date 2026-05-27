@@ -27,6 +27,13 @@ async function getGraphClient() {
   return Client.initWithMiddleware({ authProvider });
 }
 
+async function getColMap(client, siteId, listId) {
+  const resp = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').get();
+  const map = {};
+  for (const c of (resp.value || [])) { if (c.displayName && c.name) map[c.displayName] = c.name; }
+  return map;
+}
+
 async function resolveSiteAndList(client) {
   if (cache.siteId && cache.listId) return cache;
   const host = process.env.SHAREPOINT_SITE_HOSTNAME;
@@ -56,8 +63,16 @@ module.exports = async function (context, req) {
     }
     const client = await getGraphClient();
     const { siteId, listId } = await resolveSiteAndList(client);
+    // Resolve internal name de Processado (SP pode renomear)
+    let processadoInternal = 'Processado';
+    try {
+      const cm = await getColMap(client, siteId, listId);
+      processadoInternal = cm['Processado'] || 'Processado';
+    } catch (e) {}
+    const patch = {};
+    patch[processadoInternal] = processado;
     await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + itemId + '/fields')
-      .patch({ Processado: processado });
+      .patch(patch);
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

@@ -30,6 +30,13 @@ async function getGraphClient() {
   return Client.initWithMiddleware({ authProvider });
 }
 
+async function getColMap(client, siteId, listId) {
+  const resp = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').get();
+  const map = {};
+  for (const c of (resp.value || [])) { if (c.displayName && c.name) map[c.displayName] = c.name; }
+  return map;
+}
+
 async function resolveSiteAndList(client) {
   if (cache.siteId && cache.listId) return cache;
   const hostname = process.env.SHAREPOINT_SITE_HOSTNAME;
@@ -61,7 +68,7 @@ function buildFieldsPayload(body) {
   if (body.email !== undefined)         fields.field_9  = String(body.email || '').trim().toLowerCase();
   if (body.cidade !== undefined)        fields.field_10 = String(body.cidade || '').trim();
   if (body.cep !== undefined)           fields.field_11 = String(body.cep || '').trim();
-  if (body.atendeTodas !== undefined)   fields.AtendeTodas = !!body.atendeTodas;
+  // fields.AtendeTodas eh ajustado dinamicamente no handler com o internal name real
   return fields;
 }
 
@@ -84,6 +91,19 @@ module.exports = async function (context, req) {
     diag.itemId = itemId;
 
     const fields = buildFieldsPayload(body);
+
+    // Resolve internal name de AtendeTodas (SP pode ter renomeado pra field_X)
+    if (body.atendeTodas !== undefined) {
+      try {
+        const colMap = await getColMap(client, siteId, listId);
+        const atendeTodasInternal = colMap['AtendeTodas'] || 'AtendeTodas';
+        fields[atendeTodasInternal] = !!body.atendeTodas;
+        diag.atendeTodasInternal = atendeTodasInternal;
+      } catch (e) {
+        // Fallback: usa nome literal
+        fields.AtendeTodas = !!body.atendeTodas;
+      }
+    }
     if (Object.keys(fields).length === 0) {
       context.res = { status: 400, body: { error: 'Nenhum campo pra atualizar' } };
       return;

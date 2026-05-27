@@ -44,6 +44,22 @@ async function getGraphClient() {
   return Client.initWithMiddleware({ authProvider });
 }
 
+// Cache colMap (displayName -> internalName) pra esta lista
+const colMapCache = { map: null, ts: 0 };
+const COL_TTL = 5 * 60 * 1000;
+
+async function getColMap(client, siteId, listId) {
+  if (colMapCache.map && (Date.now() - colMapCache.ts) < COL_TTL) return colMapCache.map;
+  const resp = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').get();
+  const map = {};
+  for (const c of (resp.value || [])) {
+    if (c.displayName && c.name) map[c.displayName] = c.name;
+  }
+  colMapCache.map = map;
+  colMapCache.ts = Date.now();
+  return map;
+}
+
 async function resolveSiteAndList(client) {
   if (cache.siteId && cache.listId) return cache;
 
@@ -84,6 +100,11 @@ module.exports = async function (context, req) {
     diag.step = 'resolve_site';
     const { siteId, listId } = await resolveSiteAndList(client);
     diag.siteId = siteId; diag.listId = listId;
+
+    diag.step = 'fetch_columns';
+    const colMap = await getColMap(client, siteId, listId);
+    const atendeTodasInternal = colMap['AtendeTodas'] || 'AtendeTodas';
+    diag.colMap = { AtendeTodas: atendeTodasInternal };
 
     diag.step = 'fetch_items';
     // Pega items com fields. Lista grande -> paginar (todas as paginas, sem cortar)
@@ -132,7 +153,7 @@ module.exports = async function (context, req) {
           if (v === false || v === 0 || v === null || v === undefined) return false;
           const s = String(v).toLowerCase().trim();
           return s === 'true' || s === 'sim' || s === 'yes' || s === '1';
-        })(f.AtendeTodas)
+        })(f[atendeTodasInternal])
       };
     });
 
