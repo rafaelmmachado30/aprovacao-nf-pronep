@@ -505,6 +505,40 @@ const menuItems = [
 
 // ============== HELPERS ==============
 function fmtBRL(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+// Mascara monetaria BR em tempo real: 1000 -> 10,00 / 100000 -> 1.000,00
+// Estrategia: trata os digitos como centavos, sempre formata como "X.XXX,XX"
+function mascaraValorBR(input) {
+  if (!input) return;
+  let digitos = String(input.value || '').replace(/\D/g, '');
+  if (!digitos) { input.value = ''; return; }
+  // Remove zeros a esquerda (mas mantem ao menos 1 digito)
+  digitos = digitos.replace(/^0+/, '') || '0';
+  // Garante ao menos 3 chars (1 centavo) — abaixo disso preenche com zeros a esquerda
+  while (digitos.length < 3) digitos = '0' + digitos;
+  const inteiros = digitos.slice(0, -2);
+  const centavos = digitos.slice(-2);
+  // Formata inteiros com separador de milhar
+  const inteirosFmt = inteiros.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  input.value = inteirosFmt + ',' + centavos;
+}
+// Parseia "1.000,00" -> 1000 (Number). Tambem aceita "1000" ou "1000.00" como fallback.
+function parseValorBR(str) {
+  if (str === null || str === undefined) return NaN;
+  const s = String(str).trim();
+  if (!s) return NaN;
+  // Se tem virgula, eh formato BR: tira pontos (separador milhar) e troca virgula por ponto
+  if (s.indexOf(',') >= 0) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+  return parseFloat(s);
+}
+// Formata CNPJ ou CPF a partir de qualquer entrada (com ou sem mascara).
+// CNPJ (14 digitos): 00.000.000/0000-00 / CPF (11 digitos): 000.000.000-00
+function formatarCNPJ(v) {
+  if (!v) return '—';
+  const d = String(v).replace(/\D/g, '');
+  if (d.length === 14) return d.slice(0,2)+'.'+d.slice(2,5)+'.'+d.slice(5,8)+'/'+d.slice(8,12)+'-'+d.slice(12,14);
+  if (d.length === 11) return d.slice(0,3)+'.'+d.slice(3,6)+'.'+d.slice(6,9)+'-'+d.slice(9,11);
+  return String(v); // formato desconhecido, retorna original
+}
 function fmtDate(s) { if (!s) return '—'; const d = new Date(s + 'T00:00:00'); return d.toLocaleDateString('pt-BR'); }
 // Converte ISO UTC (ex: "2026-05-27T13:54:00.000Z") em formato BRT "2026-05-27 10:54"
 function fmtDateTimeBRT(iso) {
@@ -1638,11 +1672,15 @@ function animateKPIs() {
 // ============== VIEWS ==============
 const views = {
   dashboard: () => {
-    const aprovadas = notas.filter(n => n.status === 'aprovada');
-    const pendentes = notas.filter(n => n.status === 'pendente');
-    const rejeitadas = notas.filter(n => n.status === 'rejeitada' || n.status === 'duplicada');
+    if (!window._filtroDashboard) window._filtroDashboard = { unidade: 'TODAS' };
+    const uf = window._filtroDashboard.unidade;
+    const matchUnit = (n) => uf === 'TODAS' || n.unidade === uf;
+    const aprovadas = notas.filter(n => n.status === 'aprovada' && matchUnit(n));
+    const pendentes = notas.filter(n => n.status === 'pendente' && matchUnit(n));
+    const rejeitadas = notas.filter(n => (n.status === 'rejeitada' || n.status === 'duplicada') && matchUnit(n));
     const totalMes = aprovadas.reduce((s, n) => s + n.valor, 0);
-    const taxaDup = (notas.filter(n => n.status === 'duplicada').length / Math.max(notas.length,1) * 100).toFixed(1);
+    const notasNoEscopo = notas.filter(matchUnit);
+    const taxaDup = (notasNoEscopo.filter(n => n.status === 'duplicada').length / Math.max(notasNoEscopo.length,1) * 100).toFixed(1);
 
     // Dados pros graficos
     const byDiretoria = {};
@@ -1661,6 +1699,15 @@ const views = {
     return `
       <h2>Dashboard Analitico</h2>
       <div class="view-sub">Visao consolidada de aprovacoes e indicadores · Maio/2026</div>
+
+      <div class="filter-bar" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <span class="small muted" style="font-weight:600;letter-spacing:.4px;text-transform:uppercase">Unidade:</span>
+        ${['TODAS','SP','RJ','ES'].map(opt => `
+          <button class="btn ${uf===opt?'btn-primary':'btn-secondary'}" style="padding:6px 14px;font-size:13px"
+                  onclick="filtrarDashboard('${opt}')">${opt==='TODAS'?'Todas':opt}</button>
+        `).join('')}
+        ${uf !== 'TODAS' ? `<span class="small muted" style="margin-left:auto">Exibindo apenas <b>${uf}</b></span>` : ''}
+      </div>
 
       <div class="kpi-row">
         <div class="kpi"><div class="label">Aprovado no Mes</div><div class="value" data-count="${totalMes}" data-fmt="brl">R$ 0</div><div class="delta up">&#9650; 18% vs Abr</div></div>
@@ -1779,7 +1826,7 @@ const views = {
 
         <div class="form-row">
           <label>Valor (R$) *</label>
-          <input id="frm-valor" type="number" step="0.01" placeholder="0,00">
+          <input id="frm-valor" type="text" inputmode="decimal" placeholder="0,00" oninput="mascaraValorBR(this)" autocomplete="off">
         </div>
         <div class="form-row">
           <label>Vencimento * <span class="small muted" style="font-weight:400">(mínimo: D+5 dias úteis)</span></label>
@@ -1863,6 +1910,7 @@ const views = {
         unidade: 'TODAS', diretoria: 'TODAS',
         aprovadoDe: hoje, aprovadoAte: hoje,
         vencimentoDe: '', vencimentoAte: '',
+        processado: 'TODOS',
         busca: ''
       };
     }
@@ -2119,7 +2167,7 @@ function renderFornecedoresTable() {
           ${lista.length === 0 ? `<tr><td colspan="8" class="center muted" style="padding:30px">Nenhum fornecedor encontrado.</td></tr>` :
           lista.slice(0, 500).map((x,i) => `
             <tr>
-              <td class="mono">${x.cnpj || x.documento || ''}</td>
+              <td class="mono">${formatarCNPJ(x.cnpj || x.documento)}</td>
               <td>${x.razao || ''}</td>
               <td>${x.nomeFantasia || '—'}</td>
               <td>${(x.unidade||x.uf) ? `<span class="tag tag-${(x.unidade||x.uf||'').toLowerCase()}">${x.unidade||x.uf}</span>` : '—'}</td>
@@ -2878,7 +2926,15 @@ function renderAprovadasView() {
         <div class="label">Vencimento até</div>
         <input id="fap-vencAte" type="date" value="${f.vencimentoAte}" onchange="aplicaFiltroAprovadas()">
       </div>
-      <div style="grid-column:span 2">
+      <div>
+        <div class="label">Processado</div>
+        <select id="fap-processado" onchange="aplicaFiltroAprovadas()">
+          <option value="TODOS"${f.processado==='TODOS'?' selected':''}>Todas</option>
+          <option value="SIM"${f.processado==='SIM'?' selected':''}>Sim (processadas)</option>
+          <option value="NAO"${f.processado==='NAO'?' selected':''}>Nao (pendentes)</option>
+        </select>
+      </div>
+      <div>
         <div class="label">Buscar</div>
         <input id="fap-busca" type="search" placeholder="Nº NF, fornecedor, valor…" value="${f.busca}" oninput="aplicaFiltroAprovadas()">
       </div>
@@ -2941,6 +2997,8 @@ function calcularAprovadasFiltradas() {
   if (f.aprovadoAte) lista = lista.filter(n => n.aprovadoEm && n.aprovadoEm.substring(0,10) <= f.aprovadoAte);
   if (f.vencimentoDe) lista = lista.filter(n => n.vencimento >= f.vencimentoDe);
   if (f.vencimentoAte) lista = lista.filter(n => n.vencimento <= f.vencimentoAte);
+  if (f.processado === 'SIM') lista = lista.filter(n => !!n.processado);
+  else if (f.processado === 'NAO') lista = lista.filter(n => !n.processado);
   if (f.busca) {
     const q = f.busca.toLowerCase();
     lista = lista.filter(n =>
@@ -2959,7 +3017,7 @@ function renderAprovadasTable() {
   const f = window._filtroAprovadas;
   const lista = calcularAprovadasFiltradas();
   const totalSemFiltro = notas.filter(n => n.status === 'aprovada').length;
-  const algumFiltroAtivo = f.unidade !== 'TODAS' || f.diretoria !== 'TODAS' || f.aprovadoDe || f.aprovadoAte || f.vencimentoDe || f.vencimentoAte || f.busca;
+  const algumFiltroAtivo = f.unidade !== 'TODAS' || f.diretoria !== 'TODAS' || f.aprovadoDe || f.aprovadoAte || f.vencimentoDe || f.vencimentoAte || (f.processado && f.processado !== 'TODOS') || f.busca;
 
   return `
     <div class="card">
@@ -2984,7 +3042,7 @@ function renderAprovadasTable() {
                 <td><b>${n.id||''}</b><br><span class="small muted">Nº ${n.numero||''}</span></td>
                 <td>
                   <b>${(fornecedorOf(n)||{}).razao || '—'}</b>
-                  <br><span class="small muted mono">${(fornecedorOf(n)||{}).cnpj || (fornecedorOf(n)||{}).documento || n.fornecedorCnpj || '—'}</span>
+                  <br><span class="small muted mono">${formatarCNPJ((fornecedorOf(n)||{}).cnpj || (fornecedorOf(n)||{}).documento || n.fornecedorCnpj)}</span>
                 </td>
                 <td>${n.unidade ? `<span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span>` : '—'}</td>
                 <td>${n.diretoria||'—'}</td>
@@ -3019,6 +3077,7 @@ function aplicaFiltroAprovadas() {
   if (id('fap-aprovAte'))  f.aprovadoAte  = id('fap-aprovAte').value;
   if (id('fap-vencDe'))    f.vencimentoDe  = id('fap-vencDe').value;
   if (id('fap-vencAte'))   f.vencimentoAte = id('fap-vencAte').value;
+  if (id('fap-processado'))f.processado    = id('fap-processado').value;
   if (id('fap-busca'))     f.busca        = id('fap-busca').value;
   // Re-renderiza SO a tabela. Input mantem foco.
   clearTimeout(_filtroAprovDebounce);
@@ -3029,8 +3088,14 @@ function aplicaFiltroAprovadas() {
 }
 
 function limpaFiltroAprovadas() {
-  window._filtroAprovadas = { unidade: 'TODAS', diretoria: 'TODAS', aprovadoDe: '', aprovadoAte: '', vencimentoDe: '', vencimentoAte: '', busca: '' };
+  window._filtroAprovadas = { unidade: 'TODAS', diretoria: 'TODAS', aprovadoDe: '', aprovadoAte: '', vencimentoDe: '', vencimentoAte: '', processado: 'TODOS', busca: '' };
   document.getElementById('content-area').innerHTML = renderAprovadasView();
+}
+
+// Filtro de unidade do Dashboard — re-renderiza a view inteira pra recalcular KPIs+graficos
+function filtrarDashboard(unidade) {
+  window._filtroDashboard = { unidade: unidade };
+  showView('dashboard');
 }
 
 function pieByUnit(aprovadas) {
@@ -3641,7 +3706,7 @@ async function submitNF() {
 
   const fornIdx = document.getElementById('frm-forn').value;
   const numero = document.getElementById('frm-numero').value;
-  const valor = parseFloat(document.getElementById('frm-valor').value);
+  const valor = parseValorBR(document.getElementById('frm-valor').value);
   const venc = document.getElementById('frm-venc').value;
   const descricao = (document.getElementById('frm-descricao')||{}).value || '';
   const file = window.fakeFile || window.selectedFile;
