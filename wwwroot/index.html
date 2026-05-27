@@ -369,7 +369,7 @@ const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submitter (Colaborador)',                shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','fila-aprovacao','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
   gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Gestor · Suprimentos (SP/RJ/ES)',        shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['fila-aprovacao','nova-nf','minhas-nfs','mapa-aprovadores','arquitetura'] },
   financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','mapa-aprovadores','auditoria','arquitetura'] }
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','mapa-aprovadores','auditoria','arquitetura','configuracoes'] }
 };
 
 // Grupos de segurança do Entra ID consultados via Microsoft Graph.
@@ -500,6 +500,7 @@ const menuItems = [
   { id: 'mapa-aprovadores',  label: 'Mapa de Aprovadores',        icon: ICONS.mapa },
   { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
   { id: 'arquitetura',       label: 'Arquitetura do Sistema',     icon: ICONS.arquitetura },
+  { id: 'configuracoes',     label: 'Configurações',              icon: ICONS.arquitetura },
 ];
 
 // ============== HELPERS ==============
@@ -917,7 +918,7 @@ async function carregarDadosIniciais() {
   if (window._carregamentoEmAndamento) return window._carregamentoEmAndamento;
   window._carregamentoEmAndamento = (async () => {
     // Carrega fornecedores+diretorias PRIMEIRO (notas dependem do fornecedores pra mapping)
-    await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais(), carregarGestoresFinanceiroReais()]);
+    await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais(), carregarGestoresFinanceiroReais(), carregarConfigSistema()]);
     // Depois carrega as notas (que mapeiam fornecedorIdx pelo array de fornecedores)
     await carregarNotasReais();
     // Re-renderiza qualquer view que dependa de fornecedores/diretorias
@@ -1096,6 +1097,206 @@ function destroyAllCharts() {
   for (const id of Object.keys(window._activeCharts)) {
     try { window._activeCharts[id].destroy(); } catch(e){}
     delete window._activeCharts[id];
+  }
+}
+
+// =================== CONFIGURACOES (admin-only) ===================
+window._sistemConfig = null; // cache da config global
+
+async function carregarConfigSistema() {
+  try {
+    const r = await fetch('/api/ConfigGet', { credentials: 'include' });
+    if (!r.ok) {
+      console.warn('[ConfigGet] HTTP ' + r.status);
+      window._sistemConfig = null;
+      return;
+    }
+    const data = await r.json();
+    window._sistemConfig = (data && data.config) || null;
+    console.log('[ConfigGet] config carregada:', window._sistemConfig);
+  } catch (e) {
+    console.warn('[ConfigGet] erro:', e && e.message);
+    window._sistemConfig = null;
+  }
+}
+
+function renderConfiguracoesView() {
+  const cfg = window._sistemConfig || { multiNivel: { habilitado: false, valorLimite: 0, modoAprovador: 'global', gestorMasterGlobal: '', gestoresPorDiretoria: {} } };
+  const mn = cfg.multiNivel || {};
+  const habilitado = !!mn.habilitado;
+  const valorLimite = Number(mn.valorLimite || 0);
+  const modo = mn.modoAprovador || 'global';
+  const gestorGlobal = mn.gestorMasterGlobal || '';
+  const gestoresDir = mn.gestoresPorDiretoria || {};
+
+  // 9 diretorias (mesmas do sistema)
+  const diretoriasFixas = ['Suprimentos','Tecnologia','Administrativa','Juridica','Fiscal-Contabil','Financeira','RH-DP','Tecnica','Qualidade'];
+
+  return `
+    <h2>Configurações do Sistema</h2>
+    <div class="view-sub">Visivel apenas para administradores. Mudancas afetam o fluxo de aprovacao de TODOS os usuarios.</div>
+
+    <div class="card" style="max-width:880px">
+      <h3 style="margin-top:0">Aprovacao multi-nivel por valor</h3>
+      <p class="small muted" style="margin-bottom:14px">
+        Quando habilitado, NFs com valor acima do limite passam por um 2º nivel de aprovacao
+        (gestor master) apos a aprovacao do gestor da diretoria. NFs abaixo do limite seguem o fluxo padrao.
+      </p>
+
+      <label class="form-check" style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+        <input type="checkbox" id="cfg-habilitado" ${habilitado ? 'checked' : ''}>
+        <span style="font-weight:600">Habilitar aprovacao multi-nivel</span>
+      </label>
+
+      <div id="cfg-multinivel-detalhes" style="${habilitado ? '' : 'opacity:0.5;pointer-events:none;'}">
+        <div class="form-row" style="margin-bottom:14px">
+          <label>Valor limite (R$) <span class="small muted">— NFs acima desse valor precisam de 2º nivel</span></label>
+          <input type="number" id="cfg-valor-limite" value="${valorLimite}" min="0" step="100" style="max-width:200px">
+        </div>
+
+        <div class="form-row" style="margin-bottom:14px">
+          <label>Modo do aprovador do 2º nivel</label>
+          <div style="display:flex;gap:18px;margin-top:6px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="radio" name="cfg-modo" value="global" ${modo==='global'?'checked':''} onchange="renderConfigCamposGestor(this.value)">
+              Unico gestor global
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="radio" name="cfg-modo" value="porDiretoria" ${modo==='porDiretoria'?'checked':''} onchange="renderConfigCamposGestor(this.value)">
+              Um por diretoria
+            </label>
+          </div>
+        </div>
+
+        <div id="cfg-campos-gestor">
+          ${modo === 'global' ? `
+            <div class="form-row">
+              <label>Email do gestor master global <span class="small muted">— precisa ser @pronep.com.br</span></label>
+              <input type="email" id="cfg-gestor-global" value="${gestorGlobal}" placeholder="nome.sobrenome@pronep.com.br" style="max-width:380px">
+            </div>
+          ` : `
+            <div class="form-row">
+              <label>Gestor master por diretoria</label>
+              <table class="data" style="font-size:13px;max-width:680px;margin-top:6px">
+                <thead><tr><th>Diretoria</th><th>Email do gestor master</th></tr></thead>
+                <tbody>
+                  ${diretoriasFixas.map(d => `
+                    <tr>
+                      <td>${d}</td>
+                      <td><input type="email" data-diretoria="${d}" class="cfg-gestor-dir" value="${gestoresDir[d] || ''}" placeholder="email@pronep.com.br" style="width:100%"></td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `}
+        </div>
+      </div>
+
+      <div class="btn-row" style="margin-top:24px">
+        <button class="btn btn-primary" onclick="salvarConfigSistema()">Salvar configurações</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderConfigCamposGestor(modo) {
+  // Re-renderiza apenas a area de campos do gestor (sem perder o resto)
+  const cfg = window._sistemConfig || { multiNivel: {} };
+  const mn = cfg.multiNivel || {};
+  const gestorGlobal = mn.gestorMasterGlobal || '';
+  const gestoresDir = mn.gestoresPorDiretoria || {};
+  const diretoriasFixas = ['Suprimentos','Tecnologia','Administrativa','Juridica','Fiscal-Contabil','Financeira','RH-DP','Tecnica','Qualidade'];
+
+  const el = document.getElementById('cfg-campos-gestor');
+  if (!el) return;
+  if (modo === 'global') {
+    el.innerHTML = `
+      <div class="form-row">
+        <label>Email do gestor master global <span class="small muted">— precisa ser @pronep.com.br</span></label>
+        <input type="email" id="cfg-gestor-global" value="${gestorGlobal}" placeholder="nome.sobrenome@pronep.com.br" style="max-width:380px">
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <div class="form-row">
+        <label>Gestor master por diretoria</label>
+        <table class="data" style="font-size:13px;max-width:680px;margin-top:6px">
+          <thead><tr><th>Diretoria</th><th>Email do gestor master</th></tr></thead>
+          <tbody>
+            ${diretoriasFixas.map(d => `
+              <tr>
+                <td>${d}</td>
+                <td><input type="email" data-diretoria="${d}" class="cfg-gestor-dir" value="${gestoresDir[d] || ''}" placeholder="email@pronep.com.br" style="width:100%"></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+}
+
+// Toggle habilitado: opacity/pointer-events do bloco
+document.addEventListener('change', function (e) {
+  if (e.target && e.target.id === 'cfg-habilitado') {
+    const det = document.getElementById('cfg-multinivel-detalhes');
+    if (det) {
+      det.style.opacity = e.target.checked ? '1' : '0.5';
+      det.style.pointerEvents = e.target.checked ? '' : 'none';
+    }
+  }
+});
+
+async function salvarConfigSistema() {
+  const habilitado = document.getElementById('cfg-habilitado').checked;
+  const valorLimite = Number(document.getElementById('cfg-valor-limite').value || 0);
+  const modoEl = document.querySelector('input[name="cfg-modo"]:checked');
+  const modo = modoEl ? modoEl.value : 'global';
+
+  const config = { multiNivel: { habilitado, valorLimite, modoAprovador: modo, gestorMasterGlobal: '', gestoresPorDiretoria: {} } };
+
+  if (habilitado) {
+    if (modo === 'global') {
+      const g = (document.getElementById('cfg-gestor-global') || {}).value || '';
+      config.multiNivel.gestorMasterGlobal = g.trim().toLowerCase();
+    } else {
+      const inputs = document.querySelectorAll('.cfg-gestor-dir');
+      inputs.forEach(inp => {
+        const dir = inp.getAttribute('data-diretoria');
+        const email = (inp.value || '').trim().toLowerCase();
+        if (dir && email) config.multiNivel.gestoresPorDiretoria[dir] = email;
+      });
+    }
+  }
+
+  // Validacao local
+  if (habilitado) {
+    if (valorLimite < 0) { toast('Valor limite deve ser >= 0.', 'error'); return; }
+    if (modo === 'global' && !/@pronep\.com\.br$/i.test(config.multiNivel.gestorMasterGlobal)) {
+      toast('Email do gestor master deve terminar em @pronep.com.br.', 'error'); return;
+    }
+    if (modo === 'porDiretoria' && Object.keys(config.multiNivel.gestoresPorDiretoria).length === 0) {
+      toast('Defina pelo menos um gestor master por diretoria.', 'error'); return;
+    }
+  }
+
+  toast('Salvando configurações...', 'info');
+  try {
+    const r = await fetch('/api/ConfigUpdate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ config: config })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      toast('Erro ao salvar: ' + (data.error || 'HTTP ' + r.status), 'error');
+      return;
+    }
+    window._sistemConfig = config;
+    toast('Configurações salvas com sucesso!', 'success');
+    showView('configuracoes');
+  } catch (e) {
+    toast('Falha de comunicacao: ' + (e && e.message), 'error');
   }
 }
 
@@ -1753,7 +1954,8 @@ const views = {
         <li>Toda ação é registrada em <b>Application Insights / Log Analytics</b> para auditoria.</li>
       </ol>
     </div>
-  `
+  `,
+  configuracoes: () => renderConfiguracoesView()
 };
 
 // Dado um e-mail de gestor, retorna a lista de combinações Unidade × Diretoria que ele aprova
