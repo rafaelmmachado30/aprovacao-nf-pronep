@@ -318,12 +318,9 @@ module.exports = async function (context, req) {
         }};
         return;
       }
-      if (gestorMaster === aprovadorEmail) {
-        // Auto-escalation: o gestor master eh o mesmo que aprovou primeiro - segue como aprovacao final
-        diag.autoEscalation = true;
-      } else {
-        // Encaminha pro 2o nivel: NAO faz watermark, NAO move PDF.
-        // Apenas muda status pra AguardandoN2 + troca AprovadorAtual + notifica gestor master.
+      {
+        // Sempre encaminha pro 2o nivel quando valor > limite, mesmo que aprovador == gestor master.
+        // Isso forca registro auditavel de 2 aprovacoes distintas (boa pratica de governanca).
         diag.step = 'encaminhar_n2';
         const patchFields = buildPatchPayload({
           Status: 'AguardandoN2',
@@ -392,8 +389,12 @@ module.exports = async function (context, req) {
     diag.stampedSize = stampedPdf.length;
 
     diag.step = 'upload_aprovado';
-    const hoje = new Date();
-    const dataPasta = `${hoje.getFullYear()}-${String(hoje.getMonth()+1).padStart(2,'0')}-${String(hoje.getDate()).padStart(2,'0')}`;
+    // Data BRT (UTC-3): server roda em UTC, ajusta pra fuso de Brasilia
+    // Senao apos 21h BRT vira dia seguinte no UTC
+    const agora = new Date();
+    const brt = new Date(agora.getTime() - 3 * 60 * 60 * 1000);
+    const dataPasta = `${brt.getUTCFullYear()}-${String(brt.getUTCMonth()+1).padStart(2,'0')}-${String(brt.getUTCDate()).padStart(2,'0')}`;
+    diag.dataPastaBRT = dataPasta;
     const folderAprov = `Notas Fiscais/Notas Aprovadas/${f.Unidade}/${dataPasta}`;
     const uploadPath = `/sites/${siteId}/drive/root:/${encodeURIComponent(folderAprov)}/${encodeURIComponent(target.name)}:/content`;
     const uploadResp = await client.api(uploadPath).header('Content-Type', 'application/pdf').put(stampedPdf);
