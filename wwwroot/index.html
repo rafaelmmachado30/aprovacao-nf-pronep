@@ -403,10 +403,31 @@
       gap: 8px;
       padding: 10px;
     }
-    /* Variante: empilha tudo em 1 coluna (cada filtro ocupa linha inteira)
-       Usar quando os filtros tem labels longas e precisam respirar */
+    /* Variante: empilha tudo em coluna unica (mais robusto que grid 1fr —
+       usa flex-direction column pra sobrepor qualquer style inline conflitante) */
     .filter-bar.filter-stack-mobile {
-      grid-template-columns: 1fr !important;
+      display: flex !important;
+      flex-direction: column !important;
+      grid-template-columns: none !important;
+      gap: 10px !important;
+    }
+    .filter-bar.filter-stack-mobile > div {
+      width: 100% !important;
+      flex: none !important;
+    }
+    .filter-bar.filter-stack-mobile input,
+    .filter-bar.filter-stack-mobile select {
+      font-size: 14px !important;
+      padding: 8px 10px !important;
+    }
+    /* Grupo de botoes dentro do stack: lado a lado em 50/50 */
+    .filter-bar.filter-stack-mobile > div[style*="display:flex"] {
+      display: flex !important;
+      flex-direction: row !important;
+      gap: 8px !important;
+    }
+    .filter-bar.filter-stack-mobile > div[style*="display:flex"] .btn {
+      flex: 1; min-width: 0; padding: 10px 8px; font-size: 13px;
     }
     .filter-bar > div { width: 100%; }
     .filter-bar select,
