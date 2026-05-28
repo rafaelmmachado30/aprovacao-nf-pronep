@@ -84,6 +84,12 @@
 
   /* Topbar — estilo Pronep Analytics */
   .topbar { grid-area: topbar; background: var(--branco); border-bottom: 4px solid var(--azul-claro); display: flex; align-items: center; padding: 14px 32px; gap: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); position: sticky; top: 0; z-index: 10; }
+  /* Botao hamburger — escondido em desktop, aparece em mobile */
+  .menu-toggle { display: none; background: none; border: none; padding: 6px; cursor: pointer; color: var(--azul-escuro); border-radius: 6px; align-items: center; justify-content: center; }
+  .menu-toggle:hover { background: var(--azul-soft); }
+  /* Backdrop do drawer mobile — escondido em desktop */
+  .sidebar-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 19; opacity: 0; pointer-events: none; transition: opacity 0.2s ease; }
+  body.menu-open .sidebar-backdrop { opacity: 1; pointer-events: auto; }
   .topbar .logo-area { display: flex; align-items: center; gap: 20px; }
   .topbar .logo-area img { height: 36px; width: auto; display: block; }
   .topbar .divider { width: 1px; height: 36px; background: var(--cinza-borda); }
@@ -312,46 +318,47 @@
 
   /* Mobile (até 768px) */
   @media (max-width: 768px) {
-    /* App grid: sidebar vira tabbar horizontal no topo (sob o topbar) */
+    /* App grid: sidebar sai do fluxo (vira drawer overlay) */
     #app.active {
       grid-template-columns: 1fr;
-      grid-template-rows: auto auto 1fr;
-      grid-template-areas: 'topbar' 'sidebar' 'content';
+      grid-template-rows: auto 1fr;
+      grid-template-areas: 'topbar' 'content';
     }
+    /* Botao hamburger visivel */
+    .menu-toggle { display: inline-flex; }
+    /* Backdrop ativo */
+    .sidebar-backdrop { display: block; }
+
+    /* Sidebar vira drawer fixo a esquerda, escondido por padrao */
     .sidebar {
-      position: static;
-      height: auto;
-      padding: 0;
-      box-shadow: 0 2px 8px rgba(31,78,121,0.15);
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
+      width: 260px;
+      height: 100vh;
+      z-index: 20;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease;
+      box-shadow: 4px 0 20px rgba(0,0,0,0.25);
+      padding: 16px 0;
     }
-    .sidebar nav {
-      display: flex;
-      flex-wrap: nowrap;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-      padding: 4px 6px;
-      gap: 2px;
-      scrollbar-width: thin;
-    }
+    body.menu-open .sidebar { transform: translateX(0); }
+
+    /* Items do menu mais touch-friendly */
     .sidebar a.nav-item {
-      padding: 8px 12px;
-      font-size: 12px;
-      border-left: none;
-      border-bottom: 3px solid transparent;
-      flex: 0 0 auto;
-      white-space: nowrap;
+      padding: 12px 18px;
+      font-size: 14px;
     }
-    .sidebar a.nav-item.active {
-      border-left: none;
-      border-bottom-color: var(--azul-claro);
-    }
-    .sidebar a.nav-item .icon { width: 22px; height: 22px; }
-    .sidebar a.nav-item .badge { margin-left: 6px; }
-    .sidebar .footer-area { display: none; }
+    .sidebar a.nav-item .icon { width: 28px; height: 28px; }
+    .sidebar .footer-area { padding: 12px 20px; }
 
     /* Topbar mais compacta */
     .topbar { padding: 8px 12px !important; gap: 10px; }
     .topbar img { max-height: 28px !important; }
+    .topbar .titles .title { font-size: 14px; }
+    .topbar .titles .subtitle { display: none; }
+    .topbar .user-area { min-width: 0 !important; }
 
     /* Content padding reduz */
     .content { padding: 14px 12px 32px; }
@@ -463,6 +470,9 @@
 <!-- ====================== APP SHELL ====================== -->
 <div id="app">
   <header class="topbar">
+    <button class="menu-toggle" id="menu-toggle" onclick="toggleMenuMobile()" aria-label="Abrir menu" type="button">
+      <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
     <div class="logo-area">
       <img src="pronep-logo.png" alt="Pronep Life Care">
       <div class="divider"></div>
@@ -479,10 +489,11 @@
     </div>
   </header>
 
-  <aside class="sidebar">
+  <aside class="sidebar" id="sidebar">
     <nav id="nav-list"></nav>
     <div class="footer-area">v1.0 · Protótipo<br>22/maio/2026</div>
   </aside>
+  <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="fecharMenuMobile()"></div>
 
   <main class="content" id="content-area">
     <!-- Views injected by JS -->
@@ -1304,10 +1315,33 @@ function renderNav() {
   nav.innerHTML = html;
 }
 
+// =================== MENU MOBILE (drawer) ===================
+function toggleMenuMobile() {
+  const body = document.body;
+  if (body.classList.contains('menu-open')) fecharMenuMobile();
+  else abrirMenuMobile();
+}
+function abrirMenuMobile() {
+  document.body.classList.add('menu-open');
+  const btn = document.getElementById('menu-toggle');
+  if (btn) btn.setAttribute('aria-label', 'Fechar menu');
+}
+function fecharMenuMobile() {
+  document.body.classList.remove('menu-open');
+  const btn = document.getElementById('menu-toggle');
+  if (btn) btn.setAttribute('aria-label', 'Abrir menu');
+}
+// Tecla ESC fecha o drawer
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && document.body.classList.contains('menu-open')) fecharMenuMobile();
+});
+
 function showView(id) {
   currentView = id;
   const m = menuItems.find(m=>m.id===id) || {label:'Visão'};
   document.getElementById('crumb-view').textContent = m.label;
+  // Em mobile, ao trocar de view, fecha o drawer automaticamente
+  fecharMenuMobile();
   renderNav();
   destroyAllCharts();
   const area = document.getElementById('content-area');
