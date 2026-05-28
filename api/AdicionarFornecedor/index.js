@@ -135,17 +135,30 @@ module.exports = async function (context, req) {
     diag.step = 'create_item';
     const fields = buildFieldsPayload(body);
 
-    // Resolve internal name de AtendeTodas (SP pode ter renomeado pra field_X)
+    // Resolve internal names de colunas que podem ter sido renomeadas pelo SP (field_X)
+    let colMap = null;
+    try {
+      colMap = await getColMap(client, siteId, listId);
+    } catch (e) {
+      diag.colMapError = String(e && e.message);
+    }
+
     if (body.atendeTodas !== undefined) {
-      try {
-        const colMap = await getColMap(client, siteId, listId);
-        const atendeTodasInternal = colMap['AtendeTodas'] || 'AtendeTodas';
-        fields[atendeTodasInternal] = !!body.atendeTodas;
-        diag.atendeTodasInternal = atendeTodasInternal;
-      } catch (e) {
-        // Fallback: usa nome literal
-        fields.AtendeTodas = !!body.atendeTodas;
-      }
+      const atendeTodasInternal = (colMap && colMap['AtendeTodas']) || 'AtendeTodas';
+      fields[atendeTodasInternal] = !!body.atendeTodas;
+      diag.atendeTodasInternal = atendeTodasInternal;
+    }
+
+    if (body.categoria !== undefined && body.categoria !== null && body.categoria !== '') {
+      const categoriaInternal = (colMap && colMap['Categoria']) || 'Categoria';
+      fields[categoriaInternal] = String(body.categoria).trim();
+      diag.categoriaInternal = categoriaInternal;
+    }
+
+    if (body.descricaoOutros !== undefined && body.descricaoOutros !== null) {
+      const descOutrosInternal = (colMap && colMap['DescricaoOutros']) || 'DescricaoOutros';
+      fields[descOutrosInternal] = String(body.descricaoOutros || '').trim().toUpperCase();
+      diag.descOutrosInternal = descOutrosInternal;
     }
     diag.fields = fields;
     const created = await client.api('/sites/' + siteId + '/lists/' + listId + '/items')

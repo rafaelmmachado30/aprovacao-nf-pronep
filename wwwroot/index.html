@@ -3017,7 +3017,7 @@ function openEditarFornecedor(idx) {
 
 function abrirModalFornecedor(idx) {
   const isEdit = idx !== null && idx !== undefined;
-  const x = isEdit ? fornecedores[idx] : { cnpj: '', razao: '', nomeFantasia: '', unidade: '', diretoria: '', categoria: 'Serviços', ativo: true };
+  const x = isEdit ? fornecedores[idx] : { cnpj: '', razao: '', nomeFantasia: '', unidade: '', diretoria: '', categoria: 'Serviços', descricaoOutros: '', ativo: true };
   const titulo = isEdit ? 'Editar Fornecedor' : 'Novo Fornecedor';
   openModal(`
     <span class="close-x" onclick="closeModal()">×</span>
@@ -3052,9 +3052,17 @@ function abrirModalFornecedor(idx) {
       </div>
       <div class="form-row">
         <label>Categoria *</label>
-        <select id="frn-categoria">
+        <select id="frn-categoria" onchange="onCategoriaFornecedorChange()">
           ${['Serviços','Materiais','Locação','Reembolso','Medicamentos','Outros'].map(c => `<option${x.categoria===c?' selected':''}>${c}</option>`).join('')}
         </select>
+      </div>
+      <div class="form-row" id="frn-descricao-outros-row" style="grid-column:1/-1;display:${x.categoria==='Outros'?'':'none'}">
+        <label>Descrição da atividade/serviço * <span class="small muted" style="font-weight:400">(obrigatório quando categoria é "Outros")</span></label>
+        <input id="frn-descricao-outros" value="${x.descricaoOutros || ''}" placeholder="DESCREVA A ATIVIDADE OU O SERVIÇO"
+               style="text-transform:uppercase" oninput="this.value = this.value.toUpperCase()" maxlength="200">
+        <div class="small muted" style="margin-top:4px;color:#C62828">
+          Atenção: categoria "Outros" só permite Pessoa Física (CPF). Pra cadastrar empresa (CNPJ), use uma das outras categorias.
+        </div>
       </div>
       <div class="form-row">
         <label>UF de Atendimento *</label>
@@ -3089,6 +3097,35 @@ function abrirModalFornecedor(idx) {
       <button class="btn btn-primary" onclick="salvarFornecedor(${isEdit ? idx : 'null'})">${isEdit ? 'Salvar alterações' : 'Cadastrar'}</button>
     </div>
   `);
+  // Aplica regra de Categoria=Outros no estado inicial (forca CPF + mostra descricao)
+  setTimeout(onCategoriaFornecedorChange, 0);
+}
+
+// Quando Categoria muda no modal de Fornecedor:
+//  - Mostra/esconde campo Descricao quando Outros
+//  - Forca TipoDocumento=CPF (PF) e desabilita opcao CNPJ quando Outros
+function onCategoriaFornecedorChange() {
+  const cat = (document.getElementById('frn-categoria') || {}).value || '';
+  const ehOutros = cat === 'Outros';
+  const descRow = document.getElementById('frn-descricao-outros-row');
+  if (descRow) descRow.style.display = ehOutros ? '' : 'none';
+
+  const selectTipo = document.getElementById('frn-tipo-doc');
+  if (!selectTipo) return;
+  const optCNPJ = selectTipo.querySelector('option[value="CNPJ"]');
+  const optCPF  = selectTipo.querySelector('option[value="CPF"]');
+
+  if (ehOutros) {
+    // Categoria Outros: forca CPF + desabilita CNPJ
+    selectTipo.value = 'CPF';
+    if (optCNPJ) optCNPJ.disabled = true;
+    if (optCPF)  optCPF.disabled = false;
+    atualizaCampoDocumento();
+  } else {
+    // Outras categorias: libera os 2 tipos
+    if (optCNPJ) optCNPJ.disabled = false;
+    if (optCPF)  optCPF.disabled = false;
+  }
 }
 
 // =================== INTEGRACAO BRASILAPI - CONSULTA CNPJ ===================
@@ -3198,6 +3235,9 @@ async function salvarFornecedor(idx) {
   const diretoria = document.getElementById('frn-diretoria').value;
   const ativo = document.getElementById('frn-ativo').checked;
   const atendeTodas = (document.getElementById('frn-atende-todas') || {}).checked || false;
+  const descricaoOutros = (document.getElementById('frn-descricao-outros') || {}).value
+    ? document.getElementById('frn-descricao-outros').value.trim().toUpperCase()
+    : '';
   if (!razao || !cnpj || !diretoria) {
     toast('Preencha todos os campos obrigatorios (Razao, CNPJ, UF e Diretoria).', 'error');
     return;
@@ -3207,6 +3247,18 @@ async function salvarFornecedor(idx) {
   const onlyDigits = (s) => String(s||'').replace(/\D/g, '');
   const digits = onlyDigits(cnpj);
   const tipoDocumento = digits.length === 14 ? 'CNPJ' : (digits.length === 11 ? 'CPF' : '');
+
+  // Categoria "Outros": validacoes especificas
+  if (categoria === 'Outros') {
+    if (tipoDocumento !== 'CPF') {
+      toast('Categoria "Outros" so permite Pessoa Fisica (CPF). Selecione CPF no campo Tipo ou troque a categoria.', 'error');
+      return;
+    }
+    if (!descricaoOutros || descricaoOutros.length < 3) {
+      toast('Descreva a atividade/servico (minimo 3 caracteres) quando a Categoria for "Outros".', 'error');
+      return;
+    }
+  }
 
   // Desabilita botoes pra evitar duplo-clique
   document.querySelectorAll('.modal .btn').forEach(b => b.disabled = true);
@@ -3220,7 +3272,7 @@ async function salvarFornecedor(idx) {
         document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
         return;
       }
-      const payloadAdd = { razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas };
+      const payloadAdd = { razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, categoria, descricaoOutros };
       console.log('[salvarFornecedor] ADD payload:', payloadAdd);
       const r = await fetch('/api/AdicionarFornecedor', {
         method: 'POST',
@@ -3240,7 +3292,7 @@ async function salvarFornecedor(idx) {
         return;
       }
       // Sucesso: adiciona localmente E recarrega da fonte (pra ter id real)
-      fornecedores.push({ id: data.id, spId: data.id, cnpj: digits, documento: cnpj, razao, nomeFantasia: fantasia, unidade, diretoria, uf: unidade, categoria, ativo, tipoDocumento });
+      fornecedores.push({ id: data.id, spId: data.id, cnpj: digits, documento: cnpj, razao, nomeFantasia: fantasia, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, atendeTodas, tipoDocumento });
       toast('Fornecedor "' + razao + '" cadastrado (id ' + data.id + ').', 'success');
     } else {
       // UPDATE
@@ -3251,7 +3303,7 @@ async function salvarFornecedor(idx) {
         document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
         return;
       }
-      const payload = { id: spId, razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas };
+      const payload = { id: spId, razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, categoria, descricaoOutros };
       console.log('[salvarFornecedor] EDIT payload:', payload);
       const r = await fetch('/api/EditarFornecedor', {
         method: 'PATCH',
@@ -3267,7 +3319,7 @@ async function salvarFornecedor(idx) {
         return;
       }
       // Sucesso: atualiza localmente
-      Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, cnpj: digits, documento: cnpj, unidade, diretoria, uf: unidade, categoria, ativo, tipoDocumento, atendeTodas });
+      Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, cnpj: digits, documento: cnpj, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, tipoDocumento, atendeTodas });
       toast('Fornecedor "' + razao + '" atualizado.', 'success');
     }
     closeModal();
@@ -5159,4 +5211,4 @@ function exportXlsxStub() {
 }
 </script>
 </body>
-</html>
+</ht

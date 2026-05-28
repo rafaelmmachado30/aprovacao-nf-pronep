@@ -92,29 +92,43 @@ module.exports = async function (context, req) {
 
     const fields = buildFieldsPayload(body);
 
-    // Resolve internal name de AtendeTodas (SP pode ter renomeado pra field_X)
-    if (body.atendeTodas !== undefined) {
-      try {
-        const colMap = await getColMap(client, siteId, listId);
-        const atendeTodasInternal = colMap['AtendeTodas'] || 'AtendeTodas';
-        fields[atendeTodasInternal] = !!body.atendeTodas;
-        diag.atendeTodasInternal = atendeTodasInternal;
-      } catch (e) {
-        // Fallback: usa nome literal
-        fields.AtendeTodas = !!body.atendeTodas;
-      }
-    }
-    if (Object.keys(fields).length === 0) {
-      context.res = { status: 400, body: { error: 'Nenhum campo pra atualizar' } };
-      return;
-    }
-    diag.fields = fields;
-
     diag.step = 'graph_client';
     const client = await getGraphClient();
 
     diag.step = 'resolve_site';
     const { siteId, listId } = await resolveSiteAndList(client);
+
+    // Resolve internal names dinamicamente (colunas podem ter sido renomeadas pelo SP)
+    let colMap = null;
+    try {
+      colMap = await getColMap(client, siteId, listId);
+    } catch (e) {
+      diag.colMapError = String(e && e.message);
+    }
+
+    if (body.atendeTodas !== undefined) {
+      const atendeTodasInternal = (colMap && colMap['AtendeTodas']) || 'AtendeTodas';
+      fields[atendeTodasInternal] = !!body.atendeTodas;
+      diag.atendeTodasInternal = atendeTodasInternal;
+    }
+
+    if (body.categoria !== undefined && body.categoria !== null && body.categoria !== '') {
+      const categoriaInternal = (colMap && colMap['Categoria']) || 'Categoria';
+      fields[categoriaInternal] = String(body.categoria).trim();
+      diag.categoriaInternal = categoriaInternal;
+    }
+
+    if (body.descricaoOutros !== undefined && body.descricaoOutros !== null) {
+      const descOutrosInternal = (colMap && colMap['DescricaoOutros']) || 'DescricaoOutros';
+      fields[descOutrosInternal] = String(body.descricaoOutros || '').trim().toUpperCase();
+      diag.descOutrosInternal = descOutrosInternal;
+    }
+
+    if (Object.keys(fields).length === 0) {
+      context.res = { status: 400, body: { error: 'Nenhum campo pra atualizar' } };
+      return;
+    }
+    diag.fields = fields;
 
     diag.step = 'update_fields';
     // PATCH em /items/{id}/fields atualiza so os campos enviados
