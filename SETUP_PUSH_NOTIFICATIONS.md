@@ -10,11 +10,29 @@ Como funciona: usuário ativa notificacoes em **Configuracoes** -> browser cria 
 
 As VAPID keys autenticam o servidor que envia o push. As suas foram **geradas localmente** (rodaram uma vez no script `python3` do dev). Salve com cuidado — a `VAPID_PRIVATE_KEY` é secreta e nunca deve sair do servidor.
 
-**As keys geradas (use estas):**
+**IMPORTANTE — NUNCA commita as VAPID keys neste arquivo.** Elas devem ficar APENAS no Azure App Settings (e num cofre de senhas pessoal). A `VAPID_PRIVATE_KEY` eh secreta e qualquer um que tenha acesso a ela pode enviar push em nome do servidor.
+
+**Gerar VAPID keys (rodar uma unica vez):**
+
+```bash
+python3 -c "
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
+import base64
+priv = ec.generate_private_key(ec.SECP256R1())
+pub = priv.public_key()
+pb = priv.private_numbers().private_value.to_bytes(32, 'big')
+pubb = pub.public_bytes(encoding=serialization.Encoding.X962, format=serialization.PublicFormat.UncompressedPoint)
+print('VAPID_PUBLIC_KEY :', base64.urlsafe_b64encode(pubb).rstrip(b'=').decode())
+print('VAPID_PRIVATE_KEY:', base64.urlsafe_b64encode(pb).rstrip(b'=').decode())
+"
+```
+
+3 variaveis vao no Azure (NAO no arquivo):
 
 ```
-VAPID_PUBLIC_KEY  = BJP9M_UiRSmns5A7cVrCCvvMH1QVfSUza15RCb7yTKWLD3uoEmwdIzjRX5B7zqUpAf9KRfbKolNV7EoJxMRCk1o
-VAPID_PRIVATE_KEY = G5wTtN9bNvSffyR-1008r4vAp6gJgi6Yx9YfKIhwsHY
+VAPID_PUBLIC_KEY  = <gerada acima>
+VAPID_PRIVATE_KEY = <gerada acima — SECRETA>
 VAPID_SUBJECT     = mailto:datanalytics@pronep.com.br
 ```
 
