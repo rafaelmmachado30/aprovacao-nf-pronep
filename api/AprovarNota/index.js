@@ -365,9 +365,22 @@ module.exports = async function (context, req) {
     // Lista arquivos da pasta e acha o que bate com o NumeroNF (ou usa UrlPDF do item)
     const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folder}:/children`).get();
     const files = (folderListResp.value || []).filter(x => x.file);
-    // Tenta achar pelo numero (primeiro chunk do filename)
+    // Tenta achar pelo numero (suporta padroes antigo e novo, com/sem zero-padding)
     const numero = String(f.NumeroNF || '');
-    let target = files.find(x => x.name && x.name.startsWith(numero + '_'));
+    const numPadded = /^\d+$/.test(numero) ? numero.padStart(6, '0') : numero;
+    const numUnpadded = numero.replace(/^0+/, '') || '0';
+    const candidates = Array.from(new Set([numero, numPadded, numUnpadded].filter(Boolean)));
+    let target = null;
+    for (const n of candidates) {
+      target = files.find(x => x.name && x.name.startsWith(n + '_'));
+      if (target) break;
+    }
+    if (!target) {
+      for (const n of candidates) {
+        target = files.find(x => x.name && x.name.indexOf('_' + n + '_') >= 0);
+        if (target) break;
+      }
+    }
     if (!target && files.length > 0) {
       // Fallback: pega o mais recente
       target = files.sort((a,b) => (b.lastModifiedDateTime||'').localeCompare(a.lastModifiedDateTime||''))[0];
@@ -395,8 +408,17 @@ module.exports = async function (context, req) {
     const brt = new Date(agora.getTime() - 3 * 60 * 60 * 1000);
     const dataPasta = `${brt.getUTCFullYear()}-${String(brt.getUTCMonth()+1).padStart(2,'0')}-${String(brt.getUTCDate()).padStart(2,'0')}`;
     diag.dataPastaBRT = dataPasta;
+    // Padrao Pronep: adiciona _APROVADA_{dataAprovacao} antes da extensao
+    // Funciona com nomes antigos e novos — apenas insere o sufixo
+    let aprovadoName = target.name;
+    if (/\.pdf$/i.test(aprovadoName)) {
+      aprovadoName = aprovadoName.replace(/\.pdf$/i, `_APROVADA_${dataPasta}.pdf`);
+    } else {
+      aprovadoName = `${aprovadoName}_APROVADA_${dataPasta}.pdf`;
+    }
+    diag.aprovadoName = aprovadoName;
     const folderAprov = `Notas Fiscais/Notas Aprovadas/${f.Unidade}/${dataPasta}`;
-    const uploadPath = `/sites/${siteId}/drive/root:/${encodeURIComponent(folderAprov)}/${encodeURIComponent(target.name)}:/content`;
+    const uploadPath = `/sites/${siteId}/drive/root:/${encodeURIComponent(folderAprov)}/${encodeURIComponent(aprovadoName)}:/content`;
     const uploadResp = await client.api(uploadPath).header('Content-Type', 'application/pdf').put(stampedPdf);
     diag.uploadedTo = uploadResp.webUrl;
 

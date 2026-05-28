@@ -38,6 +38,34 @@ const { TokenCredentialAuthenticationProvider } =
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
 const cache = { siteId: null, driveId: null, listNotasId: null, listDirId: null, colMap: null, colTypes: null, colMapCachedAt: 0 };
+
+// =============================================================================
+// PADRAO DE NOMENCLATURA DOS PDFs (Pronep)
+// =============================================================================
+// Pendentes: {DataVenc}_{NumNF}_{Fornec30}_{UF}_{Valor}.pdf
+//   Ex.: 2026-06-15_001234_OLA-TECNOLOGIA-EM-SAUDE-LTD_RJ_15000.00.pdf
+// Aprovadas: idem + _APROVADA_{DataAprov}
+//   Ex.: 2026-06-15_001234_OLA-TECNOLOGIA-EM-SAUDE-LTD_RJ_15000.00_APROVADA_2026-05-28.pdf
+function buildPdfFileName(opts) {
+  var numero = opts.numero, fornecedor = opts.fornecedor, unidade = opts.unidade;
+  var valor = opts.valor, vencimento = opts.vencimento, sufixoAprovada = opts.sufixoAprovada;
+  var dv = String(vencimento || '').substring(0, 10) || 'sem-data';
+  var forn = String(fornecedor || 'NF')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 30)
+    .replace(/-+$/g, '') || 'NF';
+  var num = String(numero || '').replace(/[^A-Za-z0-9]/g, '');
+  var numPadded = /^\d+$/.test(num) ? num.padStart(6, '0') : (num || 'SN');
+  var uf = String(unidade || '').toUpperCase().slice(0, 2) || 'XX';
+  var valorNum = (typeof valor === 'number' ? valor : Number(valor)) || 0;
+  var v = valorNum.toFixed(2);
+  var nome = dv + '_' + numPadded + '_' + forn + '_' + uf + '_' + v;
+  if (sufixoAprovada) nome += '_APROVADA_' + sufixoAprovada;
+  return nome + '.pdf';
+}
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
 
 // Descobre mapping displayName -> internalName das colunas da lista NotasFiscais
@@ -292,10 +320,15 @@ module.exports = async function (context, req) {
     }
 
     diag.step = 'upload_pdf';
-    // Caminho: /Notas Fiscais/Pendentes/{Unidade}/Diretoria {Diretoria}/{fileName-saneado}
-    const safeName = fileName.replace(/[^A-Za-z0-9._\\-\\s\\(\\)]/g, '').trim() || 'nota.pdf';
-    const finalName = `${numero}_${fornecedorRazao || 'NF'}_${Date.now()}_${safeName}`
-      .replace(/[^A-Za-z0-9._\\-\\s\\(\\)]/g, '_').slice(0, 200);
+    // Padrao Pronep de nomenclatura — ver buildPdfFileName no topo do arquivo
+    const finalName = buildPdfFileName({
+      numero: numero,
+      fornecedor: fornecedorRazao,
+      unidade: unidade,
+      valor: valor,
+      vencimento: vencimento
+    });
+    diag.finalName = finalName;
     const folder = `Notas Fiscais/Pendentes/${unidade}/Diretoria ${diretoria}`;
     const uploadPath = `/sites/${siteId}/drive/root:/${encodeURIComponent(folder)}/${encodeURIComponent(finalName)}:/content`;
     diag.uploadPath = uploadPath;

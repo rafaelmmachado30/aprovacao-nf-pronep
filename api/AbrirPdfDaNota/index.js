@@ -143,17 +143,28 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Acha o arquivo pelo NumeroNF como prefixo (formato PostNota: {numero}_{razao}_{timestamp}_*.pdf)
-    // SEGURANCA: SEM fallback "mais recente" - retorna erro se nao achar match exato pelo NumeroNF.
+    // Acha o arquivo pelo NumeroNF. Suporta dois padroes:
+    //   - Antigo: {numero}_{razao}_{timestamp}_*.pdf (numero no inicio)
+    //   - Novo:   {dataVenc}_{numeroPadded}_{forn}_{uf}_{valor}.pdf (numero zero-padded a 6 chars)
+    // SEGURANCA: SEM fallback "mais recente" - retorna erro se nao achar match exato.
     let target = null;
     if (numero) {
-      // 1. Match exato: comeca com "{numero}_"
-      target = arquivos.find(a => a.name && a.name.startsWith(numero + '_'));
-      // 2. Reforco: contem "_{numero}_" em qualquer parte (caso o numero seja parte do nome)
-      if (!target) {
-        target = arquivos.find(a => a.name && a.name.indexOf('_' + numero + '_') >= 0);
+      const numStr = String(numero);
+      const numPadded = /^\d+$/.test(numStr) ? numStr.padStart(6, '0') : numStr;
+      const numUnpadded = numStr.replace(/^0+/, '') || '0';
+      const candidates = Array.from(new Set([numStr, numPadded, numUnpadded]));
+      // 1. Match: comeca com "{n}_" (padrao antigo)
+      for (const n of candidates) {
+        target = arquivos.find(a => a.name && a.name.startsWith(n + '_'));
+        if (target) break;
       }
-      // 3. Match no fileSize+hash poderia ser feito aqui se persistido — TODO
+      // 2. Match: contem "_{n}_" (padrao novo - numero no meio)
+      if (!target) {
+        for (const n of candidates) {
+          target = arquivos.find(a => a.name && a.name.indexOf('_' + n + '_') >= 0);
+          if (target) break;
+        }
+      }
     }
     if (!target) {
       const filenames = arquivos.map(a => a.name).slice(0, 10);
