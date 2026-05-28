@@ -1,6 +1,6 @@
 {
   "name": "pronep-aprovacao-nf-api",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "API functions para o Sistema de Aprovacao de NF da Pronep",
   "scripts": {
     "test": "echo \"No tests\""
