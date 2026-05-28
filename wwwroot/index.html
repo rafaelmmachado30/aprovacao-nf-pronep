@@ -2128,7 +2128,9 @@ function mountDashboardCharts() {
   if (!window._dashData) { console.warn('[Charts] window._dashData eh undefined'); return; }
   const data = window._dashData;
   console.log('[Charts] _dashData:', JSON.stringify({
-    barEntries: data.barEntries.length, byUnit: Object.keys(data.byUnit), monthly: data.monthly.length
+    barEntries: (data.barEntries||[]).length,
+    byUnit: Object.keys(data.byUnit || {}),
+    stackedEntries: (data.stackedEntries||[]).length
   }));
   const canvas = document.getElementById('chart-diretoria');
   if (canvas) {
