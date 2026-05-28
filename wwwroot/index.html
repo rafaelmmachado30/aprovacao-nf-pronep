@@ -2128,9 +2128,9 @@ function mountDashboardCharts() {
   if (!window._dashData) { console.warn('[Charts] window._dashData eh undefined'); return; }
   const data = window._dashData;
   console.log('[Charts] _dashData:', JSON.stringify({
-    barEntries: (data.barEntries||[]).length,
+    dirStacked: (data.dirStacked||[]).length,
     byUnit: Object.keys(data.byUnit || {}),
-    stackedEntries: (data.stackedEntries||[]).length
+    fornStackedAll: (data.fornStackedAll||[]).length
   }));
   const canvas = document.getElementById('chart-diretoria');
   if (canvas) {
@@ -2140,63 +2140,110 @@ function mountDashboardCharts() {
     console.warn('[Charts] canvas chart-diretoria NAO existe no DOM');
   }
 
-  // === BAR HORIZONTAL: Valor por Diretoria ===
-  try {
-  const canvasBar = document.getElementById('chart-diretoria');
-  if (canvasBar && data.barEntries && data.barEntries.length) {
-    destroyChart('chart-diretoria');
-    // Plugin inline: escreve o valor no fim de cada barra
-    const barLabelsPlugin = {
-      id: 'barLabels',
+  // Plugin compartilhado: escreve o TOTAL no final de cada barra empilhada com fundo branco
+  // (usado nos 2 graficos empilhados: Diretoria x Unidade e Fornecedor x Unidade)
+  function makeStackTotalLabelsPlugin(isHorizontalIn) {
+    return {
+      id: 'stackTotalLabels',
       afterDatasetsDraw(chart) {
         const ctx = chart.ctx;
-        chart.data.datasets.forEach((dataset, i) => {
-          const meta = chart.getDatasetMeta(i);
-          meta.data.forEach((bar, idx) => {
-            const v = dataset.data[idx];
-            ctx.save();
-            ctx.fillStyle = '#1F4E79';
-            ctx.font = 'bold 11px Inter, system-ui, sans-serif';
-            ctx.textBaseline = 'middle';
-            ctx.textAlign = 'left';
-            ctx.fillText(fmtBRL(v), bar.x + 6, bar.y);
-            ctx.restore();
-          });
+        const isHorizontal = isHorizontalIn; // true = barras deitadas (indexAxis 'y')
+        const datasets = chart.data.datasets;
+        if (!datasets.length) return;
+        const lastMeta = chart.getDatasetMeta(datasets.length - 1);
+        lastMeta.data.forEach((lastBar, idx) => {
+          let total = 0;
+          datasets.forEach(ds => { total += (ds.data[idx] || 0); });
+          if (total <= 0) return;
+          const txt = total >= 1000000 ? 'R$' + (total/1000000).toFixed(1).replace('.', ',') + 'M'
+                    : total >= 1000   ? 'R$' + Math.round(total/1000) + 'k'
+                    : 'R$' + Math.round(total);
+          ctx.save();
+          ctx.font = 'bold 11px Inter, system-ui, sans-serif';
+          const tw = ctx.measureText(txt).width;
+          const padX = 5, padY = 2, h = 16;
+          let bx, by;
+          if (isHorizontal) {
+            // Topo direito da barra (ponta horizontal mais externa)
+            bx = lastBar.x + 6;
+            by = lastBar.y - h/2;
+            // Garante que nao sai do canvas
+            const maxX = chart.chartArea.right - tw - padX*2 - 2;
+            if (bx > maxX) bx = maxX;
+          } else {
+            // Acima da barra (vertical)
+            bx = lastBar.x - tw/2 - padX;
+            by = lastBar.y - h - 4;
+            if (by < chart.chartArea.top + 2) by = chart.chartArea.top + 2;
+          }
+          // Fundo branco com sombra leve
+          ctx.fillStyle = 'rgba(255,255,255,0.96)';
+          ctx.strokeStyle = '#DCE3E9';
+          ctx.lineWidth = 1;
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(bx, by, tw + padX*2, h, 4);
+            ctx.fill();
+            ctx.stroke();
+          } else {
+            ctx.fillRect(bx, by, tw + padX*2, h);
+            ctx.strokeRect(bx, by, tw + padX*2, h);
+          }
+          // Texto
+          ctx.fillStyle = '#1F4E79';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(txt, bx + padX, by + h/2);
+          ctx.restore();
         });
       }
     };
-    window._activeCharts['chart-diretoria'] = new Chart(canvasBar, {
-      type: 'bar',
-      data: {
-        labels: data.barEntries.map(e => e[0]),
-        datasets: [{
-          label: 'Valor aprovado',
-          data: data.barEntries.map(e => e[1]),
-          backgroundColor: '#27AAE1',
-          borderColor: '#1F4E79',
-          borderWidth: 1,
-          borderRadius: 4,
-          hoverBackgroundColor: '#1F4E79'
-        }]
-      },
-      options: {
-        animation: false,
-        indexAxis: 'y',
-        responsive: true,
-        maintainAspectRatio: false,
-        layout: { padding: { right: 90 } },
-        plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: c => fmtBRL(c.parsed.x) } }
-        },
-        scales: {
-          x: { beginAtZero: true, grid: { color: '#EEF2F5' }, ticks: { callback: v => fmtBRL(v) } },
-          y: { grid: { display: false } }
-        }
-      },
-      plugins: [barLabelsPlugin]
-    });
   }
+
+  // === BAR EMPILHADO: Valor Aprovado por Diretoria x Unidade ===
+  try {
+    const canvasBar = document.getElementById('chart-diretoria');
+    if (canvasBar && data.dirStacked && data.dirStacked.length) {
+      destroyChart('chart-diretoria');
+      const cores = { SP: '#7B61C6', RJ: '#27AAE1', ES: '#F09030' };
+      const dirDatasets = ['SP', 'RJ', 'ES'].map(function(u) {
+        return {
+          label: u,
+          data: data.dirStacked.map(function(e) { return (e.vals && e.vals[u]) || 0; }),
+          backgroundColor: cores[u],
+          borderColor: cores[u],
+          borderWidth: 0,
+          stack: 'unidades'
+        };
+      });
+      const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+      // Diretoria sempre HORIZONTAL (poucos items, labels mais legiveis)
+      const dirScales = {};
+      dirScales.y = { stacked: true, grid: { display: false }, ticks: { font: { size: 11 }, autoSkip: false } };
+      dirScales.x = {
+        stacked: true,
+        beginAtZero: true,
+        grid: { color: '#EEF2F5' },
+        ticks: { font: { size: 11 }, callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; } }
+      };
+      window._activeCharts['chart-diretoria'] = new Chart(canvasBar, {
+        type: 'bar',
+        data: { labels: data.dirStacked.map(e => e.dir), datasets: dirDatasets },
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          layout: { padding: { right: 70 } },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } },
+            tooltip: { callbacks: { label: function(c) { return c.dataset.label + ': ' + fmtBRL(c.parsed.x); } } }
+          },
+          scales: dirScales
+        },
+        plugins: [makeStackTotalLabelsPlugin(true)]
+      });
+    }
   } catch (e) { console.error('[Charts] erro chart-diretoria:', e); }
 
   // === DONUT: Distribuicao por Unidade ===
@@ -2268,24 +2315,31 @@ function mountDashboardCharts() {
   } catch (e) { console.error('[Charts] erro chart-unidade:', e); }
 
   // === BAR EMPILHADO: Valor Aprovado por Fornecedor x Unidade ===
-  // try/catch defensivo: se algo der errado aqui, os outros graficos continuam funcionando
+  // Top 8 no mobile, Top 20 no desktop. Rotulos com fundo branco em cada barra.
   try {
     const canvasStack = document.getElementById('chart-forn-unit');
-    if (canvasStack && data.stackedEntries && data.stackedEntries.length > 0) {
+    if (canvasStack && data.fornStackedAll && data.fornStackedAll.length > 0) {
       destroyChart('chart-forn-unit');
+      const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+      const limite = isMobile ? 8 : 20;
+      const fornData = data.fornStackedAll.slice(0, limite);
+      // Atualiza o pill no titulo conforme a quantidade real
+      const pillEl = document.getElementById('forn-pill');
+      if (pillEl) pillEl.textContent = 'Top ' + fornData.length;
+      const fornLabels = fornData.map(function(e) {
+        return e.forn.length > 18 ? e.forn.substring(0,16) + '..' : e.forn;
+      });
       const cores = { SP: '#7B61C6', RJ: '#27AAE1', ES: '#F09030' };
       const datasets = ['SP', 'RJ', 'ES'].map(function(u) {
         return {
           label: u,
-          data: data.stackedEntries.map(function(e) { return (e.vals && e.vals[u]) || 0; }),
+          data: fornData.map(function(e) { return (e.vals && e.vals[u]) || 0; }),
           backgroundColor: cores[u],
           borderColor: cores[u],
           borderWidth: 0,
           stack: 'unidades'
         };
       });
-      const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
-      // catAxis = eixo dos rotulos (fornecedor) · valAxis = eixo dos valores (R$)
       // Em desktop (indexAxis='x'): X=categoria, Y=valor.  Em mobile (indexAxis='y'): X=valor, Y=categoria.
       const catAxis = isMobile ? 'y' : 'x';
       const valAxis = isMobile ? 'x' : 'y';
@@ -2293,38 +2347,32 @@ function mountDashboardCharts() {
       scales[catAxis] = {
         stacked: true,
         grid: { display: false },
-        ticks: { font: { size: 11 }, autoSkip: false }
+        ticks: { font: { size: 10 }, autoSkip: false, maxRotation: isMobile ? 0 : 60, minRotation: isMobile ? 0 : 35 }
       };
       scales[valAxis] = {
         stacked: true,
         beginAtZero: true,
         grid: { color: '#EEF2F5' },
-        ticks: {
-          font: { size: 11 },
-          callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; }
-        }
+        ticks: { font: { size: 11 }, callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; } }
       };
       window._activeCharts['chart-forn-unit'] = new Chart(canvasStack, {
         type: 'bar',
-        data: { labels: data.stackedLabels, datasets: datasets },
+        data: { labels: fornLabels, datasets: datasets },
         options: {
           animation: false,
           responsive: true,
           maintainAspectRatio: false,
           indexAxis: isMobile ? 'y' : 'x',
+          layout: { padding: isMobile ? { right: 60 } : { top: 22 } },
           plugins: {
             legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } },
-            tooltip: {
-              callbacks: {
-                label: function(c) { return c.dataset.label + ': ' + fmtBRL(c.parsed[valAxis]); }
-              }
-            }
+            tooltip: { callbacks: { label: function(c) { return c.dataset.label + ': ' + fmtBRL(c.parsed[valAxis]); } } }
           },
           scales: scales
-        }
+        },
+        plugins: [makeStackTotalLabelsPlugin(isMobile)]
       });
     } else if (canvasStack) {
-      // Sem dados — limpa o canvas com mensagem
       const ctx = canvasStack.getContext('2d');
       ctx.clearRect(0, 0, canvasStack.width, canvasStack.height);
       ctx.fillStyle = '#647883';
@@ -2376,14 +2424,23 @@ const views = {
     const taxaDup = (notasNoEscopo.filter(n => n.status === 'duplicada').length / Math.max(notasNoEscopo.length,1) * 100).toFixed(1);
 
     // Dados pros graficos
-    const byDiretoria = {};
-    aprovadas.forEach(n => { byDiretoria[n.diretoria] = (byDiretoria[n.diretoria]||0) + n.valor; });
-    const barEntries = Object.entries(byDiretoria).sort((a,b)=>b[1]-a[1]);
+    // Diretoria x Unidade (barras empilhadas) — pq o gestor ja ve so a propria diretoria,
+    // e a quebra por unidade da contexto util
+    const byDirUnit = {};
+    aprovadas.forEach(n => {
+      const dir = n.diretoria || '—';
+      if (!byDirUnit[dir]) byDirUnit[dir] = { SP: 0, RJ: 0, ES: 0 };
+      const u = n.unidade || '';
+      if (byDirUnit[dir].hasOwnProperty(u)) byDirUnit[dir][u] += n.valor;
+    });
+    const dirStacked = Object.entries(byDirUnit)
+      .map(function(kv) { return { dir: kv[0], vals: kv[1], total: kv[1].SP + kv[1].RJ + kv[1].ES }; })
+      .sort(function(a,b) { return b.total - a.total; });
 
     const byUnit = {};
     aprovadas.forEach(n => byUnit[n.unidade] = (byUnit[n.unidade]||0) + n.valor);
 
-    // Dados do novo grafico: Valor Aprovado por Fornecedor x Unidade (barras empilhadas, top 8)
+    // Fornecedor x Unidade (barras empilhadas) — slice de top 8/20 acontece no mount
     const byFornUnit = {};
     aprovadas.forEach(n => {
       const forn = (fornecedorOf(n)||{}).razao || n.fornecedorRazao || '—';
@@ -2391,17 +2448,12 @@ const views = {
       const u = n.unidade || '';
       if (byFornUnit[forn].hasOwnProperty(u)) byFornUnit[forn][u] += n.valor;
     });
-    const stackedEntries = Object.entries(byFornUnit)
+    const fornStackedAll = Object.entries(byFornUnit)
       .map(function(kv) { return { forn: kv[0], vals: kv[1], total: kv[1].SP + kv[1].RJ + kv[1].ES }; })
-      .sort(function(a,b) { return b.total - a.total; })
-      .slice(0, 8);
-    const stackedLabels = stackedEntries.map(function(e) {
-      // Trunca nomes longos pro grafico nao ficar feio
-      return e.forn.length > 18 ? e.forn.substring(0,16) + '..' : e.forn;
-    });
+      .sort(function(a,b) { return b.total - a.total; });
 
     // Guarda dados pra mountDashboardCharts() consumir apos innerHTML
-    window._dashData = { barEntries, byUnit, stackedEntries, stackedLabels, totalMes };
+    window._dashData = { dirStacked, byUnit, fornStackedAll, totalMes };
 
     return `
       <h2>Dashboard Analitico</h2>
@@ -2425,18 +2477,18 @@ const views = {
 
       <div class="chart-grid">
         <div class="card">
-          <h3>Valor Aprovado por Diretoria <span class="pill">Maio/2026</span></h3>
-          <div style="position:relative;height:280px"><canvas id="chart-diretoria"></canvas></div>
+          <h3>Valor Aprovado por Diretoria × Unidade <span class="pill">Maio/2026</span></h3>
+          <div style="position:relative;height:320px"><canvas id="chart-diretoria"></canvas></div>
         </div>
         <div class="card">
           <h3>Distribuicao por Unidade</h3>
-          <div style="position:relative;height:280px"><canvas id="chart-unidade"></canvas></div>
+          <div style="position:relative;height:320px"><canvas id="chart-unidade"></canvas></div>
         </div>
       </div>
 
       <div class="card">
-        <h3>Valor Aprovado por Fornecedor × Unidade <span class="pill">Top 8</span></h3>
-        <div style="position:relative;height:320px"><canvas id="chart-forn-unit"></canvas></div>
+        <h3>Valor Aprovado por Fornecedor × Unidade <span class="pill" id="forn-pill">Top 20</span></h3>
+        <div style="position:relative;height:420px"><canvas id="chart-forn-unit"></canvas></div>
       </div>
 
       <div class="card data-hide-mobile">
