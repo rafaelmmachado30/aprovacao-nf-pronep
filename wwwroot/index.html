@@ -292,6 +292,124 @@
   .btn { transition: transform 0.1s ease, box-shadow 0.15s ease; }
   .btn:active { transform: scale(0.97); }
   .tag, .pill, .status-pill { transition: transform 0.15s ease; }
+
+  /* ===========================================================================
+     RESPONSIVIDADE — telas pequenas (tablet / mobile)
+     Estrategia:
+       - Ate 1100px: cards permitem scroll horizontal das tabelas largas
+       - Ate 768px:  sidebar vira tabbar superior, KPIs em 2 colunas, filtros empilham
+       - Ate 480px:  KPIs em 1 coluna, fonte ainda menor
+     =========================================================================== */
+
+  /* Tablet / desktop pequeno (até 1100px) */
+  @media (max-width: 1100px) {
+    /* Tabelas largas ganham scroll horizontal dentro do card */
+    .card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .card > table.data, .card table.data { min-width: 680px; }
+    /* Filter-bar com padding menor */
+    .filter-bar { padding: 12px 14px; }
+  }
+
+  /* Mobile (até 768px) */
+  @media (max-width: 768px) {
+    /* App grid: sidebar vira tabbar horizontal no topo (sob o topbar) */
+    #app.active {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto 1fr;
+      grid-template-areas: 'topbar' 'sidebar' 'content';
+    }
+    .sidebar {
+      position: static;
+      height: auto;
+      padding: 0;
+      box-shadow: 0 2px 8px rgba(31,78,121,0.15);
+    }
+    .sidebar nav {
+      display: flex;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      padding: 4px 6px;
+      gap: 2px;
+      scrollbar-width: thin;
+    }
+    .sidebar a.nav-item {
+      padding: 8px 12px;
+      font-size: 12px;
+      border-left: none;
+      border-bottom: 3px solid transparent;
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+    .sidebar a.nav-item.active {
+      border-left: none;
+      border-bottom-color: var(--azul-claro);
+    }
+    .sidebar a.nav-item .icon { width: 22px; height: 22px; }
+    .sidebar a.nav-item .badge { margin-left: 6px; }
+    .sidebar .footer-area { display: none; }
+
+    /* Topbar mais compacta */
+    .topbar { padding: 8px 12px !important; gap: 10px; }
+    .topbar img { max-height: 28px !important; }
+
+    /* Content padding reduz */
+    .content { padding: 14px 12px 32px; }
+
+    /* Titulos menores */
+    h2 { font-size: 20px; margin: 0 0 4px; }
+    .view-sub { font-size: 12px; margin-bottom: 12px; }
+
+    /* KPIs em 2 colunas */
+    .kpi-row { grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+    .kpi { padding: 12px 14px; }
+    .kpi .label { font-size: 11px; }
+    .kpi .value { font-size: 22px; }
+    .kpi .delta { font-size: 11px; }
+
+    /* Filter-bar empilha tudo */
+    .filter-bar {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      padding: 12px;
+    }
+    .filter-bar > div { width: 100%; }
+    .filter-bar select,
+    .filter-bar input { width: 100%; box-sizing: border-box; }
+    /* Override de grid-column inline em filtros (ex: "grid-column: span 2") */
+    .filter-bar > div[style*="grid-column"] { grid-column: auto !important; }
+    .filter-bar > div[style*="display:grid"],
+    .filter-bar > div[style*="grid-template"] { grid-template-columns: 1fr !important; }
+
+    /* Cards mais compactos */
+    .card { padding: 14px; margin-bottom: 12px; border-radius: 6px; }
+    .card h3 { font-size: 14px; }
+
+    /* Tabelas mais densas + scroll horizontal */
+    .card table.data { font-size: 12px; min-width: 600px; }
+    .card table.data th,
+    .card table.data td { padding: 8px 8px; }
+
+    /* Form grid em coluna unica */
+    .form-grid { grid-template-columns: 1fr !important; gap: 12px !important; }
+    .form-row input,
+    .form-row select,
+    .form-row textarea { font-size: 14px; }
+
+    /* Chart grid e modais */
+    .chart-grid { grid-template-columns: 1fr !important; }
+    .modal { max-width: calc(100vw - 24px) !important; padding: 16px !important; }
+    .modal h3 { font-size: 16px; }
+  }
+
+  /* Mobile pequeno (até 480px) */
+  @media (max-width: 480px) {
+    .kpi-row { grid-template-columns: 1fr; }
+    .topbar .user-info { display: none; }
+    .topbar { gap: 6px; }
+    h2 { font-size: 18px; }
+  }
 </style>
 </head>
 <body>
