@@ -781,6 +781,7 @@ function loginAs(userData, emailLogin) {
     email: email,
     initials: userData.nome.split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase(),
     role: userData.cargo || base.role,
+    roleKey: userData.persona,  // CHAVE real ('admin','financeiro','gestor','submitter') - separada do role de display
     dept: userData.dept || base.dept
   });
   document.getElementById('user-email').textContent = currentPersona.email || '—';
@@ -1710,7 +1711,7 @@ function renderConfiguracoesView() {
       </div>
     </div>
 
-    ${currentPersona && currentPersona.role === 'admin' ? `
+    ${currentPersona && currentPersona.roleKey === 'admin' ? `
     <div class="card" style="max-width:880px;margin-top:18px;border:2px solid #C62828;background:#FFF8F8">
       <h3 style="margin-top:0;color:#C62828;display:flex;align-items:center;gap:8px">
         <span style="font-size:22px">⚠</span> Zona de risco — Reset da base
@@ -1733,7 +1734,7 @@ function renderConfiguracoesView() {
 
 // Modal de confirmacao dupla — so admin chega aqui
 function abrirModalLimparBase() {
-  if (!currentPersona || currentPersona.role !== 'admin') {
+  if (!currentPersona || currentPersona.roleKey !== 'admin') {
     toast('Acesso restrito a administradores.', 'error');
     return;
   }
