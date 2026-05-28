@@ -2285,6 +2285,25 @@ function mountDashboardCharts() {
         };
       });
       const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+      // catAxis = eixo dos rotulos (fornecedor) · valAxis = eixo dos valores (R$)
+      // Em desktop (indexAxis='x'): X=categoria, Y=valor.  Em mobile (indexAxis='y'): X=valor, Y=categoria.
+      const catAxis = isMobile ? 'y' : 'x';
+      const valAxis = isMobile ? 'x' : 'y';
+      const scales = {};
+      scales[catAxis] = {
+        stacked: true,
+        grid: { display: false },
+        ticks: { font: { size: 11 }, autoSkip: false }
+      };
+      scales[valAxis] = {
+        stacked: true,
+        beginAtZero: true,
+        grid: { color: '#EEF2F5' },
+        ticks: {
+          font: { size: 11 },
+          callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; }
+        }
+      };
       window._activeCharts['chart-forn-unit'] = new Chart(canvasStack, {
         type: 'bar',
         data: { labels: data.stackedLabels, datasets: datasets },
@@ -2297,24 +2316,11 @@ function mountDashboardCharts() {
             legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } },
             tooltip: {
               callbacks: {
-                label: function(c) { return c.dataset.label + ': ' + fmtBRL(c.parsed[isMobile ? 'x' : 'y']); }
+                label: function(c) { return c.dataset.label + ': ' + fmtBRL(c.parsed[valAxis]); }
               }
             }
           },
-          scales: {
-            x: {
-              stacked: true,
-              grid: { color: '#EEF2F5' },
-              ticks: { callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; }, font: { size: 11 } },
-              beginAtZero: true
-            },
-            y: {
-              stacked: true,
-              grid: { display: false },
-              ticks: { font: { size: 11 } },
-              beginAtZero: true
-            }
-          }
+          scales: scales
         }
       });
     } else if (canvasStack) {
