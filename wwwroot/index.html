@@ -417,6 +417,102 @@
     .topbar { gap: 6px; }
     h2 { font-size: 18px; }
   }
+
+  /* ============================================================================
+     CARDS MOBILE (estilo Planner/Trello) — pra Fila, Aprovadas e Rejeitadas
+     Em desktop: cards escondidos, tabelas visiveis
+     Em mobile (<768px): tabelas escondidas, cards visiveis
+     ============================================================================ */
+  .nf-cards-mobile { display: none; }
+  .data-table-desktop { display: block; }
+
+  @media (max-width: 768px) {
+    .nf-cards-mobile { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
+    .data-table-desktop { display: none !important; }
+    /* Card-container em mobile: sem padding/shadow pq cards ja tem */
+    .card.cards-host { padding: 8px; box-shadow: none; background: transparent; }
+  }
+
+  .nf-card {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 6px rgba(31, 78, 121, 0.07);
+    border: 1px solid #E1E8EE;
+    overflow: hidden;
+    cursor: pointer;
+    transition: box-shadow 0.15s, transform 0.1s;
+    position: relative;
+  }
+  .nf-card:active { transform: scale(0.995); }
+  .nf-card.fora-prazo { background: #FFF8F8; border-color: #FFCDD2; }
+  .nf-card.aguardando-n2 { border-color: #F9A825; }
+  .nf-card.processado { opacity: 0.7; }
+
+  .nf-card-stripe { height: 5px; background: var(--azul-claro); }
+  .nf-card.fora-prazo .nf-card-stripe { background: #C62828; }
+  .nf-card.aguardando-n2 .nf-card-stripe { background: #F9A825; }
+  .nf-card.rejeitada .nf-card-stripe { background: #C62828; }
+  .nf-card.aprovada .nf-card-stripe { background: #2E7D32; }
+
+  .nf-card-header {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: 11px 14px 4px; gap: 10px;
+  }
+  .nf-card-id { font-weight: 700; color: var(--azul-escuro); font-size: 15px; line-height: 1.1; }
+  .nf-card-num { font-size: 11px; color: var(--cinza-medio); margin-top: 2px; }
+  .nf-card-value {
+    font-weight: 700; color: var(--verde); font-size: 16px;
+    white-space: nowrap; text-align: right;
+  }
+  .nf-card.fora-prazo .nf-card-value { color: #C62828; }
+
+  .nf-card-body { padding: 0 14px 12px; }
+  .nf-card-fornecedor {
+    font-size: 13px; color: var(--cinza-texto);
+    margin-bottom: 8px; line-height: 1.35; font-weight: 600;
+  }
+  .nf-card-meta {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 12px;
+  }
+  .nf-card-meta .meta-item {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: var(--cinza-medio);
+  }
+  .nf-card-meta .meta-item b { color: var(--cinza-texto); }
+  .nf-card-meta .venc-alerta { color: #C62828; font-weight: 600; }
+
+  .nf-card-toggle {
+    text-align: center; padding: 6px; border-top: 1px dashed #E1E8EE;
+    font-size: 11px; color: var(--cinza-medio); user-select: none;
+    text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+  }
+  .nf-card-toggle .icon { display: inline-block; transition: transform 0.2s; margin-left: 4px; }
+  .nf-card.open .nf-card-toggle .icon { transform: rotate(180deg); }
+  .nf-card.open .nf-card-toggle .label-fechado { display: none; }
+  .nf-card:not(.open) .nf-card-toggle .label-aberto { display: none; }
+
+  .nf-card-detail {
+    display: none; padding: 12px 14px 14px;
+    border-top: 1px solid #EEF2F5; background: #FAFBFC;
+  }
+  .nf-card.open .nf-card-detail { display: block; }
+
+  .nf-detail-grid {
+    display: grid; grid-template-columns: 110px 1fr; gap: 7px 12px;
+    font-size: 12px; margin-bottom: 14px;
+  }
+  .nf-detail-grid .label {
+    color: var(--cinza-medio); font-weight: 600;
+    text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em;
+  }
+  .nf-detail-grid .val { color: var(--cinza-texto); word-break: break-word; }
+  .nf-detail-grid .val .mono { font-size: 11px; }
+
+  .nf-card-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .nf-card-actions .btn { flex: 1; min-width: 0; padding: 9px 4px; font-size: 12px; font-weight: 600; }
+  .nf-card-actions .btn-aprovar { background: #2E7D32; color: #fff; border-color: #2E7D32; }
+  .nf-card-actions .btn-rejeitar { background: #C62828; color: #fff; border-color: #C62828; }
 </style>
 </head>
 <body>
@@ -2425,7 +2521,8 @@ const views = {
     return `
       <h2>Notas Rejeitadas</h2>
       <div class="view-sub">NFs rejeitadas por gestor ou automaticamente pelo sistema. Quem lançou recebeu e-mail + Teams.</div>
-      <div class="card">
+      <!-- Versao desktop: tabela -->
+      <div class="card data-table-desktop">
         <table class="data">
           <thead><tr><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Status</th><th>Motivo</th><th>Solicitante</th></tr></thead>
           <tbody>
@@ -2443,6 +2540,14 @@ const views = {
             `).join('') || '<tr><td colspan="8" class="muted center">Sem rejeições recentes.</td></tr>'}
           </tbody>
         </table>
+      </div>
+      <!-- Versao mobile: cards -->
+      <div class="card cards-host">
+        ${rj.length === 0 ? '<div class="muted center" style="padding:30px">Sem rejeições recentes.</div>' : `
+          <div class="nf-cards-mobile">
+            ${rj.map(n => buildNFCard(n, 'rejeitadas')).join('')}
+          </div>
+        `}
       </div>
     `;
   },
@@ -3243,6 +3348,163 @@ async function confirmarImportacao() {
   showView('fornecedores');
 }
 
+// =================== CARDS MOBILE (Fila / Aprovadas / Rejeitadas) ===================
+// Toggle expandir/recolher um card individual
+function toggleNFCard(el) {
+  if (!el) return;
+  // Se o clique veio de um botao dentro do card, nao toggle
+  el.classList.toggle('open');
+}
+
+// Helper: monta o HTML de UM card pra uma NF, no contexto especificado.
+// contexto: 'fila' | 'aprovadas' | 'rejeitadas'
+function buildNFCard(n, contexto) {
+  const forn = fornecedorOf(n) || {};
+  const cnpj = formatarCNPJ(forn.cnpj || forn.documento || n.fornecedorCnpj);
+  const unid = (n.unidade || '').toLowerCase();
+  const isAguardandoN2 = !!n.aguardandoN2;
+  const isAprovador = currentPersona && currentPersona.shortRole !== 'Submitter';
+
+  // Calcula dias ate o vencimento (so usado na Fila)
+  let diasAteVenc = NaN, venceForaPrazo = false, vencInfo = '';
+  if (contexto === 'fila' && n.vencimento) {
+    const hoje = new Date(); hoje.setHours(0,0,0,0);
+    const dVenc = new Date(n.vencimento + 'T00:00:00');
+    if (!isNaN(dVenc.getTime())) {
+      diasAteVenc = diasEntre(hoje, dVenc);
+      venceForaPrazo = diasAteVenc < 5;
+      if (venceForaPrazo) {
+        vencInfo = diasAteVenc < 0
+          ? ' (venceu ' + Math.abs(diasAteVenc) + ' dia(s) atras)'
+          : ' (' + diasAteVenc + ' dia(s) ate vencer)';
+      }
+    }
+  }
+
+  // Classes contextuais
+  const classes = ['nf-card'];
+  if (venceForaPrazo) classes.push('fora-prazo');
+  if (isAguardandoN2) classes.push('aguardando-n2');
+  if (n.processado) classes.push('processado');
+  if (contexto === 'rejeitadas') classes.push('rejeitada');
+  if (contexto === 'aprovadas') classes.push('aprovada');
+
+  // Header sempre tem ID + valor
+  const headerHtml = `
+    <div class="nf-card-header">
+      <div>
+        <div class="nf-card-id">${n.id || ''}</div>
+        <div class="nf-card-num">Nº ${n.numero || ''}${n.serie ? '/' + n.serie : ''}</div>
+      </div>
+      <div class="nf-card-value">${fmtBRL(n.valor || 0)}</div>
+    </div>
+  `;
+
+  // Body — informacoes essenciais conforme contexto
+  let metaHtml = '';
+  if (contexto === 'fila') {
+    metaHtml = `
+      <span class="meta-item"><span class="tag tag-${unid}">${n.unidade || '—'}</span></span>
+      <span class="meta-item ${venceForaPrazo ? 'venc-alerta' : ''}">
+        ${venceForaPrazo ? '⚠ ' : ''}${fmtDate(n.vencimento)}${vencInfo}
+      </span>
+    `;
+  } else if (contexto === 'aprovadas') {
+    metaHtml = `
+      <span class="meta-item"><span class="tag tag-${unid}">${n.unidade || '—'}</span></span>
+      <span class="meta-item"><b>${n.diretoria || '—'}</b></span>
+      <span class="meta-item">Venc.: ${fmtDate(n.vencimento)}</span>
+    `;
+  } else { // rejeitadas
+    metaHtml = `
+      <span class="meta-item"><span class="tag tag-${unid}">${n.unidade || '—'}</span></span>
+      <span class="meta-item"><b>${n.diretoria || '—'}</b></span>
+      <span class="meta-item">${statusPill(n.status, n)}</span>
+    `;
+  }
+
+  const bodyHtml = `
+    <div class="nf-card-body">
+      <div class="nf-card-fornecedor">${forn.razao || n.fornecedorRazao || '—'}</div>
+      <div class="nf-card-meta">${metaHtml}</div>
+    </div>
+  `;
+
+  // Detalhes — todas as infos + acoes
+  const detailRows = [];
+  detailRows.push(['CNPJ', '<span class="mono">' + cnpj + '</span>']);
+  detailRows.push(['Diretoria', n.diretoria || '—']);
+  if (contexto !== 'fila') detailRows.push(['Vencimento', fmtDate(n.vencimento)]);
+  detailRows.push(['Solicitante', '<b>' + (n.lancadoPor || '—') + '</b>']);
+  detailRows.push(['Lançada em', n.lancadoEm || '—']);
+  if (n.descricao) detailRows.push(['Descrição', n.descricao]);
+  if (contexto === 'aprovadas' || contexto === 'rejeitadas') {
+    detailRows.push(['Status', statusPill(n.status, n)]);
+  }
+  if (contexto === 'aprovadas') {
+    detailRows.push(['Aprovador', n.aprovadoPor || '—']);
+    detailRows.push(['Aprovado em', n.aprovadoEm || '—']);
+    detailRows.push(['Processado', n.processado ? '✓ Sim' : 'Não']);
+  }
+  if (contexto === 'rejeitadas' && n.motivo) {
+    detailRows.push(['Motivo', '<span style="color:#C62828">' + n.motivo + '</span>']);
+  }
+
+  const detailGridHtml = detailRows.map(r =>
+    '<div class="label">' + r[0] + '</div><div class="val">' + r[1] + '</div>'
+  ).join('');
+
+  // Acoes contextuais (no detail, com event.stopPropagation pra nao fechar o card)
+  let actionsHtml = '';
+  if (contexto === 'fila' && isAprovador) {
+    actionsHtml = `
+      <div class="nf-card-actions">
+        <button class="btn btn-secondary" onclick="event.stopPropagation();openNFDetail('${n.id}')">📄 Abrir NF</button>
+        <button class="btn btn-aprovar" onclick="event.stopPropagation();confirmApprove('${n.id}')">✓ Aprovar</button>
+        <button class="btn btn-rejeitar" onclick="event.stopPropagation();confirmReject('${n.id}')">✕ Rejeitar</button>
+      </div>
+    `;
+  } else if (contexto === 'aprovadas') {
+    actionsHtml = `
+      <div class="nf-card-actions">
+        <button class="btn btn-secondary" onclick="event.stopPropagation();openApprovedPdf('${n.id}')">📄 Ver PDF</button>
+      </div>
+    `;
+  } else if (contexto === 'rejeitadas' && isAprovador) {
+    actionsHtml = `
+      <div class="nf-card-actions">
+        <button class="btn btn-secondary" onclick="event.stopPropagation();openNFDetail('${n.id}')">📄 Ver detalhes</button>
+      </div>
+    `;
+  }
+
+  const detailHtml = `
+    <div class="nf-card-detail">
+      <div class="nf-detail-grid">${detailGridHtml}</div>
+      ${actionsHtml}
+    </div>
+  `;
+
+  // Toggle line
+  const toggleHtml = `
+    <div class="nf-card-toggle">
+      <span class="label-fechado">Toque para ver detalhes</span>
+      <span class="label-aberto">Toque para recolher</span>
+      <span class="icon">▾</span>
+    </div>
+  `;
+
+  return `
+    <div class="${classes.join(' ')}" onclick="toggleNFCard(this)">
+      <div class="nf-card-stripe"></div>
+      ${headerHtml}
+      ${bodyHtml}
+      ${toggleHtml}
+      ${detailHtml}
+    </div>
+  `;
+}
+
 function renderFilaAprovacaoView() {
   const f = window._filtroFila;
   // Base: todas pendentes
@@ -3340,7 +3602,8 @@ function renderFilaAprovacaoView() {
       : ''}
 
     ${lista.length > 0 ? `
-    <div class="card">
+    <!-- Versao desktop: tabela completa -->
+    <div class="card data-table-desktop">
       <table class="data">
         <thead><tr>
           <th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th>Vencimento</th><th class="num">Valor</th><th>Solicitante</th><th class="center">Status</th>${currentPersona.shortRole !== 'Submitter' ? '<th class="center">Ações</th>' : ''}
@@ -3356,7 +3619,7 @@ function renderFilaAprovacaoView() {
             return `
             <tr style="${trStyle}">
               <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero}/${n.serie}</span></td>
-              <td>${fornecedorOf(n).razao}<br><span class="small muted mono">${fornecedorOf(n).cnpj}</span></td>
+              <td>${fornecedorOf(n).razao}<br><span class="small muted mono">${formatarCNPJ(fornecedorOf(n).cnpj)}</span></td>
               <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
               <td>${n.diretoria}</td>
               <td>${venceForaPrazo
@@ -3376,6 +3639,13 @@ function renderFilaAprovacaoView() {
           }).join('')}
         </tbody>
       </table>
+    </div>
+
+    <!-- Versao mobile: cards estilo Planner -->
+    <div class="card cards-host">
+      <div class="nf-cards-mobile">
+        ${lista.map(n => buildNFCard(n, 'fila')).join('')}
+      </div>
     </div>
     ` : (algumFiltroAtivo ? '<div class="card"><div class="muted center" style="padding:30px">Nenhuma NF encontrada com os filtros atuais. <a href="#" onclick="event.preventDefault();limpaFiltroFila()">Limpar filtros →</a></div></div>' : '')}
   `;
@@ -3526,13 +3796,20 @@ function renderAprovadasTable() {
   const totalSemFiltro = notas.filter(n => n.status === 'aprovada').length;
   const algumFiltroAtivo = f.unidade !== 'TODAS' || f.diretoria !== 'TODAS' || f.aprovadoDe || f.aprovadoAte || f.vencimentoDe || f.vencimentoAte || (f.processado && f.processado !== 'TODOS') || f.busca;
 
+  const contadorHtml = `
+    <div class="small muted" style="margin-bottom:8px">
+      ${algumFiltroAtivo
+        ? `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s) com filtros aplicados <span class="muted">(de ${totalSemFiltro} no total)</span>`
+        : `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s)`}
+    </div>
+  `;
+
+  const emptyMsg = `<div class="muted center" style="padding:30px">Nenhuma nota encontrada com os filtros atuais. <a href="#" onclick="event.preventDefault();limpaFiltroAprovadas()">Limpar filtros →</a></div>`;
+
   return `
-    <div class="card">
-      <div class="small muted" style="margin-bottom:8px">
-        ${algumFiltroAtivo
-          ? `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s) com filtros aplicados <span class="muted">(de ${totalSemFiltro} no total)</span>`
-          : `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s)`}
-      </div>
+    <!-- Versao desktop: tabela completa -->
+    <div class="card data-table-desktop">
+      ${contadorHtml}
       <table class="data">
         <thead><tr><th class="center">✓</th><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Solicitante</th><th>Aprovador</th><th>Aprovado em</th><th>Vencimento</th><th class="center">PDF</th></tr></thead>
         <tbody>
@@ -3570,6 +3847,17 @@ function renderAprovadasTable() {
           ${lista.length > 500 ? `<tr><td colspan="11" class="center muted" style="padding:14px;font-style:italic">Mostrando 500 de ${lista.length}. Refine os filtros.</td></tr>` : ''}
         </tbody>
       </table>
+    </div>
+
+    <!-- Versao mobile: cards estilo Planner -->
+    <div class="card cards-host">
+      ${contadorHtml}
+      ${lista.length === 0 ? emptyMsg : `
+        <div class="nf-cards-mobile">
+          ${lista.slice(0, 500).map(n => buildNFCard(n, 'aprovadas')).join('')}
+        </div>
+        ${lista.length > 500 ? '<div class="center muted small" style="padding:14px;font-style:italic">Mostrando 500 de ' + lista.length + '. Refine os filtros.</div>' : ''}
+      `}
     </div>
   `;
 }
