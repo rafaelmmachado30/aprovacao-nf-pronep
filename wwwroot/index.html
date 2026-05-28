@@ -403,6 +403,11 @@
       gap: 8px;
       padding: 10px;
     }
+    /* Variante: empilha tudo em 1 coluna (cada filtro ocupa linha inteira)
+       Usar quando os filtros tem labels longas e precisam respirar */
+    .filter-bar.filter-stack-mobile {
+      grid-template-columns: 1fr !important;
+    }
     .filter-bar > div { width: 100%; }
     .filter-bar select,
     .filter-bar input { width: 100%; box-sizing: border-box; font-size: 13px; padding: 6px 8px; }
@@ -412,6 +417,15 @@
     /* Inner grids dentro do filter-bar empilham */
     .filter-bar > div[style*="display:grid"],
     .filter-bar > div[style*="grid-template"] { display: block !important; }
+    /* Grupo de botoes dentro de filter-bar (ex: Importar + Novo) empilham com gap */
+    .filter-bar > div[style*="display:flex"][style*="gap"] {
+      display: flex !important;
+      flex-wrap: wrap;
+      gap: 8px !important;
+    }
+    .filter-bar > div[style*="display:flex"][style*="gap"] .btn {
+      flex: 1; min-width: 0; padding: 8px 10px; font-size: 13px;
+    }
 
     /* Cards mais compactos */
     .card { padding: 14px; margin-bottom: 12px; border-radius: 6px; }
@@ -2892,7 +2906,7 @@ function renderFornecedoresView() {
     <h2>Cadastro de Fornecedores</h2>
     <div class="view-sub">Cadastro centralizado. A unidade e diretoria padrão definidas aqui são usadas para roteamento automático no lançamento de NF.</div>
 
-    <div class="filter-bar" style="display:flex;gap:12px;align-items:end">
+    <div class="filter-bar filter-stack-mobile" style="display:flex;gap:12px;align-items:end">
       <div style="flex:1">
         <div class="label">Buscar</div>
         <input id="ffr-busca" type="search" placeholder="Razão social, nome fantasia ou CNPJ…" value="${f.busca}" oninput="aplicaFiltroFornecedores()">
