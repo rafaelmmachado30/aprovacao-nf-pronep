@@ -434,6 +434,20 @@
     .modal h3 { font-size: 16px; }
   }
 
+  /* Esconde elementos no mobile (usado pra tabela analitica do dashboard) */
+  @media (max-width: 768px) {
+    .data-hide-mobile { display: none !important; }
+    /* Dashboard: botoes de filtro ocupam linha completa em 2 colunas */
+    .view-sub + .filter-bar[style*="display:flex"] {
+      display: grid !important;
+      grid-template-columns: repeat(4, 1fr) !important;
+      gap: 6px !important;
+    }
+    .view-sub + .filter-bar[style*="display:flex"] .btn { padding: 8px 4px !important; font-size: 12px !important; }
+    .view-sub + .filter-bar[style*="display:flex"] > span:first-child { grid-column: 1 / -1; margin-bottom: 4px; }
+    .view-sub + .filter-bar[style*="display:flex"] > span:last-child { grid-column: 1 / -1; margin-top: 4px; }
+  }
+
   /* Mobile pequeno (até 480px) */
   @media (max-width: 480px) {
     .kpi-row { grid-template-columns: 1fr; }
@@ -2247,65 +2261,61 @@ function mountDashboardCharts() {
     });
   }
 
-  // === LINHA: Evolucao Mensal ===
-  const canvasLine = document.getElementById('chart-mensal');
-  if (canvasLine) {
-    destroyChart('chart-mensal');
-    // Plugin: rotulo acima de cada ponto (formato compacto R$XXk)
-    const fmtCompact = v => {
-      if (v >= 1000000) return 'R$' + (v/1000000).toFixed(1).replace('.', ',') + 'M';
-      if (v >= 1000)    return 'R$' + Math.round(v/1000) + 'k';
-      return 'R$' + Math.round(v);
-    };
-    const lineLabelsPlugin = {
-      id: 'lineLabels',
-      afterDatasetsDraw(chart) {
-        const ctx = chart.ctx;
-        const meta = chart.getDatasetMeta(0);
-        meta.data.forEach((point, idx) => {
-          const v = chart.data.datasets[0].data[idx];
-          ctx.save();
-          ctx.fillStyle = '#1F4E79';
-          ctx.font = 'bold 10px Inter, system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'bottom';
-          ctx.fillText(fmtCompact(v), point.x, point.y - 8);
-          ctx.restore();
-        });
-      }
-    };
-    window._activeCharts['chart-mensal'] = new Chart(canvasLine, {
-      type: 'line',
-      data: {
-        labels: data.months,
-        datasets: [{
-          label: 'Valor aprovado',
-          data: data.monthly,
-          borderColor: '#27AAE1',
-          backgroundColor: 'rgba(39,170,225,0.12)',
-          borderWidth: 2.5,
-          fill: true,
-          tension: 0.35,
-          pointBackgroundColor: '#1F4E79',
-          pointRadius: 4,
-          pointHoverRadius: 6
-        }]
-      },
+  // === BAR EMPILHADO: Valor Aprovado por Fornecedor x Unidade ===
+  const canvasStack = document.getElementById('chart-forn-unit');
+  if (canvasStack && data.stackedEntries) {
+    destroyChart('chart-forn-unit');
+    const cores = { SP: '#7B61C6', RJ: '#27AAE1', ES: '#F09030' };
+    const datasets = ['SP', 'RJ', 'ES'].map(function(u) {
+      return {
+        label: u,
+        data: data.stackedEntries.map(function(e) { return e.vals[u] || 0; }),
+        backgroundColor: cores[u],
+        borderColor: cores[u],
+        borderWidth: 0,
+        stack: 'unidades'
+      };
+    });
+    // Detecta se eh mobile pra ajustar orientacao (horizontal em mobile cabe melhor)
+    const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+    window._activeCharts['chart-forn-unit'] = new Chart(canvasStack, {
+      type: 'bar',
+      data: { labels: data.stackedLabels, datasets: datasets },
       options: {
         animation: false,
         responsive: true,
         maintainAspectRatio: false,
-        layout: { padding: { top: 20 } },
+        indexAxis: isMobile ? 'y' : 'x',
         plugins: {
-          legend: { display: false },
-          tooltip: { callbacks: { label: c => fmtBRL(c.parsed.y) } }
+          legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: function(c) { return c.dataset.label + ': ' + fmtBRL(c.parsed[isMobile ? 'x' : 'y']); },
+              footer: function(items) {
+                const t = items.reduce(function(s,i) { return s + (i.parsed[isMobile ? 'x' : 'y'] || 0); }, 0);
+                return 'Total: ' + fmtBRL(t);
+              }
+            }
+          }
         },
         scales: {
-          y: { beginAtZero: true, grid: { color: '#EEF2F5' }, ticks: { callback: v => fmtBRL(v) } },
-          x: { grid: { display: false } }
+          x: {
+            stacked: true,
+            grid: { color: '#EEF2F5', display: !isMobile },
+            ticks: isMobile
+              ? { callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; }, font: { size: 10 } }
+              : { font: { size: 11 } }
+          },
+          y: {
+            stacked: true,
+            grid: { display: isMobile },
+            ticks: isMobile
+              ? { font: { size: 10 } }
+              : { callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; }, font: { size: 11 } },
+            beginAtZero: true
+          }
         }
-      },
-      plugins: [lineLabelsPlugin]
+      }
     });
   }
 }
@@ -2356,11 +2366,25 @@ const views = {
     const byUnit = {};
     aprovadas.forEach(n => byUnit[n.unidade] = (byUnit[n.unidade]||0) + n.valor);
 
-    const monthly = [42000, 58000, 51000, 67000, 73000, 81000, 76000, 88000, 92000, 95000, 102000, totalMes];
-    const months  = ['Jun/25','Jul','Ago','Set','Out','Nov','Dez','Jan/26','Fev','Mar','Abr','Mai'];
+    // Dados do novo grafico: Valor Aprovado por Fornecedor x Unidade (barras empilhadas, top 8)
+    const byFornUnit = {};
+    aprovadas.forEach(n => {
+      const forn = (fornecedorOf(n)||{}).razao || n.fornecedorRazao || '—';
+      if (!byFornUnit[forn]) byFornUnit[forn] = { SP: 0, RJ: 0, ES: 0 };
+      const u = n.unidade || '';
+      if (byFornUnit[forn].hasOwnProperty(u)) byFornUnit[forn][u] += n.valor;
+    });
+    const stackedEntries = Object.entries(byFornUnit)
+      .map(function(kv) { return { forn: kv[0], vals: kv[1], total: kv[1].SP + kv[1].RJ + kv[1].ES }; })
+      .sort(function(a,b) { return b.total - a.total; })
+      .slice(0, 8);
+    const stackedLabels = stackedEntries.map(function(e) {
+      // Trunca nomes longos pro grafico nao ficar feio
+      return e.forn.length > 18 ? e.forn.substring(0,16) + '..' : e.forn;
+    });
 
     // Guarda dados pra mountDashboardCharts() consumir apos innerHTML
-    window._dashData = { barEntries, byUnit, monthly, months, totalMes };
+    window._dashData = { barEntries, byUnit, stackedEntries, stackedLabels, totalMes };
 
     return `
       <h2>Dashboard Analitico</h2>
@@ -2394,11 +2418,11 @@ const views = {
       </div>
 
       <div class="card">
-        <h3>Evolucao Mensal de Valor Aprovado <span class="pill">Ultimos 12 meses</span></h3>
-        <div style="position:relative;height:260px"><canvas id="chart-mensal"></canvas></div>
+        <h3>Valor Aprovado por Fornecedor × Unidade <span class="pill">Top 8</span></h3>
+        <div style="position:relative;height:320px"><canvas id="chart-forn-unit"></canvas></div>
       </div>
 
-      <div class="card">
+      <div class="card data-hide-mobile">
         <h3>Detalhamento Analitico (top 10)</h3>
         ${analyticsTable(aprovadas.slice(0, 10))}
         <div style="margin-top:12px;text-align:right">
