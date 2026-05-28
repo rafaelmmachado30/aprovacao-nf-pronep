@@ -647,6 +647,26 @@ const menuItems = [
 
 // ============== HELPERS ==============
 function fmtBRL(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+// Retorna data de "hoje" no fuso BRT (America/Sao_Paulo) no formato YYYY-MM-DD.
+// IMPORTANTE: NAO usar new Date().toISOString().substring(0,10) — depois das 21h no
+// Brasil ja virou o dia seguinte em UTC, e o filtro/exibicao mostra "amanha".
+function hojeBRT() {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+}
+// Retorna timestamp atual no fuso BRT, formato "YYYY-MM-DD HH:MM:SS" (digits=19).
+function agoraBRT() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+  }).formatToParts(new Date());
+  const get = (t) => (parts.find(p => p.type === t) || {}).value || '00';
+  // Safari/Chrome as vezes retorna hour='24' as 00h — normaliza
+  const h = get('hour') === '24' ? '00' : get('hour');
+  return get('year') + '-' + get('month') + '-' + get('day') + ' ' +
+         h + ':' + get('minute') + ':' + get('second');
+}
 // Mascara monetaria BR em tempo real: 1000 -> 10,00 / 100000 -> 1.000,00
 // Estrategia: trata os digitos como centavos, sempre formata como "X.XXX,XX"
 function mascaraValorBR(input) {
@@ -2216,7 +2236,7 @@ const views = {
   aprovadas: () => {
     // Filtros iniciais — primeiro abrir vem com data de aprovação = hoje (dinamica)
     if (!window._filtroAprovadas) {
-      const hoje = new Date().toISOString().substring(0, 10);
+      const hoje = hojeBRT();
       window._filtroAprovadas = {
         unidade: 'TODAS', diretoria: 'TODAS',
         aprovadoDe: hoje, aprovadoAte: hoje,
@@ -4129,7 +4149,7 @@ async function submitNF() {
 
     // Sucesso — adiciona na lista local pra atualizar UI imediatamente
     const novoId = data.id;
-    const agora = new Date().toISOString().replace('T',' ').substring(0,19);
+    const agora = agoraBRT();
     notas.unshift({
       id: 'NF-' + novoId,
       numero: numero,
@@ -4241,7 +4261,7 @@ function confirmApprove(id) {
     <span class="close-x" onclick="closeModal()">×</span>
     <h3>Aprovação da ${id}</h3>
     <p>Ao confirmar, o backend aplicará a marca d'água abaixo (3 linhas, azul, transparência 70% — idêntica ao PA atual via PDF Blocks) e moverá o arquivo para
-    <span class="mono">SharePoint/Notas Aprovadas/${n.unidade}/${now.toISOString().substring(0,10)}/</span>.</p>
+    <span class="mono">SharePoint/Notas Aprovadas/${n.unidade}/${hojeBRT()}/</span>.</p>
     <div class="modal-pdf-preview" style="min-height:280px">
       [ Preview do PDF da NF ]
       <div class="watermark-overlay">
@@ -4310,7 +4330,7 @@ async function doApprove(id) {
     // Sucesso!
     n.status = 'aprovada';
     n.aprovadoPor = currentPersona.name;
-    n.aprovadoEm = new Date().toISOString().replace('T',' ').substring(0,16);
+    n.aprovadoEm = agoraBRT().substring(0,16);
     n.urlPDFAprovado = data.urlPDFAprovado || '';
     closeModal();
     toast(`✓ ${id} aprovada · PDF com watermark movido para Notas Aprovadas`, 'success');
