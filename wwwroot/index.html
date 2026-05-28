@@ -470,13 +470,40 @@
   .nf-card:active { transform: scale(0.995); }
   .nf-card.fora-prazo { background: #FFF8F8; border-color: #FFCDD2; }
   .nf-card.aguardando-n2 { border-color: #F9A825; }
-  .nf-card.processado { opacity: 0.7; }
+  /* Processada: fundo cinza-clarinho igual o desktop, leve transparencia */
+  .nf-card.processado { background: #F0F4F7; opacity: 0.85; }
+  .nf-card.processado .nf-card-id,
+  .nf-card.processado .nf-card-fornecedor { color: var(--cinza-medio); }
 
   .nf-card-stripe { height: 5px; background: var(--azul-claro); }
   .nf-card.fora-prazo .nf-card-stripe { background: #C62828; }
   .nf-card.aguardando-n2 .nf-card-stripe { background: #F9A825; }
   .nf-card.rejeitada .nf-card-stripe { background: #C62828; }
-  .nf-card.aprovada .nf-card-stripe { background: #2E7D32; }
+  /* Aprovada NAO processada: faixa azul (cor padrao do sistema) */
+  .nf-card.aprovada .nf-card-stripe { background: var(--azul-claro); }
+  /* Processada: SOBRESCREVE com cinza pra diferenciar visualmente */
+  .nf-card.processado .nf-card-stripe { background: #B8C5D0 !important; }
+
+  /* Badge visivel no card fechado mostrando "Processada" */
+  .nf-card .processado-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #E8F0F7; color: #5A6F82;
+    padding: 2px 8px; border-radius: 10px;
+    font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+
+  /* Toggle "Processada" no detail expandido */
+  .nf-card-processado-toggle {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; margin-bottom: 10px;
+    background: #fff; border: 1px solid #E1E8EE; border-radius: 8px;
+    cursor: pointer; user-select: none;
+  }
+  .nf-card-processado-toggle:hover { background: #F8FAFC; }
+  .nf-card-processado-toggle input { width: 18px; height: 18px; cursor: pointer; margin: 0; }
+  .nf-card-processado-toggle .lbl { flex: 1; font-size: 13px; font-weight: 600; color: var(--cinza-texto); }
+  .nf-card-processado-toggle .desc { font-size: 11px; color: var(--cinza-medio); font-weight: 400; margin-top: 2px; }
 
   .nf-card-header {
     display: flex; justify-content: space-between; align-items: flex-start;
@@ -3450,8 +3477,10 @@ function buildNFCard(n, contexto) {
                   ${venceForaPrazo ? '⚠ ' : ''}<b>Venc.:</b> ${fmtDate(n.vencimento)}${vencInfo}
                 </div>`;
   } else if (contexto === 'aprovadas') {
+    const procBadge = n.processado ? '<span class="processado-badge">✓ Processada</span>' : '';
     metaHtml = `<span class="tag tag-${unid}">${n.unidade || '—'}</span>
-                <span class="meta-item"><b>${n.diretoria || '—'}</b></span>`;
+                <span class="meta-item"><b>${n.diretoria || '—'}</b></span>
+                ${procBadge}`;
     vencHtml = `<div class="nf-card-venc"><b>Venc.:</b> ${fmtDate(n.vencimento)}</div>`;
   } else { // rejeitadas
     metaHtml = `<span class="tag tag-${unid}">${n.unidade || '—'}</span>
@@ -3503,7 +3532,17 @@ function buildNFCard(n, contexto) {
       </div>
     `;
   } else if (contexto === 'aprovadas') {
+    // Toggle de "Processada" + botao Ver PDF
+    const procChecked = n.processado ? 'checked' : '';
     actionsHtml = `
+      <label class="nf-card-processado-toggle" onclick="event.stopPropagation()">
+        <input type="checkbox" ${procChecked}
+               onchange="toggleProcessado('${n.id}', this.checked, this)">
+        <span>
+          <div class="lbl">Marcar como processada</div>
+          <div class="desc">NF liberada pra integração no sistema fiscal</div>
+        </span>
+      </label>
       <div class="nf-card-actions">
         <button class="btn btn-secondary" onclick="event.stopPropagation();openApprovedPdf('${n.id}')">📄 Ver PDF</button>
       </div>
