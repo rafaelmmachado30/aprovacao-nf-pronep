@@ -1335,6 +1335,161 @@ function renderNav() {
   nav.innerHTML = html;
 }
 
+// =================== PUSH NOTIFICATIONS ===================
+// Converte base64url (formato VAPID) em Uint8Array (formato exigido pelo browser)
+function urlBase64ToUint8Array(base64) {
+  const padding = '='.repeat((4 - base64.length % 4) % 4);
+  const b64 = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+async function getSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    return await reg.pushManager.getSubscription();
+  } catch (e) { return null; }
+}
+
+async function atualizarStatusPush() {
+  const statusEl = document.getElementById('push-status');
+  const btnOn = document.getElementById('btn-push-on');
+  const btnOff = document.getElementById('btn-push-off');
+  const btnTest = document.getElementById('btn-push-test');
+  if (!statusEl) return;
+
+  // Capabilities
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    statusEl.innerHTML = '<span style="color:var(--vermelho,#C62828)">✕ Seu navegador nao suporta push notifications.</span>';
+    if (btnOn) btnOn.disabled = true;
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    statusEl.innerHTML = '<span style="color:var(--vermelho,#C62828)">✕ Notificacoes bloqueadas pelo navegador. Abra as configuracoes do site e libere.</span>';
+    if (btnOn) btnOn.disabled = true;
+    return;
+  }
+
+  const sub = await getSubscription();
+  if (sub) {
+    statusEl.innerHTML = '<span style="color:var(--verde,#2E7D32)">✓ Notificacoes ativadas neste dispositivo.</span>';
+    if (btnOn) btnOn.style.display = 'none';
+    if (btnOff) btnOff.style.display = 'inline-flex';
+    if (btnTest) btnTest.style.display = 'inline-flex';
+  } else {
+    statusEl.innerHTML = '<span class="muted">Notificacoes ainda nao ativadas neste dispositivo. Clique no botao abaixo pra ativar.</span>';
+    if (btnOn) { btnOn.style.display = 'inline-flex'; btnOn.disabled = false; }
+    if (btnOff) btnOff.style.display = 'none';
+    if (btnTest) btnTest.style.display = 'none';
+  }
+}
+
+async function ativarPushNotificacoes() {
+  const btn = document.getElementById('btn-push-on');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:6px"></span>Ativando...'; }
+  try {
+    // 1. Pede permissao
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') {
+      toast(perm === 'denied' ? 'Voce negou as notificacoes. Pra liberar, abra as configuracoes do site.' : 'Permissao nao concedida.', 'error');
+      atualizarStatusPush();
+      return;
+    }
+    // 2. Pega VAPID public key
+    const keyResp = await fetch('/api/PushPublicKey');
+    if (!keyResp.ok) throw new Error('Servidor sem chave VAPID configurada');
+    const { publicKey } = await keyResp.json();
+    if (!publicKey) throw new Error('publicKey vazio do servidor');
+    // 3. Cria subscription no browser
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey)
+    });
+    // 4. Manda pro backend
+    const saveResp = await fetch('/api/PushSubscribe', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON(), userAgent: navigator.userAgent })
+    });
+    if (!saveResp.ok) {
+      const data = await saveResp.json().catch(() => ({}));
+      throw new Error(data.error || ('HTTP ' + saveResp.status));
+    }
+    toast('Notificacoes ativadas neste dispositivo!', 'success');
+  } catch (e) {
+    toast('Erro ao ativar: ' + (e && e.message), 'error');
+  } finally {
+    atualizarStatusPush();
+  }
+}
+
+async function desativarPushNotificacoes() {
+  const btn = document.getElementById('btn-push-off');
+  if (btn) btn.disabled = true;
+  try {
+    const sub = await getSubscription();
+    if (sub) {
+      const endpoint = sub.endpoint;
+      await sub.unsubscribe();
+      // Avisa o backend pra apagar
+      try {
+        await fetch('/api/PushUnsubscribe', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: endpoint })
+        });
+      } catch (e) {}
+    }
+    toast('Notificacoes desativadas neste dispositivo.', 'success');
+  } catch (e) {
+    toast('Erro ao desativar: ' + (e && e.message), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    atualizarStatusPush();
+  }
+}
+
+// Testa uma notificacao LOCAL (sem passar pelo servidor) — util pra validar SW + permissao
+async function testarPushLocal() {
+  if (Notification.permission !== 'granted') {
+    toast('Permissao nao concedida.', 'error');
+    return;
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    await reg.showNotification('Aprovacao NF Pronep', {
+      body: 'Teste de notificacao — esta funcionando!',
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: 'nf-teste',
+      data: { url: '/?view=fila-aprovacao' }
+    });
+    toast('Notificacao de teste enviada.', 'success');
+  } catch (e) {
+    toast('Erro no teste: ' + (e && e.message), 'error');
+  }
+}
+
+// Escuta mensagens vindas do SW (ex: clique na notif) pra navegar pra view certa
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'push-click') {
+      const url = event.data.url || '/';
+      // Extrai parametros e navega
+      try {
+        const u = new URL(url, location.origin);
+        const view = u.searchParams.get('view');
+        if (view && typeof showView === 'function') showView(view);
+      } catch (e) {}
+    }
+  });
+}
+
 // =================== MENU MOBILE (drawer) ===================
 function toggleMenuMobile() {
   const body = document.body;
@@ -1536,6 +1691,22 @@ function renderConfiguracoesView() {
       <div class="alert" style="background:var(--azul-soft);border-left:3px solid var(--azul-claro);padding:12px 14px;border-radius:6px;margin-top:14px;font-size:13px;line-height:1.5">
         <b style="color:var(--azul-escuro)">💡 Dica:</b> Mudancas no Entra ID podem demorar ate 5 minutos pra refletir no sistema (cache de tokens).
         Se o usuario nao conseguir acessar logo apos a adicao, peca pra ele <b>sair e entrar novamente</b>.
+      </div>
+    </div>
+
+    <!-- ===== Push Notifications ===== -->
+    <div class="card" style="max-width:880px;margin-top:18px" id="card-push">
+      <h3 style="margin-top:0">Notificacoes no celular / desktop</h3>
+      <p class="small muted" style="margin-bottom:14px;line-height:1.55">
+        Receba um alerta no celular ou desktop quando uma NF cair na sua fila ou tiver atualizacao.
+        Funciona em <b>Android (Chrome)</b>, <b>Windows/Mac (Chrome/Edge)</b> e <b>iPhone</b> (precisa ter
+        adicionado o app a tela de inicio antes).
+      </p>
+      <div id="push-status" class="small" style="margin-bottom:14px"></div>
+      <div class="btn-row" style="gap:10px">
+        <button id="btn-push-on" class="btn btn-primary" onclick="ativarPushNotificacoes()">🔔 Ativar notificacoes</button>
+        <button id="btn-push-off" class="btn btn-secondary" onclick="desativarPushNotificacoes()" style="display:none">🔕 Desativar</button>
+        <button id="btn-push-test" class="btn btn-secondary" onclick="testarPushLocal()" style="display:none">▶ Testar notificacao</button>
       </div>
     </div>
 
@@ -2419,7 +2590,11 @@ const views = {
       </ol>
     </div>
   `,
-  configuracoes: () => renderConfiguracoesView()
+  configuracoes: () => {
+    // Atualiza status do push apos render (precisa do DOM montado)
+    setTimeout(() => { try { atualizarStatusPush(); } catch (e) {} }, 50);
+    return renderConfiguracoesView();
+  }
 };
 
 // Dado um e-mail de gestor, retorna a lista de combinações Unidade × Diretoria que ele aprova

@@ -259,7 +259,7 @@ async function enviarTeams(evento, dados, destinatariosEmail) {
 
 // Funcao alto-nivel chamada por outras Functions in-process
 async function notificar(evento, destinatarios, dados, cc) {
-  const result = { email: null, teamsAtividade: null, teamsWebhook: null };
+  const result = { email: null, teamsAtividade: null, teamsWebhook: null, push: null };
   if (Array.isArray(destinatarios) && destinatarios.length > 0) {
     try { result.email = await enviarEmail(evento, destinatarios, dados, cc); }
     catch (e) { result.email = { ok: false, error: e.message, statusCode: e.statusCode, body: e.body }; }
@@ -284,7 +284,92 @@ async function notificar(evento, destinatarios, dados, cc) {
     result.teamsWebhook = { ok: true, skipped: true, reason: 'Atividade Graph enviou com sucesso' };
   }
 
+  // Push notification: dispara pra todos os destinatarios que tiverem subscription registrada.
+  // Best-effort — falhas nao bloqueiam o resto. Se VAPID nao configurado, vira no-op.
+  try {
+    result.push = await enviarPushParaDestinatarios(evento, destinatarios, dados);
+  } catch (e) {
+    result.push = { ok: false, error: e.message };
+  }
+
   return result;
+}
+
+// Envia push pra cada destinatario (best-effort). Reutiliza graph client local.
+async function enviarPushParaDestinatarios(evento, destinatarios, dados) {
+  if (!Array.isArray(destinatarios) || destinatarios.length === 0) {
+    return { ok: true, skipped: true, reason: 'sem destinatarios' };
+  }
+  let pushNotif;
+  try { pushNotif = require('./pushNotif'); }
+  catch (e) { return { ok: false, error: 'pushNotif module nao carregado: ' + e.message }; }
+
+  if (!pushNotif.configurarWebPush()) {
+    return { ok: false, skipped: true, reason: 'VAPID nao configurado' };
+  }
+
+  // Constroi payload do push
+  const numero = (dados && dados.numero) || '';
+  const valor = (dados && dados.valor) || 0;
+  const forn = (dados && dados.fornecedor) || '';
+  const nfId = (dados && dados.nfId) || (dados && dados.id) || '';
+  const valorFmt = typeof valor === 'number'
+    ? valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+    : valor;
+
+  let title = 'Aprovacao NF Pronep';
+  let body = '';
+  if (evento === 'lancada') {
+    title = 'Nova NF para aprovar';
+    body = (forn ? forn + ' · ' : '') + 'NF ' + numero + ' · ' + valorFmt;
+  } else if (evento === 'aprovada') {
+    title = 'NF aprovada';
+    body = 'NF ' + numero + ' foi aprovada · ' + valorFmt;
+  } else if (evento === 'rejeitada') {
+    title = 'NF rejeitada';
+    body = 'NF ' + numero + ' foi rejeitada' + (dados && dados.motivo ? ' · ' + dados.motivo : '');
+  } else {
+    body = 'NF ' + numero;
+  }
+
+  const payload = {
+    title: title,
+    body: body,
+    tag: 'nf-' + nfId,                    // permite "substituir" notificacao da mesma NF
+    url: '/?view=fila-aprovacao' + (nfId ? '&nf=' + encodeURIComponent(nfId) : ''),
+    evento: evento,
+    nfId: nfId,
+    timestamp: Date.now()
+  };
+
+  // Conecta no Graph (mesmo padrao das outras notifs)
+  const { ClientSecretCredential } = require('@azure/identity');
+  const { Client } = require('@microsoft/microsoft-graph-client');
+  const { TokenCredentialAuthenticationProvider } =
+    require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+
+  const credential = new ClientSecretCredential(
+    process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
+  );
+  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
+    scopes: ['https://graph.microsoft.com/.default']
+  });
+  const client = Client.initWithMiddleware({ authProvider });
+  const host = process.env.SHAREPOINT_SITE_HOSTNAME;
+  const path = process.env.SHAREPOINT_SITE_PATH;
+  const siteResp = await client.api(`/sites/${host}:${path}`).get();
+  const siteId = siteResp.id;
+
+  const resultados = {};
+  for (const email of destinatarios) {
+    if (!email) continue;
+    try {
+      resultados[email] = await pushNotif.enviarPushPraEmail(client, siteId, email, payload);
+    } catch (e) {
+      resultados[email] = { error: e.message };
+    }
+  }
+  return { ok: true, porEmail: resultados };
 }
 
 module.exports = { notificar, enviarEmail, enviarTeams, buildEmail };

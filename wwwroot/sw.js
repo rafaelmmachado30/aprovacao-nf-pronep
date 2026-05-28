@@ -13,7 +13,7 @@
  * IMPORTANTE: pra atualizar o SW a cada deploy, bumpa CACHE_VERSION.
  */
 
-const CACHE_VERSION = 'pronep-nf-v1';
+const CACHE_VERSION = 'pronep-nf-v2-push';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const SHELL_ASSETS = [
   '/',
@@ -117,4 +117,74 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
+});
+
+// ============================================================================
+// PUSH NOTIFICATIONS
+// ============================================================================
+
+// Recebe push do servidor — mostra notificacao nativa no SO
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    if (event.data) data = event.data.json();
+  } catch (e) {
+    // payload pode ser texto puro
+    try { data = { title: 'Aprovacao NF Pronep', body: event.data.text() }; }
+    catch (e2) { data = { title: 'Aprovacao NF Pronep', body: 'Nova atualizacao' }; }
+  }
+
+  const title = data.title || 'Aprovacao NF Pronep';
+  const options = {
+    body: data.body || '',
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: data.tag || 'nf-default',          // substitui notif anterior da mesma NF
+    renotify: true,                          // toca/vibra de novo mesmo se substituindo
+    requireInteraction: false,
+    data: {
+      url: data.url || '/',
+      evento: data.evento,
+      nfId: data.nfId,
+      timestamp: data.timestamp || Date.now()
+    }
+  };
+  // Acoes contextuais — aparece no formato "expanded" no Android/Desktop
+  if (data.evento === 'lancada') {
+    options.actions = [
+      { action: 'open', title: 'Abrir' },
+      { action: 'dismiss', title: 'Depois' }
+    ];
+  }
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+// Quando o user clica na notificacao — abre o app na URL certa
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  if (event.action === 'dismiss') return;
+  const url = (event.notification.data && event.notification.data.url) || '/';
+  const fullUrl = new URL(url, self.location.origin).href;
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Se ja tem janela do app aberta, foca nela
+      for (const client of clientList) {
+        try {
+          const sameOrigin = new URL(client.url).origin === self.location.origin;
+          if (sameOrigin && 'focus' in client) {
+            client.focus();
+            // Manda mensagem pro front saber qual URL/NF abrir
+            if (client.postMessage) {
+              client.postMessage({ type: 'push-click', url: url, nfId: event.notification.data && event.notification.data.nfId });
+            }
+            return;
+          }
+        } catch (e) {}
+      }
+      // Senao, abre nova janela
+      if (self.clients.openWindow) return self.clients.openWindow(fullUrl);
+    })
+  );
 });
