@@ -43,9 +43,13 @@ const cache = { siteId: null, driveId: null, listNotasId: null, listDirId: null,
 // PADRAO DE NOMENCLATURA DOS PDFs (Pronep)
 // =============================================================================
 // Pendentes: {DataVenc}_{NumNF}_{Fornec30}_{UF}_{Valor}.pdf
-//   Ex.: 2026-06-15_001234_OLA-TECNOLOGIA-EM-SAUDE-LTD_RJ_15000.00.pdf
+//   Ex.: 2026-06-15_12345_OLA-TECNOLOGIA-EM-SAUDE-LTDA_RJ_15000,00.pdf
 // Aprovadas: idem + _APROVADA_{DataAprov}
-//   Ex.: 2026-06-15_001234_OLA-TECNOLOGIA-EM-SAUDE-LTD_RJ_15000.00_APROVADA_2026-05-28.pdf
+//   Ex.: 2026-06-15_12345_OLA-TECNOLOGIA-EM-SAUDE-LTDA_RJ_15000,00_APROVADA_2026-05-28.pdf
+// Detalhes:
+//   - Valor com VIRGULA decimal (nao ponto - evita confusao com extensao .pdf)
+//   - Numero SEM zeros a esquerda (00987 vira 987 - facilita rastrear duplicidade)
+//   - Fornecedor: uppercase ASCII, max 30 chars, hifens no lugar de espacos/especiais
 function buildPdfFileName(opts) {
   var numero = opts.numero, fornecedor = opts.fornecedor, unidade = opts.unidade;
   var valor = opts.valor, vencimento = opts.vencimento, sufixoAprovada = opts.sufixoAprovada;
@@ -57,12 +61,15 @@ function buildPdfFileName(opts) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 30)
     .replace(/-+$/g, '') || 'NF';
-  var num = String(numero || '').replace(/[^A-Za-z0-9]/g, '');
-  var numPadded = /^\d+$/.test(num) ? num.padStart(6, '0') : (num || 'SN');
+  // Numero: tira nao-alfanumericos e remove zeros a esquerda
+  // (facilita rastrear duplicidade: usuario busca "987" e acha mesmo que tenha sido "00987")
+  var numClean = String(numero || '').replace(/[^A-Za-z0-9]/g, '');
+  var numFinal = /^\d+$/.test(numClean) ? (numClean.replace(/^0+/, '') || '0') : (numClean || 'SN');
   var uf = String(unidade || '').toUpperCase().slice(0, 2) || 'XX';
   var valorNum = (typeof valor === 'number' ? valor : Number(valor)) || 0;
-  var v = valorNum.toFixed(2);
-  var nome = dv + '_' + numPadded + '_' + forn + '_' + uf + '_' + v;
+  // Valor com virgula decimal (evita confusao com extensao .pdf)
+  var v = valorNum.toFixed(2).replace('.', ',');
+  var nome = dv + '_' + numFinal + '_' + forn + '_' + uf + '_' + v;
   if (sufixoAprovada) nome += '_APROVADA_' + sufixoAprovada;
   return nome + '.pdf';
 }

@@ -143,22 +143,24 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Acha o arquivo pelo NumeroNF. Suporta dois padroes:
-    //   - Antigo: {numero}_{razao}_{timestamp}_*.pdf (numero no inicio)
-    //   - Novo:   {dataVenc}_{numeroPadded}_{forn}_{uf}_{valor}.pdf (numero zero-padded a 6 chars)
+    // Acha o arquivo pelo NumeroNF. Suporta 3 padroes:
+    //   - Antigo: {numero}_{razao}_{ts}_*.pdf (numero no inicio)
+    //   - Intermediario: {data}_{012345}_..._.pdf (zero-padded, 1a versao do padrao novo)
+    //   - Atual: {data}_{12345}_..._.pdf (sem zeros a esquerda)
     // SEGURANCA: SEM fallback "mais recente" - retorna erro se nao achar match exato.
     let target = null;
     if (numero) {
       const numStr = String(numero);
-      const numPadded = /^\d+$/.test(numStr) ? numStr.padStart(6, '0') : numStr;
-      const numUnpadded = numStr.replace(/^0+/, '') || '0';
-      const candidates = Array.from(new Set([numStr, numPadded, numUnpadded]));
+      const numClean = numStr.replace(/[^A-Za-z0-9]/g, '');
+      const numUnpadded = /^\d+$/.test(numClean) ? (numClean.replace(/^0+/, '') || '0') : numClean;
+      const numPadded = /^\d+$/.test(numClean) ? numClean.padStart(6, '0') : numClean;
+      const candidates = Array.from(new Set([numStr, numClean, numUnpadded, numPadded]));
       // 1. Match: comeca com "{n}_" (padrao antigo)
       for (const n of candidates) {
         target = arquivos.find(a => a.name && a.name.startsWith(n + '_'));
         if (target) break;
       }
-      // 2. Match: contem "_{n}_" (padrao novo - numero no meio)
+      // 2. Match: contem "_{n}_" (padroes novos - numero no meio)
       if (!target) {
         for (const n of candidates) {
           target = arquivos.find(a => a.name && a.name.indexOf('_' + n + '_') >= 0);

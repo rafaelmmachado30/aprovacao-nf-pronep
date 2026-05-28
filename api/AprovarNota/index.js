@@ -365,11 +365,15 @@ module.exports = async function (context, req) {
     // Lista arquivos da pasta e acha o que bate com o NumeroNF (ou usa UrlPDF do item)
     const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folder}:/children`).get();
     const files = (folderListResp.value || []).filter(x => x.file);
-    // Tenta achar pelo numero (suporta padroes antigo e novo, com/sem zero-padding)
+    // Tenta achar pelo numero. Suporta:
+    //   - Padrao antigo: {numero}_{razao}_{ts}_*.pdf (numero no inicio, sem padding)
+    //   - Padrao intermediario: {data}_{012345}_..._.pdf (numero zero-padded - 1a versao)
+    //   - Padrao atual: {data}_{12345}_..._.pdf (numero sem zeros a esquerda)
     const numero = String(f.NumeroNF || '');
-    const numPadded = /^\d+$/.test(numero) ? numero.padStart(6, '0') : numero;
-    const numUnpadded = numero.replace(/^0+/, '') || '0';
-    const candidates = Array.from(new Set([numero, numPadded, numUnpadded].filter(Boolean)));
+    const numClean = numero.replace(/[^A-Za-z0-9]/g, '');
+    const numUnpadded = /^\d+$/.test(numClean) ? (numClean.replace(/^0+/, '') || '0') : numClean;
+    const numPadded = /^\d+$/.test(numClean) ? numClean.padStart(6, '0') : numClean;
+    const candidates = Array.from(new Set([numero, numClean, numUnpadded, numPadded].filter(Boolean)));
     let target = null;
     for (const n of candidates) {
       target = files.find(x => x.name && x.name.startsWith(n + '_'));
