@@ -2139,8 +2139,9 @@ function mountDashboardCharts() {
   }
 
   // === BAR HORIZONTAL: Valor por Diretoria ===
+  try {
   const canvasBar = document.getElementById('chart-diretoria');
-  if (canvasBar && data.barEntries.length) {
+  if (canvasBar && data.barEntries && data.barEntries.length) {
     destroyChart('chart-diretoria');
     // Plugin inline: escreve o valor no fim de cada barra
     const barLabelsPlugin = {
@@ -2194,10 +2195,12 @@ function mountDashboardCharts() {
       plugins: [barLabelsPlugin]
     });
   }
+  } catch (e) { console.error('[Charts] erro chart-diretoria:', e); }
 
   // === DONUT: Distribuicao por Unidade ===
+  try {
   const canvasUnit = document.getElementById('chart-unidade');
-  if (canvasUnit && Object.keys(data.byUnit).length) {
+  if (canvasUnit && data.byUnit && Object.keys(data.byUnit).length) {
     destroyChart('chart-unidade');
     const labels = Object.keys(data.byUnit);
     const values = Object.values(data.byUnit);
@@ -2260,63 +2263,69 @@ function mountDashboardCharts() {
       plugins: [donutLabelsPlugin]
     });
   }
+  } catch (e) { console.error('[Charts] erro chart-unidade:', e); }
 
   // === BAR EMPILHADO: Valor Aprovado por Fornecedor x Unidade ===
-  const canvasStack = document.getElementById('chart-forn-unit');
-  if (canvasStack && data.stackedEntries) {
-    destroyChart('chart-forn-unit');
-    const cores = { SP: '#7B61C6', RJ: '#27AAE1', ES: '#F09030' };
-    const datasets = ['SP', 'RJ', 'ES'].map(function(u) {
-      return {
-        label: u,
-        data: data.stackedEntries.map(function(e) { return e.vals[u] || 0; }),
-        backgroundColor: cores[u],
-        borderColor: cores[u],
-        borderWidth: 0,
-        stack: 'unidades'
-      };
-    });
-    // Detecta se eh mobile pra ajustar orientacao (horizontal em mobile cabe melhor)
-    const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
-    window._activeCharts['chart-forn-unit'] = new Chart(canvasStack, {
-      type: 'bar',
-      data: { labels: data.stackedLabels, datasets: datasets },
-      options: {
-        animation: false,
-        responsive: true,
-        maintainAspectRatio: false,
-        indexAxis: isMobile ? 'y' : 'x',
-        plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } },
-          tooltip: {
-            callbacks: {
-              label: function(c) { return c.dataset.label + ': ' + fmtBRL(c.parsed[isMobile ? 'x' : 'y']); },
-              footer: function(items) {
-                const t = items.reduce(function(s,i) { return s + (i.parsed[isMobile ? 'x' : 'y'] || 0); }, 0);
-                return 'Total: ' + fmtBRL(t);
+  // try/catch defensivo: se algo der errado aqui, os outros graficos continuam funcionando
+  try {
+    const canvasStack = document.getElementById('chart-forn-unit');
+    if (canvasStack && data.stackedEntries && data.stackedEntries.length > 0) {
+      destroyChart('chart-forn-unit');
+      const cores = { SP: '#7B61C6', RJ: '#27AAE1', ES: '#F09030' };
+      const datasets = ['SP', 'RJ', 'ES'].map(function(u) {
+        return {
+          label: u,
+          data: data.stackedEntries.map(function(e) { return (e.vals && e.vals[u]) || 0; }),
+          backgroundColor: cores[u],
+          borderColor: cores[u],
+          borderWidth: 0,
+          stack: 'unidades'
+        };
+      });
+      const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+      window._activeCharts['chart-forn-unit'] = new Chart(canvasStack, {
+        type: 'bar',
+        data: { labels: data.stackedLabels, datasets: datasets },
+        options: {
+          animation: false,
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: isMobile ? 'y' : 'x',
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } },
+            tooltip: {
+              callbacks: {
+                label: function(c) { return c.dataset.label + ': ' + fmtBRL(c.parsed[isMobile ? 'x' : 'y']); }
               }
             }
-          }
-        },
-        scales: {
-          x: {
-            stacked: true,
-            grid: { color: '#EEF2F5', display: !isMobile },
-            ticks: isMobile
-              ? { callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; }, font: { size: 10 } }
-              : { font: { size: 11 } }
           },
-          y: {
-            stacked: true,
-            grid: { display: isMobile },
-            ticks: isMobile
-              ? { font: { size: 10 } }
-              : { callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; }, font: { size: 11 } },
-            beginAtZero: true
+          scales: {
+            x: {
+              stacked: true,
+              grid: { color: '#EEF2F5' },
+              ticks: { callback: function(v) { return v >= 1000 ? 'R$' + Math.round(v/1000) + 'k' : 'R$' + v; }, font: { size: 11 } },
+              beginAtZero: true
+            },
+            y: {
+              stacked: true,
+              grid: { display: false },
+              ticks: { font: { size: 11 } },
+              beginAtZero: true
+            }
           }
         }
-      }
-    });
+      });
+    } else if (canvasStack) {
+      // Sem dados — limpa o canvas com mensagem
+      const ctx = canvasStack.getContext('2d');
+      ctx.clearRect(0, 0, canvasStack.width, canvasStack.height);
+      ctx.fillStyle = '#647883';
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Sem dados de fornecedores neste filtro.', canvasStack.width/2, canvasStack.height/2);
+    }
+  } catch (e) {
+    console.error('[Charts] erro montando chart-forn-unit:', e);
   }
 }
 
