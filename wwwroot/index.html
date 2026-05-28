@@ -3886,7 +3886,14 @@ function calcularAprovadasFiltradas() {
       String(n.valor || '').includes(q)
     );
   }
-  lista.sort((a,b) => (b.aprovadoEm||'').localeCompare(a.aprovadoEm||''));
+  // Ordenacao: NAO processadas primeiro (no topo) · processadas no fim
+  // Dentro de cada grupo: mais recentes primeiro (por data de aprovacao DESC)
+  lista.sort((a, b) => {
+    const aProc = a.processado ? 1 : 0;
+    const bProc = b.processado ? 1 : 0;
+    if (aProc !== bProc) return aProc - bProc;  // false (0) vem antes de true (1)
+    return (b.aprovadoEm || '').localeCompare(a.aprovadoEm || '');
+  });
   return lista;
 }
 
