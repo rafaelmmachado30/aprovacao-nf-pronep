@@ -665,6 +665,57 @@
   </div>
 </div>
 <style>
+  /* === SOL — Assistente IA === */
+  .sol-box {
+    background: linear-gradient(135deg, #1F4E79 0%, #27AAE1 100%);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 18px;
+    color: #fff;
+    box-shadow: 0 4px 14px rgba(31,78,121,0.18);
+  }
+  .sol-box.collapsed { padding: 12px 18px; cursor: pointer; }
+  .sol-box.collapsed:hover { box-shadow: 0 6px 18px rgba(31,78,121,0.28); }
+  .sol-header { display:flex; align-items:center; gap:10px; }
+  .sol-avatar { width:34px; height:34px; border-radius:50%; background:#fff; color:#1F4E79; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; flex-shrink:0; }
+  .sol-title { flex:1; }
+  .sol-title h4 { margin:0; font-size:14px; font-weight:600; letter-spacing:0.2px; }
+  .sol-title p { margin:1px 0 0; font-size:12px; opacity:0.85; }
+  .sol-toggle { background:rgba(255,255,255,0.18); border:0; color:#fff; padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px; font-weight:600; }
+  .sol-toggle:hover { background:rgba(255,255,255,0.28); }
+  .sol-body { margin-top:12px; }
+  .sol-messages { background:rgba(255,255,255,0.94); color:#2C3E50; border-radius:8px; padding:10px 14px; max-height:340px; overflow-y:auto; font-size:13px; line-height:1.5; margin-bottom:10px; }
+  .sol-messages:empty { display:none; }
+  .sol-msg { margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid #ECEFF1; }
+  .sol-msg:last-child { border-bottom:0; margin-bottom:0; padding-bottom:0; }
+  .sol-msg-user { color:#1F4E79; font-weight:600; font-size:12px; margin-bottom:4px; }
+  .sol-msg-sol  { color:#27AAE1; font-weight:600; font-size:12px; margin-bottom:4px; }
+  .sol-msg-content p { margin:4px 0; }
+  .sol-msg-content table { border-collapse:collapse; margin:8px 0; font-size:12px; width:100%; }
+  .sol-msg-content th, .sol-msg-content td { padding:5px 8px; border-bottom:1px solid #ECEFF1; text-align:left; }
+  .sol-msg-content th { background:#F4F8FB; font-weight:600; color:#1F4E79; }
+  .sol-msg-content code { background:#F4F8FB; padding:1px 5px; border-radius:3px; font-size:12px; color:#C62828; }
+  .sol-msg-content ul, .sol-msg-content ol { margin:6px 0 6px 20px; padding:0; }
+  .sol-acao-card { background:#FFF9C4; border:1px solid #F9A825; border-radius:8px; padding:12px 14px; margin:8px 0; }
+  .sol-acao-card h5 { margin:0 0 6px; font-size:13px; color:#E65100; }
+  .sol-acao-card .acao-dados { font-size:12px; color:#5D4037; margin-bottom:10px; }
+  .sol-acao-card .acao-dados b { color:#3E2723; }
+  .sol-acao-card .acao-botoes { display:flex; gap:8px; }
+  .sol-acao-card button { padding:6px 14px; border-radius:5px; border:0; font-weight:600; font-size:12px; cursor:pointer; }
+  .sol-btn-confirm { background:#388E3C; color:#fff; }
+  .sol-btn-confirm:hover { background:#2E7D32; }
+  .sol-btn-confirm:disabled { background:#A5D6A7; cursor:wait; }
+  .sol-btn-cancel { background:#ECEFF1; color:#37474F; }
+  .sol-btn-cancel:hover { background:#CFD8DC; }
+  .sol-input-row { display:flex; gap:8px; }
+  .sol-input-row input { flex:1; padding:9px 12px; border-radius:6px; border:0; font-size:13px; background:rgba(255,255,255,0.95); color:#2C3E50; }
+  .sol-input-row input:focus { outline:2px solid #FFF; }
+  .sol-input-row button { padding:9px 18px; background:#fff; color:#1F4E79; border:0; border-radius:6px; font-weight:600; font-size:13px; cursor:pointer; }
+  .sol-input-row button:disabled { opacity:0.6; cursor:wait; }
+  .sol-loading { font-size:12px; opacity:0.85; margin-top:6px; }
+  .sol-suggestions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+  .sol-suggestion { background:rgba(255,255,255,0.18); border:0; color:#fff; padding:5px 11px; border-radius:14px; font-size:11px; cursor:pointer; }
+  .sol-suggestion:hover { background:rgba(255,255,255,0.32); }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 
@@ -828,6 +879,219 @@ const ICONS = {
   arquitetura:  '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M9 14l-3 3M15 14l3 3M8 19h8"/></svg>',
   configuracoes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
 };
+
+// ============== SOL — Assistente IA ==============
+window.solChat = (function() {
+  var state = { open: false, busy: false, history: [] };
+
+  function md(s) {
+    if (!s) return '';
+    var h = String(s);
+    h = h.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+    h = h.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    h = h.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<i>$2</i>');
+    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    var lines = h.split('\n');
+    var out = [], i = 0;
+    while (i < lines.length) {
+      var line = lines[i];
+      if (line.trim().startsWith('|') && i+1 < lines.length && lines[i+1].match(/^\s*\|?[-:\s|]+\|?\s*$/)) {
+        var header = line.split('|').slice(1,-1).map(function(s){return s.trim();});
+        i += 2;
+        var bodyRows = [];
+        while (i < lines.length && lines[i].trim().startsWith('|')) {
+          bodyRows.push(lines[i].split('|').slice(1,-1).map(function(s){return s.trim();}));
+          i++;
+        }
+        var t = '<table><thead><tr>' + header.map(function(c){return '<th>'+c+'</th>';}).join('') + '</tr></thead><tbody>';
+        for (var r=0; r<bodyRows.length; r++) {
+          t += '<tr>' + bodyRows[r].map(function(c){return '<td>'+c+'</td>';}).join('') + '</tr>';
+        }
+        t += '</tbody></table>';
+        out.push(t);
+        continue;
+      }
+      if (line.match(/^[-*]\s+/)) {
+        var items = [];
+        while (i < lines.length && lines[i].match(/^[-*]\s+/)) {
+          items.push('<li>' + lines[i].replace(/^[-*]\s+/, '') + '</li>');
+          i++;
+        }
+        out.push('<ul>' + items.join('') + '</ul>');
+        continue;
+      }
+      if (line.trim() === '') out.push('');
+      else out.push('<p>' + line + '</p>');
+      i++;
+    }
+    return out.join('');
+  }
+
+  function renderAcao(acao) {
+    var d = acao.dados || {};
+    var valor = Number(d.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    var vencFmt = d.vencimento ? d.vencimento.split('-').reverse().join('/') : '—';
+    var tipo = acao.tipo || acao.acao_proposta;
+    if (tipo === 'aprovacao') {
+      return '<div class="sol-acao-card" data-acao-id="'+acao.id+'">'+
+        '<h5>⚠️ Confirmar APROVAÇÃO</h5>'+
+        '<div class="acao-dados">NF <b>'+(d.numero||'—')+'</b> · Fornecedor: <b>'+(d.fornecedor||'—')+'</b><br>Valor: <b>'+valor+'</b> · Vencimento: <b>'+vencFmt+'</b> · Unidade: <b>'+(d.unidade||'—')+'</b></div>'+
+        '<div class="acao-botoes">'+
+          '<button class="sol-btn-confirm" onclick="solChat.confirmarAcao(\''+acao.id+'\',\'aprovacao\')">Aprovar</button>'+
+          '<button class="sol-btn-cancel" onclick="solChat.cancelarAcao(\''+acao.id+'\')">Cancelar</button>'+
+        '</div></div>';
+    }
+    if (tipo === 'rejeicao') {
+      var motivoEsc = (acao.motivo||'').replace(/'/g,"\\'");
+      return '<div class="sol-acao-card" data-acao-id="'+acao.id+'">'+
+        '<h5>⚠️ Confirmar REJEIÇÃO</h5>'+
+        '<div class="acao-dados">NF <b>'+(d.numero||'—')+'</b> · Fornecedor: <b>'+(d.fornecedor||'—')+'</b><br>Valor: <b>'+valor+'</b> · Motivo: <i>'+(acao.motivo||'—')+'</i></div>'+
+        '<div class="acao-botoes">'+
+          '<button class="sol-btn-confirm" style="background:#C62828" onclick="solChat.confirmarAcao(\''+acao.id+'\',\'rejeicao\',\''+motivoEsc+'\')">Rejeitar</button>'+
+          '<button class="sol-btn-cancel" onclick="solChat.cancelarAcao(\''+acao.id+'\')">Cancelar</button>'+
+        '</div></div>';
+    }
+    return '';
+  }
+
+  function renderCollapsed() {
+    return '<div class="sol-box collapsed" onclick="solChat.toggle()">'+
+      '<div class="sol-header">'+
+        '<div class="sol-avatar">S</div>'+
+        '<div class="sol-title"><h4>Peça à SOL ✨</h4><p>Sua assistente IA — listar fila, propor aprovações, detectar anomalias.</p></div>'+
+        '<button class="sol-toggle" onclick="event.stopPropagation();solChat.toggle()">Abrir</button>'+
+      '</div></div>';
+  }
+
+  function renderOpen(viewAtual) {
+    var sugestoes = viewAtual === 'aprovadas'
+      ? ['Quanto liberei este mês?', 'Aprovadas hoje', 'Top 5 fornecedores aprovados']
+      : ['Lista minha fila por vencimento', 'NFs vencendo em D+5', 'Detecte anomalias na minha fila'];
+    var msgsHtml = state.history.map(function(m){
+      if (m.role === 'user') {
+        return '<div class="sol-msg"><div class="sol-msg-user">Você</div><div class="sol-msg-content">'+md(m.content)+'</div></div>';
+      }
+      var actions = (m.actions||[]).map(renderAcao).join('');
+      return '<div class="sol-msg"><div class="sol-msg-sol">SOL</div><div class="sol-msg-content">'+md(m.content)+actions+'</div></div>';
+    }).join('');
+    var loading = state.busy ? '<div class="sol-loading">SOL está pensando...</div>' : '';
+    var sugHtml = state.history.length === 0
+      ? '<div class="sol-suggestions">' + sugestoes.map(function(s){
+          return '<button class="sol-suggestion" onclick="solChat.sendText(\''+s.replace(/'/g,"\\'")+'\')">'+s+'</button>';
+        }).join('') + '</div>'
+      : '';
+    return '<div class="sol-box">'+
+      '<div class="sol-header">'+
+        '<div class="sol-avatar">S</div>'+
+        '<div class="sol-title"><h4>SOL — sua assistente</h4><p>Posso listar sua fila, resumir aprovações, propor aprovar/rejeitar (com sua confirmação).</p></div>'+
+        '<button class="sol-toggle" onclick="solChat.toggle()">Fechar</button>'+
+      '</div>'+
+      '<div class="sol-body">'+
+        (msgsHtml ? '<div class="sol-messages" id="sol-msgs">'+msgsHtml+'</div>' : '')+
+        '<div class="sol-input-row">'+
+          '<input id="sol-input" type="text" placeholder="Pergunte algo ou diga: SOL, aprove a NF 1234..." onkeydown="if(event.key===\'Enter\')solChat.send()" '+(state.busy?'disabled':'')+'>'+
+          '<button onclick="solChat.send()" '+(state.busy?'disabled':'')+'>'+(state.busy?'...':'Enviar')+'</button>'+
+        '</div>'+
+        loading + sugHtml +
+      '</div></div>';
+  }
+
+  function refresh() {
+    var container = document.getElementById('sol-container');
+    if (!container) return;
+    var view = container.getAttribute('data-view') || 'fila-aprovacao';
+    container.innerHTML = state.open ? renderOpen(view) : renderCollapsed();
+    if (state.open) {
+      setTimeout(function(){ var el = document.getElementById('sol-input'); if (el && !state.busy) el.focus(); }, 50);
+      var msgs = document.getElementById('sol-msgs');
+      if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    }
+  }
+
+  function toggle() { state.open = !state.open; refresh(); }
+
+  async function send() {
+    var inp = document.getElementById('sol-input');
+    if (!inp) return;
+    var text = inp.value.trim();
+    if (!text) return;
+    inp.value = '';
+    await sendText(text);
+  }
+
+  async function sendText(text) {
+    if (state.busy) return;
+    state.history.push({ role: 'user', content: text });
+    state.busy = true;
+    refresh();
+    try {
+      var view = document.getElementById('sol-container');
+      var viewVal = view ? view.getAttribute('data-view') : 'fila-aprovacao';
+      var resp = await fetch('/api/SolChat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ message: text, history: state.history.slice(0,-1).slice(-12), view: viewVal })
+      });
+      var data = await resp.json().catch(function(){return{};});
+      if (!resp.ok) {
+        state.history.push({ role: 'assistant', content: '❌ ' + (data.error || 'Falha ao chamar SOL.') + (data.detail ? '\n\n' + data.detail : '') });
+      } else {
+        state.history.push({ role: 'assistant', content: data.resposta || '(SOL não respondeu)', actions: data.acoes_propostas || [] });
+      }
+    } catch (e) {
+      state.history.push({ role: 'assistant', content: '❌ Erro de rede: ' + (e.message || e) });
+    } finally {
+      state.busy = false;
+      refresh();
+    }
+  }
+
+  async function confirmarAcao(id, tipo, motivo) {
+    var card = document.querySelector('.sol-acao-card[data-acao-id="'+id+'"]');
+    if (card) {
+      card.querySelectorAll('button').forEach(function(b){b.disabled=true;});
+      var cb = card.querySelector('.sol-btn-confirm');
+      if (cb) cb.textContent = 'Processando...';
+    }
+    try {
+      var url = tipo === 'aprovacao' ? '/api/AprovarNota' : '/api/RejeitarNota';
+      var body = tipo === 'aprovacao' ? { itemId: id } : { itemId: id, motivo: motivo || 'Rejeitada via SOL' };
+      var r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(body) });
+      var data = await r.json().catch(function(){return{};});
+      if (r.ok) {
+        state.history.push({ role: 'assistant', content: (tipo==='aprovacao'?'✓ NF aprovada':'✓ NF rejeitada') + ' com sucesso. ID: ' + id });
+        try { if (typeof carregarNotasReais === 'function') await carregarNotasReais(); } catch (e2) {}
+      } else {
+        state.history.push({ role: 'assistant', content: '❌ Falha: ' + (data.error || ('HTTP '+r.status)) });
+      }
+    } catch (e) {
+      state.history.push({ role: 'assistant', content: '❌ Erro de rede: ' + (e.message || e) });
+    }
+    for (var i=0; i<state.history.length; i++) {
+      if (state.history[i].actions) state.history[i].actions = state.history[i].actions.filter(function(a){return a.id !== id;});
+    }
+    refresh();
+  }
+
+  function cancelarAcao(id) {
+    for (var i=0; i<state.history.length; i++) {
+      if (state.history[i].actions) state.history[i].actions = state.history[i].actions.filter(function(a){return a.id !== id;});
+    }
+    refresh();
+  }
+
+  function mount(viewAtual) {
+    var container = document.getElementById('sol-container');
+    if (!container) return;
+    container.setAttribute('data-view', viewAtual || 'fila-aprovacao');
+    container.innerHTML = state.open ? renderOpen(viewAtual) : renderCollapsed();
+  }
+
+  return { mount: mount, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh };
+})();
+
 
 // ============== MENU ITEMS ==============
 const menuItems = [
@@ -2541,7 +2805,8 @@ const views = {
     if (!window._filtroFila) {
       window._filtroFila = { nf: '', fornecedor: 'TODOS', unidade: 'TODAS', diretoria: 'TODAS', solicitante: 'TODOS' };
     }
-    return renderFilaAprovacaoView();
+    setTimeout(function(){ if (window.solChat) window.solChat.mount('fila-aprovacao'); }, 0);
+    return '<div id="sol-container"></div>' + renderFilaAprovacaoView();
   },
 
   'minhas-nfs': () => {
@@ -2698,6 +2963,7 @@ const views = {
   `,
 
   aprovadas: () => {
+    setTimeout(function(){ if (window.solChat) window.solChat.mount('aprovadas'); }, 0);
     // Filtros iniciais — primeiro abrir vem com data de aprovação = hoje (dinamica)
     if (!window._filtroAprovadas) {
       const hoje = hojeBRT();
@@ -2714,7 +2980,7 @@ const views = {
 
   rejeitadas: () => {
     const rj = notas.filter(n => n.status === 'rejeitada' || n.status === 'duplicada');
-    return `
+    return `<div id="sol-container"></div>
       <h2>Notas Rejeitadas</h2>
       <div class="view-sub">NFs rejeitadas por gestor ou automaticamente pelo sistema. Quem lançou recebeu e-mail + Teams.</div>
       <!-- Versao desktop: tabela -->

@@ -11,6 +11,7 @@
     "isomorphic-fetch": "^3.0.0",
     "jsonwebtoken": "^9.0.2",
     "jwks-rsa": "^3.2.2",
+    "openai": "^4.65.0",
     "pdf-lib": "^1.17.1",
     "web-push": "^3.6.7"
   }
