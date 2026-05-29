@@ -378,9 +378,26 @@ async function tool_detalhes_nf(args, ctx) {
     } catch (e) { /* nao achou pelo id, tenta por numero */ }
   }
   if (!item && args.numero) {
-    const resp = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=20').get();
-    const cands = (resp.value || []).map(it => normalizeItem(it, invColMap)).filter(n => String(n.NumeroNF) === String(args.numero));
-    if (cands.length > 0) item = { id: cands[0]._id, fields: ((resp.value || []).find(x => x.id === cands[0]._id) || {}).fields };
+    // Pagina por todas as NFs ate achar (max 30 paginas = 15k items)
+    const alvoNum = String(args.numero).replace(/\D/g, '');
+    let url = '/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=500';
+    let pages = 0;
+    while (url && pages < 30 && !item) {
+      const resp = await client.api(url).get();
+      for (const it of (resp.value || [])) {
+        const n = normalizeItem(it, invColMap);
+        const numStr = String(n.NumeroNF || '');
+        // Match exato OU normalizado (so digitos) pra tolerar formatacao tipo "NF-48" vs "48"
+        if (numStr === String(args.numero) || numStr.replace(/\D/g,'') === alvoNum) {
+          item = { id: n._id, fields: it.fields };
+          break;
+        }
+      }
+      pages++;
+      url = resp['@odata.nextLink']
+        ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '')
+        : null;
+    }
   }
   if (!item) return { erro: 'NF nao encontrada' };
   const n = normalizeItem(item, invColMap);

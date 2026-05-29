@@ -1251,9 +1251,18 @@ window.solChat = (function() {
 
     _recognition = new SR();
     _recognition.lang = 'pt-BR';
-    _recognition.continuous = false;
+    _recognition.continuous = true;       // nao para na primeira pausa
     _recognition.interimResults = true;
     _recognition.maxAlternatives = 1;
+
+    // Timer de silencio: para 3s apos a ultima palavra reconhecida
+    var _silencioTimer = null;
+    function _resetSilencioTimer() {
+      if (_silencioTimer) clearTimeout(_silencioTimer);
+      _silencioTimer = setTimeout(function(){
+        try { _recognition && _recognition.stop(); } catch(e){}
+      }, 3000); // 3s de silencio = fim
+    }
 
     var finalTranscript = '';
     var startState = inp.value;
@@ -1263,7 +1272,8 @@ window.solChat = (function() {
       btn.classList.add('gravando');
       btn.textContent = '⏺';
       btn.title = 'Clique pra parar';
-      inp.placeholder = '🎤 Ouvindo... fale agora';
+      inp.placeholder = '🎤 Ouvindo... pode falar (espero 3s de silencio)';
+      _resetSilencioTimer();
     };
     _recognition.onresult = function(ev) {
       var interim = '';
@@ -1276,6 +1286,8 @@ window.solChat = (function() {
         }
       }
       inp.value = (startState ? startState + ' ' : '') + finalTranscript + interim;
+      // Reseta o timer a cada palavra reconhecida
+      _resetSilencioTimer();
     };
     _recognition.onerror = function(ev) {
       console.error('SOL voz erro:', ev.error);
@@ -1288,6 +1300,7 @@ window.solChat = (function() {
       }
     };
     _recognition.onend = function() {
+      if (_silencioTimer) { clearTimeout(_silencioTimer); _silencioTimer = null; }
       _gravando = false;
       btn.classList.remove('gravando');
       btn.textContent = '🎤';
