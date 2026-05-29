@@ -1,11 +1,17 @@
 /**
- * AlertaDiario — TimerTrigger
+ * AlertaDiario — HTTP Endpoint (disparado por GitHub Actions cron)
  *
- * Roda 9h e 17h BRT (12h e 20h UTC), segunda a sexta.
- * - 9h seg-qui: alerta da manha (NFs pendentes do gestor)
- * - 17h seg-qui: alerta da tarde (mesma coisa, com tom de fechamento do dia)
- * - 9h sexta: alerta normal manha
- * - 17h sexta: RESUMO SEMANAL consolidado (substitui o alerta da tarde)
+ * Static Web Apps Managed Functions nao suporta TimerTrigger, entao usamos
+ * cron do GitHub Actions (.github/workflows/alerta-diario.yml) que faz GET
+ * neste endpoint nos horarios certos.
+ *
+ * URL: GET /api/AlertaDiario?tipo=manha|tarde|semanal
+ *      Header: X-Alerta-Secret: <ALERTA_DIARIO_SECRET>
+ *
+ * Tipos:
+ * - manha:   alerta da manha (seg-sex 9h BRT)
+ * - tarde:   alerta da tarde (seg-qui 17h BRT)
+ * - semanal: resumo semanal (sexta 17h BRT, substitui o "tarde")
  *
  * Pra cada gestor com NFs pendentes, monta email hibrido:
  *   - Template fixo: tabela com NFs ordenadas por vencimento, totais, D+5
@@ -18,8 +24,8 @@
  *   - SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH
  *   - EMAIL_FROM_ADDRESS (default datanalytics@pronep.com.br)
  *   - OPENAI_API_KEY (pro paragrafo de insight)
- *   - ALERTA_DIARIO_TESTE_EMAIL (opcional - se setado, envia tudo pra esse email
- *     em vez do aprovador real; util pra testar)
+ *   - ALERTA_DIARIO_SECRET (obrigatorio - shared secret com GitHub Actions)
+ *   - ALERTA_DIARIO_TESTE_EMAIL (opcional - envia tudo pra esse email; debug)
  *   - ALERTA_DIARIO_DISABLED ('true' pra pausar)
  */
 
@@ -103,17 +109,18 @@ function diasAteVencer(vencimento) {
 }
 
 // =============================================================================
-// Decide tipo do alerta baseado em data/hora atual (BRT)
+// Decide tipo do alerta — primeiro tenta query param, depois data/hora BRT
 // =============================================================================
-function decidirTipoAlerta(now) {
-  // now em UTC; BRT = UTC - 3
-  const brt = new Date(now.getTime() - 3 * 60 * 60 * 1000);
-  const dia = brt.getUTCDay(); // 0=dom 1=seg ... 5=sex 6=sab
+function decidirTipoAlerta(req) {
+  const fromQuery = String((req.query && req.query.tipo) || '').toLowerCase();
+  if (['manha','tarde','semanal'].includes(fromQuery)) return fromQuery;
+  // Fallback: detecta pela hora BRT atual
+  const brt = new Date(Date.now() - 3 * 60 * 60 * 1000);
+  const dia = brt.getUTCDay();
   const hora = brt.getUTCHours();
-  if (dia === 5 && hora === 17) return 'semanal'; // sexta 17h BRT
-  if (hora === 9) return 'manha';
-  if (hora === 17) return 'tarde';
-  return 'manha'; // fallback
+  if (dia === 5 && hora >= 16) return 'semanal';
+  if (hora >= 14) return 'tarde';
+  return 'manha';
 }
 
 // =============================================================================
@@ -340,7 +347,7 @@ async function enviarEmailViaGraph(graphClient, fromAddress, paraEmail, assunto,
 // =============================================================================
 // HANDLER PRINCIPAL
 // =============================================================================
-module.exports = async function (context, myTimer) {
+module.exports = async function (context, req) {
   const stats = {
     iniciadoEm: new Date().toISOString(),
     tipoAlerta: null,
@@ -350,14 +357,26 @@ module.exports = async function (context, myTimer) {
     erros: []
   };
 
+  // Auth por shared secret (necessario porque endpoint eh anonymous)
+  const expectedSecret = process.env.ALERTA_DIARIO_SECRET;
+  if (!expectedSecret) {
+    context.res = { status: 500, body: { error: 'ALERTA_DIARIO_SECRET nao configurado' } };
+    return;
+  }
+  const headerSecret = (req.headers && (req.headers['x-alerta-secret'] || req.headers['X-Alerta-Secret'])) || '';
+  if (headerSecret !== expectedSecret) {
+    context.res = { status: 401, body: { error: 'Unauthorized' } };
+    return;
+  }
+
   try {
     if (String(process.env.ALERTA_DIARIO_DISABLED || '').toLowerCase() === 'true') {
       context.log && context.log('AlertaDiario desabilitado por env var');
+      context.res = { status: 200, body: { skipped: true, reason: 'ALERTA_DIARIO_DISABLED=true' } };
       return;
     }
 
-    const now = new Date();
-    const tipo = decidirTipoAlerta(now);
+    const tipo = decidirTipoAlerta(req);
     stats.tipoAlerta = tipo;
     context.log && context.log('AlertaDiario iniciando — tipo:', tipo);
 
@@ -407,8 +426,10 @@ module.exports = async function (context, myTimer) {
     stats.finalizadoEm = new Date().toISOString();
     stats.duracaoMs = Date.now() - new Date(stats.iniciadoEm).getTime();
     context.log && context.log('AlertaDiario concluido:', JSON.stringify(stats));
+    context.res = { status: 200, headers: {'Content-Type':'application/json'}, body: stats };
   } catch (err) {
     stats.erros.push({ geral: err.message });
     context.log && context.log.error && context.log.error('AlertaDiario falhou:', err);
+    context.res = { status: 500, headers: {'Content-Type':'application/json'}, body: stats };
   }
 };

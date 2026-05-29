@@ -1,0 +1,82 @@
+name: SOL — Alertas diários e resumo semanal
+
+# Dispara o endpoint /api/AlertaDiario nos horários certos.
+# IMPORTANTE: GitHub Actions cron usa UTC. BRT = UTC-3.
+#
+#   9h BRT = 12h UTC (manhã, seg-sex)
+#  17h BRT = 20h UTC (tarde seg-qui / semanal sex)
+#
+# GitHub cron pode atrasar 5-15min em horários de pico. Aceitável pro caso.
+#
+# Pré-requisitos:
+#   - Repository Secret: ALERTA_DIARIO_SECRET (mesmo valor da App Setting no Azure)
+
+on:
+  schedule:
+    # 9h BRT (12h UTC) seg-sex — alerta da manhã
+    - cron: '0 12 * * 1-5'
+    # 17h BRT (20h UTC) seg-qui — alerta da tarde
+    - cron: '0 20 * * 1-4'
+    # 17h BRT (20h UTC) sexta — resumo semanal
+    - cron: '0 20 * * 5'
+  workflow_dispatch:
+    inputs:
+      tipo:
+        description: 'Tipo de alerta (manha | tarde | semanal)'
+        required: true
+        default: 'manha'
+        type: choice
+        options:
+          - manha
+          - tarde
+          - semanal
+
+jobs:
+  disparar-alerta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Detectar tipo pelo horário do cron
+        id: detect
+        run: |
+          # Quando o workflow é disparado por cron, GITHUB_EVENT pra schedule não traz o cron
+          # exato — então deduzimos pela hora UTC atual + dia da semana.
+          if [ -n "${{ github.event.inputs.tipo }}" ]; then
+            echo "tipo=${{ github.event.inputs.tipo }}" >> $GITHUB_OUTPUT
+          else
+            UTC_HOUR=$(date -u +%H)
+            UTC_DOW=$(date -u +%u)  # 1=seg ... 7=dom
+            if [ "$UTC_HOUR" = "12" ]; then
+              echo "tipo=manha" >> $GITHUB_OUTPUT
+            elif [ "$UTC_HOUR" = "20" ] && [ "$UTC_DOW" = "5" ]; then
+              echo "tipo=semanal" >> $GITHUB_OUTPUT
+            elif [ "$UTC_HOUR" = "20" ]; then
+              echo "tipo=tarde" >> $GITHUB_OUTPUT
+            else
+              echo "tipo=manha" >> $GITHUB_OUTPUT
+            fi
+          fi
+          echo "Tipo detectado: ${{ steps.detect.outputs.tipo }}"
+
+      - name: Chamar /api/AlertaDiario
+        env:
+          TIPO: ${{ steps.detect.outputs.tipo }}
+          SECRET: ${{ secrets.ALERTA_DIARIO_SECRET }}
+        run: |
+          if [ -z "$SECRET" ]; then
+            echo "::error::Secret ALERTA_DIARIO_SECRET não configurado no repo"
+            exit 1
+          fi
+          URL="https://purple-forest-09588fe10.7.azurestaticapps.net/api/AlertaDiario?tipo=$TIPO"
+          echo "Disparando $URL"
+          HTTP_CODE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -H "X-Alerta-Secret: $SECRET" \
+            -H "Accept: application/json" \
+            --max-time 290 \
+            "$URL")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/response.json | head -c 2000
+          echo ""
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Endpoint retornou HTTP $HTTP_CODE"
+            exit 1
+          fi
