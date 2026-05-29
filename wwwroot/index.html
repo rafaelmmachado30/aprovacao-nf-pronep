@@ -1046,7 +1046,16 @@ window.solChat = (function() {
         return '<div class="sol-msg"><div class="sol-msg-user">Você</div><div class="sol-msg-content">'+md(m.content)+'</div></div>';
       }
       var actions = (m.actions||[]).map(renderAcao).join('');
-      var exportBtn = m.content && m.content.length > 30 && !m.content.startsWith('❌')
+      // So oferece Exportar PDF se a resposta parecer um relatorio
+      // (contem tabela markdown OU eh longa OU tem lista com >2 itens)
+      var ehRelatorio = false;
+      if (m.content && !m.content.startsWith('❌')) {
+        var c = m.content;
+        ehRelatorio = c.includes('|') && c.match(/\|.*\|/) ||
+                      c.length > 300 ||
+                      (c.match(/^[-*]\s+/gm) || []).length >= 3;
+      }
+      var exportBtn = ehRelatorio
         ? '<div class="sol-msg-actions"><button class="sol-export-btn" onclick="solChat.exportarPDF('+idx+')">📄 Exportar PDF</button></div>'
         : '';
       return '<div class="sol-msg"><div class="sol-msg-sol">SOL</div><div class="sol-msg-content">'+md(m.content)+actions+exportBtn+'</div></div>';
@@ -1138,7 +1147,7 @@ window.solChat = (function() {
     }
     try {
       var url = tipo === 'aprovacao' ? '/api/AprovarNota' : '/api/RejeitarNota';
-      var body = tipo === 'aprovacao' ? { itemId: id } : { itemId: id, motivo: motivo || 'Rejeitada via SOL' };
+      var body = tipo === 'aprovacao' ? { id: id } : { id: id, motivo: motivo || 'Rejeitada via SOL' };
       var r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(body) });
       var data = await r.json().catch(function(){return{};});
       if (r.ok) {

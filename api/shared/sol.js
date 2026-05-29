@@ -85,7 +85,7 @@ function buildSystemPrompt(user, viewAtual) {
     '  9. Pra acoes destrutivas, SEMPRE confirme o numero, fornecedor e valor da NF antes de propor.',
     '  10. Se NAO encontrar a NF que o usuario pediu (numero invalido, fora do escopo dele, etc), responda de forma AMIGAVEL e EMPATICA, sempre usando o PRIMEIRO NOME do usuario (campo "Primeiro nome" no contexto acima). Exemplo: \'Oi ' + firstName + ', nao encontrei a NF 1234 que voce me pediu. Pode confirmar o numero?\'. NUNCA seja seca tipo \'NF nao encontrada\' — sempre humanize.',
     '  12. Quando for chamar o usuario pelo nome (em saudacoes ou respostas amigaveis), use SEMPRE o primeiro nome (' + firstName + ') — nunca o nome completo, nunca o email.',
-    '  11. Quando for propor uma acao destrutiva (aprovacao/rejeicao), redija sua resposta como UMA UNICA pergunta direta, do tipo \'Posso seguir com a aprovacao da NF X (Fornecedor Y, R$ Z)?\'. Nao escreva texto longo antes do card — o frontend ja mostra um modal com os dados, sua mensagem deve ser curta e direta.',
+    '  11. Quando o usuario pedir pra aprovar/rejeitar uma NF, VA DIRETO ao ponto: (a) chame detalhes_nf pra confirmar que a NF existe, (b) IMEDIATAMENTE chame propor_aprovacao (ou propor_rejeicao) na MESMA TURN — nao pergunte \'quer aprovar?\' antes! Sua resposta em texto deve ser BREVE, tipo \'Encontrei a NF X. Abrindo a confirmacao...\' (porque o modal vai aparecer logo apos). NAO faca o usuario responder \'sim\' antes — o modal ja eh a confirmacao.',
     '',
     'EXEMPLOS DE INTERAÇÃO:',
     '  User: "Liste minha fila"',
@@ -369,6 +369,42 @@ async function tool_listar_aprovadas(args, ctx) {
   };
 }
 
+// Helper: carrega mapa CNPJ -> RazaoSocial uma vez (cacheado no ctx)
+async function carregarMapFornecedoresParaSol(client, siteId) {
+  const lists = await client.api('/sites/' + siteId + '/lists').filter("displayName eq 'PRONEP-NF-Fornecedores'").get();
+  if (!lists.value || !lists.value.length) return {};
+  const listId = lists.value[0].id;
+  const colsResp = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').get();
+  const inv = {};
+  for (const c of (colsResp.value || [])) {
+    if (c.displayName && c.name) inv[c.name] = c.displayName;
+  }
+  const all = [];
+  let url = '/sites/' + siteId + '/lists/' + listId + '/items?expand=fields&$top=500';
+  let pages = 0;
+  while (url && pages < 30) {
+    const resp = await client.api(url).get();
+    all.push(...(resp.value || []));
+    pages++;
+    url = resp['@odata.nextLink']
+      ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '')
+      : null;
+  }
+  const mapa = {};
+  for (const it of all) {
+    const f = it.fields || {};
+    const out = {};
+    for (const [k, v] of Object.entries(f)) {
+      const display = inv[k] || k;
+      out[display] = v;
+    }
+    const cnpj = String(out.documento || out.Documento || out.field_2 || out.CNPJ || '').replace(/\D/g, '');
+    const razao = out.Title || out.razao || out.RazaoSocial || '';
+    if (cnpj) mapa[cnpj] = razao;
+  }
+  return mapa;
+}
+
 async function tool_detalhes_nf(args, ctx) {
   const { client, siteId, listNotasId, invColMap } = ctx.gr;
   let item = null;
@@ -415,13 +451,23 @@ async function tool_detalhes_nf(args, ctx) {
       return { erro: 'Voce nao tem permissao pra ver essa NF' };
     }
   }
+  // Resolve nome do fornecedor via CNPJ (lookup na lista Fornecedores 1x por sessao)
+  let fornNome = '';
+  try {
+    if (!ctx._fornMap) {
+      ctx._fornMap = await carregarMapFornecedoresParaSol(ctx.gr.client, ctx.gr.siteId);
+    }
+    const cnpj = String(n.CNPJFornecedor || '').replace(/\D/g, '');
+    fornNome = (cnpj && ctx._fornMap[cnpj]) || String(n.CNPJFornecedor || '');
+  } catch (e) { fornNome = String(n.CNPJFornecedor || ''); }
+
   return {
     id: n._id,
     numero: n.NumeroNF,
-    fornecedor: n.Fornecedor,
-    cnpj: n.FornecedorCNPJ,
-    valor: Number(n.ValorTotal || n.Valor || 0),
-    vencimento: String(n.Vencimento || '').substring(0,10),
+    fornecedor: fornNome || '(sem nome)',
+    cnpj: n.CNPJFornecedor || '',
+    valor: Number(n.Valor || 0),
+    vencimento: String(n.DataVencimento || '').substring(0,10),
     unidade: n.Unidade,
     diretoria: n.Diretoria,
     status: n.Status,
