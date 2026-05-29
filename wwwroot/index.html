@@ -839,9 +839,9 @@
 <script>
 // ============== STATE ==============
 const personas = {
-  submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submitter (Colaborador)',                shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','fila-aprovacao','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
-  gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Gestor · Suprimentos (SP/RJ/ES)',        shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['fila-aprovacao','nova-nf','minhas-nfs','mapa-aprovadores','arquitetura'] },
-  financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','mapa-aprovadores','arquitetura'] },
+  submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','fila-aprovacao','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
+  gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','mapa-aprovadores','arquitetura'] },
+  financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['aprovadas','rejeitadas','fornecedores','mapa-aprovadores','arquitetura'] },
   admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','mapa-aprovadores','auditoria','arquitetura','configuracoes'] }
 };
 
@@ -3116,7 +3116,8 @@ const views = {
 
     return `
       <h2>Dashboard Analitico</h2>
-      <div class="view-sub">Visao consolidada de aprovacoes e indicadores · Maio/2026</div>
+      <div class="view-sub">${currentPersona.shortRole === 'Gestor' ? 'Visão consolidada das NFs do seu escopo de aprovação' : 'Visao consolidada de aprovacoes e indicadores · Maio/2026'}</div>
+      ${currentPersona.shortRole === 'Gestor' ? '<div class="small muted" style="background:#E1F5FE;padding:8px 12px;border-radius:6px;margin-bottom:10px;color:#1F4E79"><b>Escopo restrito:</b> mostrando apenas as NFs onde você é o aprovador responsável.</div>' : ''}
 
       <div class="filter-bar" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
         <span class="small muted" style="font-weight:600;letter-spacing:.4px;text-transform:uppercase">Unidade:</span>
