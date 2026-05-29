@@ -67,6 +67,43 @@ async function resolveSiteAndList(client) {
   return _cache;
 }
 
+// Carrega mapa CNPJ -> RazaoSocial da lista PRONEP-NF-Fornecedores (1x por instancia)
+async function carregarMapFornecedores(client, siteId) {
+  const lists = await client.api('/sites/' + siteId + '/lists').filter("displayName eq 'PRONEP-NF-Fornecedores'").get();
+  if (!lists.value || !lists.value.length) return {};
+  const listId = lists.value[0].id;
+  const colsResp = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').get();
+  const inv = {};
+  for (const c of (colsResp.value || [])) {
+    if (c.displayName && c.name) inv[c.name] = c.displayName;
+  }
+  // field_2 = documento, Title = razao social (segundo o padrao de import via XLSX)
+  const all = [];
+  let url = '/sites/' + siteId + '/lists/' + listId + '/items?expand=fields&$top=500';
+  let pages = 0;
+  while (url && pages < 30) {
+    const resp = await client.api(url).get();
+    all.push(...(resp.value || []));
+    pages++;
+    url = resp['@odata.nextLink']
+      ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '')
+      : null;
+  }
+  const mapa = {};
+  for (const it of all) {
+    const f = it.fields || {};
+    const out = {};
+    for (const [k, v] of Object.entries(f)) {
+      const display = inv[k] || k;
+      out[display] = v;
+    }
+    const cnpj = String(out.documento || out.Documento || out.field_2 || out.CNPJ || '').replace(/\D/g, '');
+    const razao = out.Title || out.razao || out.RazaoSocial || '';
+    if (cnpj) mapa[cnpj] = razao;
+  }
+  return mapa;
+}
+
 function normalizeItem(item, invColMap) {
   const raw = item.fields || {};
   const out = { _id: item.id };
@@ -140,7 +177,7 @@ Dados:
 ${JSON.stringify(contexto, null, 2)}
 
 Responda com apenas o paragrafo, sem cabecalho.`
-    : `Voce e a SOL. Gere UM unico paragrafo curto (2-3 linhas, max 280 chars) de insight sobre as NFs pendentes do gestor. Foque em o que merece atencao prioritaria HOJE: NFs vencendo, valores altos atipicos, ou concentracao em 1 fornecedor. Tom direto, util, sem repetir numeros da tabela.
+    : `Voce e a SOL. Gere UM unico paragrafo curto (2-3 linhas, max 280 chars) de insight sobre as NFs pendentes do gestor.\n\nPRIORIZE NESSA ORDEM (se aplicavel):\n1) NFs VENCIDAS ou vencendo em ≤5 dias — cite numero e fornecedor delas\n2) Valores muito acima da media do fornecedor\n3) Concentracao em 1 fornecedor\n\nSE houver NFs em D+5, abra o paragrafo destacando-as por nome/numero. Tom direto, acionavel. Nao repita totais da tabela.
 
 Dados:
 ${JSON.stringify(contexto, null, 2)}
@@ -213,9 +250,9 @@ function buildEmailDiario(tipo, gestorEmail, notas, insight) {
 
   // Métricas
   const total = ordenadas.length;
-  const totalValor = ordenadas.reduce((s, n) => s + (Number(n.ValorTotal || n.Valor || 0)), 0);
-  const d5 = ordenadas.filter(n => diasAteVencer(n.Vencimento) <= 5);
-  const vencidas = ordenadas.filter(n => diasAteVencer(n.Vencimento) < 0);
+  const totalValor = ordenadas.reduce((s, n) => s + (Number(n.Valor || 0)), 0);
+  const d5 = ordenadas.filter(n => diasAteVencer(n.DataVencimento) <= 5);
+  const vencidas = ordenadas.filter(n => diasAteVencer(n.DataVencimento) < 0);
 
   // Breakdown por unidade
   const porUnidade = {};
@@ -223,22 +260,22 @@ function buildEmailDiario(tipo, gestorEmail, notas, insight) {
     const u = n.Unidade || '—';
     if (!porUnidade[u]) porUnidade[u] = { qtd: 0, total: 0 };
     porUnidade[u].qtd += 1;
-    porUnidade[u].total += Number(n.ValorTotal || n.Valor || 0);
+    porUnidade[u].total += Number(n.Valor || 0);
   }
 
   // Top 10 NFs prioritarias pra mostrar na tabela
   const top = ordenadas.slice(0, 10);
 
   const linhasTop = top.map(n => {
-    const d = diasAteVencer(n.Vencimento);
+    const d = diasAteVencer(n.DataVencimento);
     let badge = '';
     if (d < 0) badge = '<span style="background:#FFEBEE;color:#C62828;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600">VENCIDA</span>';
     else if (d <= 5) badge = '<span style="background:#FFF3E0;color:#E65100;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600">D+5</span>';
     return `<tr>
       <td style="padding:7px 10px;border-bottom:1px solid #ECEFF1;font-size:12px;color:#1F4E79"><b>${escapeHtml(n.NumeroNF || '—')}</b></td>
-      <td style="padding:7px 10px;border-bottom:1px solid #ECEFF1;font-size:12px;color:#2C3E50">${escapeHtml(n.Fornecedor || '—').substring(0, 30)}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #ECEFF1;font-size:12px;color:#2C3E50">${escapeHtml(n._fornecedorNome || '—').substring(0, 30)}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #ECEFF1;font-size:12px;color:#2C3E50;text-align:right"><b>${escapeHtml(fmtBRL(n.ValorTotal || n.Valor))}</b></td>
-      <td style="padding:7px 10px;border-bottom:1px solid #ECEFF1;font-size:12px;color:#2C3E50">${escapeHtml(fmtData(n.Vencimento))} ${badge}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #ECEFF1;font-size:12px;color:#2C3E50">${escapeHtml(fmtData(n.DataVencimento))} ${badge}</td>
       <td style="padding:7px 10px;border-bottom:1px solid #ECEFF1;font-size:12px;color:#647883">${escapeHtml(n.Unidade || '—')}</td>
     </tr>`;
   }).join('');
@@ -273,8 +310,15 @@ function buildEmailDiario(tipo, gestorEmail, notas, insight) {
   <tr><td align="center">
     <table cellspacing="0" cellpadding="0" border="0" width="640" style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(31,78,121,0.1)">
       <tr><td style="background:linear-gradient(135deg,${corHeader} 0%,#27AAE1 100%);color:#fff;padding:20px 26px">
-        <div style="font-size:11px;opacity:0.85;text-transform:uppercase;letter-spacing:1px">${escapeHtml(subtitulo)}</div>
-        <div style="font-size:20px;font-weight:600;margin-top:4px">${escapeHtml(titulo)}</div>
+        <table cellspacing="0" cellpadding="0" border="0" width="100%"><tr>
+          <td style="vertical-align:middle">
+            <div style="font-size:11px;opacity:0.85;text-transform:uppercase;letter-spacing:1px">${escapeHtml(subtitulo)}</div>
+            <div style="font-size:20px;font-weight:600;margin-top:4px">${escapeHtml(titulo)}</div>
+          </td>
+          <td style="vertical-align:middle;text-align:right;width:140px">
+            <img src="https://purple-forest-09588fe10.7.azurestaticapps.net/pronep-logo.png" alt="Pronep" style="max-height:42px;max-width:130px;background:rgba(255,255,255,0.95);padding:6px 10px;border-radius:6px">
+          </td>
+        </tr></table>
       </td></tr>
       <tr><td style="padding:22px 26px;color:#2C3E50;font-size:14px;line-height:1.55">
         <p style="margin:0 0 12px"><b>${saudacao}!</b></p>
@@ -292,7 +336,7 @@ function buildEmailDiario(tipo, gestorEmail, notas, insight) {
             </td>
             <td style="width:8px"></td>
             <td style="background:${d5.length > 0 ? '#FFF8E1' : '#F4F8FB'};padding:12px;border-radius:6px;text-align:center;width:33%">
-              <div style="font-size:11px;color:${d5.length > 0 ? '#E65100' : '#647883'};text-transform:uppercase">Vencendo D+5</div>
+              <div style="font-size:11px;color:${d5.length > 0 ? '#E65100' : '#647883'};text-transform:uppercase">Vencimento ≤ D+5</div>
               <div style="font-size:22px;font-weight:700;color:${d5.length > 0 ? '#E65100' : '#1F4E79'};margin-top:2px">${d5.length}</div>
             </td>
           </tr>
@@ -383,6 +427,15 @@ module.exports = async function (context, req) {
     const client = await getGraphClient();
     const { siteId, listNotasId, invColMap } = await resolveSiteAndList(client);
     const todas = await carregarNotas(client, siteId, listNotasId, invColMap);
+    // Carrega mapa CNPJ -> Razao Social pra preencher nome do fornecedor em cada NF
+    let mapFornec = {};
+    try { mapFornec = await carregarMapFornecedores(client, siteId); }
+    catch (e) { context.log && context.log('WARN: nao conseguiu carregar fornecedores:', e.message); }
+    // Resolve nome do fornecedor por CNPJ em cada nota
+    for (const n of todas) {
+      const cnpj = String(n.CNPJFornecedor || '').replace(/\D/g, '');
+      n._fornecedorNome = (cnpj && mapFornec[cnpj]) || n.CNPJFornecedor || '—';
+    }
 
     // Filtra pendentes
     const pendentes = todas.filter(n => ['Lancada', 'EmAprovacao', 'Pendente'].includes(String(n.Status || '')));
@@ -404,10 +457,10 @@ module.exports = async function (context, req) {
         const contexto = {
           tipo: tipo,
           total: notas.length,
-          totalValor: notas.reduce((s, n) => s + Number(n.ValorTotal || n.Valor || 0), 0),
-          fornecedores: [...new Set(notas.map(n => n.Fornecedor).filter(Boolean))].slice(0, 10),
-          vencendoEmD5: notas.filter(n => diasAteVencer(n.Vencimento) <= 5).length,
-          vencidas: notas.filter(n => diasAteVencer(n.Vencimento) < 0).length,
+          totalValor: notas.reduce((s, n) => s + Number(n.Valor || 0), 0),
+          fornecedores: [...new Set(notas.map(n => n._fornecedorNome).filter(Boolean))].slice(0, 10),
+          vencendoEmD5: notas.filter(n => diasAteVencer(n.DataVencimento) <= 5).length,
+          vencidas: notas.filter(n => diasAteVencer(n.DataVencimento) < 0).length,
           unidades: [...new Set(notas.map(n => n.Unidade).filter(Boolean))]
         };
         const insight = await gerarInsight(contexto, tipo);
