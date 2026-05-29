@@ -111,6 +111,11 @@ module.exports = async function (context, req) {
       fields[atendeTodasInternal] = !!body.atendeTodas;
       diag.atendeTodasInternal = atendeTodasInternal;
     }
+    if (body.atendeMultiDiretoria !== undefined) {
+      const multiDirInternal = (colMap && colMap['AtendeMultiDiretoria']) || 'AtendeMultiDiretoria';
+      fields[multiDirInternal] = !!body.atendeMultiDiretoria;
+      diag.atendeMultiDiretoriaInternal = multiDirInternal;
+    }
 
     if (body.categoria !== undefined && body.categoria !== null && body.categoria !== '') {
       const categoriaInternal = (colMap && colMap['Categoria']) || 'Categoria';

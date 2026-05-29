@@ -3157,8 +3157,17 @@ const views = {
           <div id="frm-forn-dropdown" class="combobox-dropdown"></div>
         </div>
         <div class="form-row">
-          <label>Categoria</label>
+          <label>Categoria *</label>
           <input id="frm-categoria" readonly placeholder="Auto-preenchido do cadastro">
+          <select id="frm-categoria-select" style="display:none">
+            <option value="">— Selecione —</option>
+            <option>Serviços</option>
+            <option>Materiais</option>
+            <option>Locação</option>
+            <option>Reembolso</option>
+            <option>Medicamentos</option>
+            <option>Outros</option>
+          </select>
         </div>
         <div class="form-row" id="frm-descricao-row" style="display:none">
           <label>Descrição do serviço * <span class="small muted" style="font-weight:400">(obrigatório quando categoria é "Outros")</span></label>
@@ -3179,6 +3188,9 @@ const views = {
         <div class="form-row">
           <label>Diretoria *</label>
           <input id="frm-diretoria" readonly placeholder="Auto-preenchido do cadastro">
+          <select id="frm-diretoria-select" style="display:none">
+            <option value="">— Selecione —</option>
+          </select>
         </div>
 
         <div class="form-row">
@@ -3590,7 +3602,7 @@ function openEditarFornecedor(idx) {
 
 function abrirModalFornecedor(idx) {
   const isEdit = idx !== null && idx !== undefined;
-  const x = isEdit ? fornecedores[idx] : { cnpj: '', razao: '', nomeFantasia: '', unidade: '', diretoria: '', categoria: 'Serviços', descricaoOutros: '', ativo: true };
+  const x = isEdit ? fornecedores[idx] : { cnpj: '', razao: '', nomeFantasia: '', unidade: '', diretoria: '', categoria: 'Serviços', descricaoOutros: '', ativo: true, atendeMultiDiretoria: false };
   const titulo = isEdit ? 'Editar Fornecedor' : 'Novo Fornecedor';
   openModal(`
     <span class="close-x" onclick="closeModal()">×</span>
@@ -3661,6 +3673,12 @@ function abrirModalFornecedor(idx) {
           <input id="frn-atende-todas" type="checkbox" ${x.atendeTodas?'checked':''} style="width:auto"> Atende as 3 unidades (SP, RJ, ES)
         </label>
         <div class="small muted" style="margin-top:4px">Quando marcado, ao lançar NF o usuário escolherá a unidade na hora (em vez de usar a unidade padrão do cadastro).</div>
+      </div>
+      <div class="form-row" style="grid-column:1/-1">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:500;text-transform:none">
+          <input id="frn-atende-multi-diretoria" type="checkbox" ${x.atendeMultiDiretoria?'checked':''} style="width:auto"> Atende mais de uma Diretoria / Categoria
+        </label>
+        <div class="small muted" style="margin-top:4px">Quando marcado, ao lançar NF o usuário escolherá Categoria e Diretoria na hora (em vez de usar o padrão do cadastro). Útil pra fornecedores que prestam serviços variados.</div>
       </div>
     </div>
     <div class="small muted" style="margin-top:10px"><b>Diretoria padrão:</b> determina automaticamente para qual gestor a NF será roteada quando este fornecedor for selecionado no lançamento.</div>
@@ -3808,6 +3826,7 @@ async function salvarFornecedor(idx) {
   const diretoria = document.getElementById('frn-diretoria').value;
   const ativo = document.getElementById('frn-ativo').checked;
   const atendeTodas = (document.getElementById('frn-atende-todas') || {}).checked || false;
+  const atendeMultiDiretoria = (document.getElementById('frn-atende-multi-diretoria') || {}).checked || false;
   const descricaoOutros = (document.getElementById('frn-descricao-outros') || {}).value
     ? document.getElementById('frn-descricao-outros').value.trim().toUpperCase()
     : '';
@@ -3845,7 +3864,7 @@ async function salvarFornecedor(idx) {
         document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
         return;
       }
-      const payloadAdd = { razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, categoria, descricaoOutros };
+      const payloadAdd = { razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, atendeMultiDiretoria, categoria, descricaoOutros };
       console.log('[salvarFornecedor] ADD payload:', payloadAdd);
       const r = await fetch('/api/AdicionarFornecedor', {
         method: 'POST',
@@ -3865,7 +3884,7 @@ async function salvarFornecedor(idx) {
         return;
       }
       // Sucesso: adiciona localmente E recarrega da fonte (pra ter id real)
-      fornecedores.push({ id: data.id, spId: data.id, cnpj: digits, documento: cnpj, razao, nomeFantasia: fantasia, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, atendeTodas, tipoDocumento });
+      fornecedores.push({ id: data.id, spId: data.id, cnpj: digits, documento: cnpj, razao, nomeFantasia: fantasia, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, atendeTodas, atendeMultiDiretoria, tipoDocumento });
       toast('Fornecedor "' + razao + '" cadastrado (id ' + data.id + ').', 'success');
     } else {
       // UPDATE
@@ -3876,7 +3895,7 @@ async function salvarFornecedor(idx) {
         document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
         return;
       }
-      const payload = { id: spId, razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, categoria, descricaoOutros };
+      const payload = { id: spId, razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, atendeMultiDiretoria, categoria, descricaoOutros };
       console.log('[salvarFornecedor] EDIT payload:', payload);
       const r = await fetch('/api/EditarFornecedor', {
         method: 'PATCH',
@@ -3892,7 +3911,7 @@ async function salvarFornecedor(idx) {
         return;
       }
       // Sucesso: atualiza localmente
-      Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, cnpj: digits, documento: cnpj, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, tipoDocumento, atendeTodas });
+      Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, cnpj: digits, documento: cnpj, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, tipoDocumento, atendeTodas, atendeMultiDiretoria });
       toast('Fornecedor "' + razao + '" atualizado.', 'success');
     }
     closeModal();
@@ -4980,19 +4999,67 @@ function onFornChange() {
     if (di) di.value = '';
   }
   document.getElementById('frm-diretoria').value = f.diretoria || '';
-  console.log('[selecionarFornecedor] fornecedor:', f.razao, 'atendeTodas:', f.atendeTodas, '(tipo:', typeof f.atendeTodas, ')');
+  console.log('[selecionarFornecedor] fornecedor:', f.razao, 'atendeTodas:', f.atendeTodas, 'multiDir:', f.atendeMultiDiretoria);
 
   // Configura radios de unidade: pre-seleciona + desabilita conforme cadastro
   configurarRadiosUnidade(f);
 
+  // Multi-diretoria: troca Categoria e Diretoria por SELECTs quando flag = true
+  configurarCategoriaDiretoria(f);
+
   // Valida se fornecedor tem cadastro completo (UnidadePadrao + DiretoriaPadrao)
   const faltam = [];
   if (!f.atendeTodas && !f.unidade) faltam.push('UnidadePadrao');
-  if (!f.diretoria)                 faltam.push('DiretoriaPadrao');
+  if (!f.atendeMultiDiretoria && !f.diretoria) faltam.push('DiretoriaPadrao');
   if (faltam.length > 0) {
     mostrarAvisoFornecedorIncompleto(f, faltam);
   } else {
     limparAvisoFornecedor();
+  }
+}
+
+function configurarCategoriaDiretoria(f) {
+  // Quando o fornecedor atende mais de uma Diretoria, troca os inputs readonly
+  // por SELECTs editaveis. O default na opcao "selecione" forca o user a escolher.
+  const catInput  = document.getElementById('frm-categoria');
+  const catSelect = document.getElementById('frm-categoria-select');
+  const dirInput  = document.getElementById('frm-diretoria');
+  const dirSelect = document.getElementById('frm-diretoria-select');
+  if (!catInput || !catSelect || !dirInput || !dirSelect) return;
+
+  const multi = !!f.atendeMultiDiretoria;
+
+  // Popula o select de diretoria com a lista global (1x — idempotente)
+  if (dirSelect.options.length <= 1 && typeof diretorias !== 'undefined' && Array.isArray(diretorias)) {
+    for (const d of diretorias) {
+      const opt = document.createElement('option');
+      opt.value = d; opt.textContent = d;
+      dirSelect.appendChild(opt);
+    }
+  }
+
+  if (multi) {
+    // Esconde inputs readonly e mostra selects
+    catInput.style.display = 'none';
+    dirInput.style.display = 'none';
+    catSelect.style.display = '';
+    dirSelect.style.display = '';
+    // Reseta — força o user a escolher conscientemente
+    catSelect.value = '';
+    dirSelect.value = '';
+    // Triggera revalidacao da Descricao quando o user mudar pra Outros
+    catSelect.onchange = function() {
+      const ehOutros = (catSelect.value || '').toLowerCase() === 'outros';
+      const descRow = document.getElementById('frm-descricao-row');
+      if (descRow) descRow.style.display = ehOutros ? '' : 'none';
+      if (!ehOutros) { const di = document.getElementById('frm-descricao'); if (di) di.value = ''; }
+    };
+  } else {
+    // Volta pro modo padrao
+    catInput.style.display = '';
+    dirInput.style.display = '';
+    catSelect.style.display = 'none';
+    dirSelect.style.display = 'none';
   }
 }
 
@@ -5321,7 +5388,13 @@ function fileToDataURL(file) {
 
 async function submitNF() {
   // Validacao especial: Categoria='Outros' exige Descrição preenchida
-  const _categoria = (document.getElementById('frm-categoria') || {}).value || '';
+  // Le da Categoria/Diretoria do SELECT se ele estiver visivel (multi-diretoria), senao do input
+  const _catSelectEl = document.getElementById('frm-categoria-select');
+  const _dirSelectEl = document.getElementById('frm-diretoria-select');
+  const _usandoSelect = _catSelectEl && _catSelectEl.style.display !== 'none';
+  const _categoria = _usandoSelect
+    ? ((_catSelectEl.value || '').trim())
+    : ((document.getElementById('frm-categoria') || {}).value || '');
   if (_categoria.toLowerCase() === 'outros') {
     const _desc = ((document.getElementById('frm-descricao') || {}).value || '').trim();
     if (_desc.length < 3) {
@@ -5408,7 +5481,24 @@ async function submitNF() {
       btn.textContent = labelOriginal;
       return;
     }
-    console.log('[submitNF] forn.atendeTodas=' + forn.atendeTodas + ' | forn.unidade=' + forn.unidade + ' | unidadeFinal=' + unidadeFinal);
+    console.log('[submitNF] forn.atendeTodas=' + forn.atendeTodas + ' | forn.atendeMultiDiretoria=' + forn.atendeMultiDiretoria + ' | unidadeFinal=' + unidadeFinal);
+
+    // Resolve Categoria/Diretoria: quando multi-diretoria, le dos selects; senao usa o cadastro
+    let categoriaFinal = forn.categoria || '';
+    let diretoriaFinal = forn.diretoria || '';
+    if (forn.atendeMultiDiretoria) {
+      const catSel = document.getElementById('frm-categoria-select');
+      const dirSel = document.getElementById('frm-diretoria-select');
+      categoriaFinal = (catSel && catSel.value || '').trim();
+      diretoriaFinal = (dirSel && dirSel.value || '').trim();
+      if (!categoriaFinal || !diretoriaFinal) {
+        msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>Categoria e Diretoria sao obrigatorias</b> — este fornecedor atende mais de uma diretoria. Selecione ambas antes de enviar.</div></div>';
+        btn.disabled = false;
+        btn.textContent = labelOriginal;
+        return;
+      }
+    }
+    console.log('[submitNF] categoriaFinal=' + categoriaFinal + ' | diretoriaFinal=' + diretoriaFinal);
 
     const payload = {
       fornecedorCNPJ:  forn.documento || forn.cnpj,
@@ -5418,7 +5508,8 @@ async function submitNF() {
       valor:           valor,
       vencimento:      venc,
       unidade:         unidadeFinal,
-      diretoria:       forn.diretoria,
+      diretoria:       diretoriaFinal,
+      categoria:       categoriaFinal,
       negociadoCom:    negociouComEmail || null,
       descricao:       descricao,
       fileBase64:      dataURL,

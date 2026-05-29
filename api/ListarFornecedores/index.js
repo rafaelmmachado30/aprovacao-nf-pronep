@@ -104,10 +104,12 @@ module.exports = async function (context, req) {
     diag.step = 'fetch_columns';
     const colMap = await getColMap(client, siteId, listId);
     const atendeTodasInternal = colMap['AtendeTodas'] || 'AtendeTodas';
+    const multiDirInternal    = colMap['AtendeMultiDiretoria'] || 'AtendeMultiDiretoria';
     const categoriaInternal   = colMap['Categoria']   || 'Categoria';
     const descOutrosInternal  = colMap['DescricaoOutros'] || 'DescricaoOutros';
     diag.colMap = {
       AtendeTodas: atendeTodasInternal,
+      AtendeMultiDiretoria: multiDirInternal,
       Categoria: categoriaInternal,
       DescricaoOutros: descOutrosInternal
     };
@@ -160,6 +162,12 @@ module.exports = async function (context, req) {
           const s = String(v).toLowerCase().trim();
           return s === 'true' || s === 'sim' || s === 'yes' || s === '1';
         })(f[atendeTodasInternal]),
+        atendeMultiDiretoria: (function(v){
+          if (v === true || v === 1) return true;
+          if (v === false || v === 0 || v === null || v === undefined) return false;
+          const s = String(v).toLowerCase().trim();
+          return s === 'true' || s === 'sim' || s === 'yes' || s === '1';
+        })(f[multiDirInternal]),
         categoria:        f[categoriaInternal] || '',
         descricaoOutros:  f[descOutrosInternal] || ''
       };
