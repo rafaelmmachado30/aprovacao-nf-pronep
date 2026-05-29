@@ -1,8 +1,9 @@
 /**
  * SOL — Assistente IA do Sistema de Aprovacao de NF Pronep
  *
- * Wrapper sobre OpenAI com tool use (function calling). Define as tools que a
- * SOL pode chamar e o system prompt que rege seu comportamento.
+ * Wrapper dual-provider sobre Anthropic Claude (primario) e OpenAI (fallback)
+ * com tool use (function calling). Define as tools que a SOL pode chamar e o
+ * system prompt que rege seu comportamento.
  *
  * IMPORTANTE - Seguranca:
  *  - A SOL recebe um `user` (do getUser/auth) e SO consulta dados que esse user
@@ -12,11 +13,22 @@
  *    mostrar um card de confirmacao. O usuario clica e o frontend chama
  *    AprovarNota/RejeitarNota normalmente (com o mesmo auth).
  *
- * Dependencias: openai SDK (^4)
+ * PROVIDERS:
+ *  - Anthropic Claude (primario): claude-haiku-4-5 default, escala pra
+ *    claude-sonnet-4-6 se a SOL chamar 3+ tools na mesma turn (consulta complexa).
+ *  - OpenAI (fallback): gpt-4o-mini. Roda automaticamente se Anthropic falhar
+ *    ou ANTHROPIC_API_KEY nao estiver setada.
  *
- * App Settings exigidas:
- *   OPENAI_API_KEY - chave da OpenAI
- *   OPENAI_MODEL   - opcional, default 'gpt-4o-mini'
+ * Dependencias: @anthropic-ai/sdk ^0.32, openai ^4
+ *
+ * App Settings exigidas (pelo menos uma):
+ *   ANTHROPIC_API_KEY - chave Anthropic (preferido)
+ *   OPENAI_API_KEY    - chave OpenAI (fallback)
+ *
+ * App Settings opcionais:
+ *   ANTHROPIC_MODEL_HAIKU  - default 'claude-haiku-4-5-20251001'
+ *   ANTHROPIC_MODEL_SONNET - default 'claude-sonnet-4-6'
+ *   OPENAI_MODEL           - default 'gpt-4o-mini'
  */
 
 require('isomorphic-fetch');

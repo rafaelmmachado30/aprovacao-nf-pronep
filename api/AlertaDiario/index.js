@@ -23,7 +23,9 @@
  *   - AAD_TENANT_ID, AAD_CLIENT_ID, AAD_CLIENT_SECRET
  *   - SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH
  *   - EMAIL_FROM_ADDRESS (default datanalytics@pronep.com.br)
- *   - OPENAI_API_KEY (pro paragrafo de insight)
+ *   - ANTHROPIC_API_KEY (primario, pro paragrafo de insight via Claude)
+ *   - OPENAI_API_KEY (fallback automatico se Anthropic indisponivel)
+ *   - ANTHROPIC_MODEL_HAIKU (opcional, default claude-haiku-4-5)
  *   - ALERTA_DIARIO_SECRET (obrigatorio - shared secret com GitHub Actions)
  *   - ALERTA_DIARIO_TESTE_EMAIL (opcional - envia tudo pra esse email; debug)
  *   - ALERTA_DIARIO_DISABLED ('true' pra pausar)
