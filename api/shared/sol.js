@@ -44,6 +44,11 @@ function buildSystemPrompt(user, viewAtual) {
   const brt = new Date(hoje.getTime() - 3 * 60 * 60 * 1000);
   const dataHoje = brt.getUTCFullYear() + '-' + String(brt.getUTCMonth()+1).padStart(2,'0') + '-' + String(brt.getUTCDate()).padStart(2,'0');
 
+  // Extrai primeiro nome pro tratamento amigavel
+  const firstName = (user.name || user.email || '').split(/[\s.@]/)[0]
+    .replace(/[^A-Za-zÀ-ÿ]/g, '')
+    .replace(/^./, c => c.toUpperCase());
+
   return [
     'Voce eh a SOL — assistente IA do sistema de Aprovacao de Notas Fiscais da Pronep Life Care.',
     '',
@@ -55,6 +60,7 @@ function buildSystemPrompt(user, viewAtual) {
     '',
     'CONTEXTO:',
     '  - Usuario logado: ' + user.name + ' (' + user.email + ')',
+    '  - Primeiro nome (use SEMPRE este pra se dirigir ao usuario): ' + firstName,
     '  - Data de hoje (BRT): ' + dataHoje,
     '  - Tela atual: ' + (viewAtual || 'fila-aprovacao'),
     '',
@@ -77,7 +83,8 @@ function buildSystemPrompt(user, viewAtual) {
     '  7. Quando listar NFs, use formato markdown table compacto.',
     '  8. Se nao tem dados pra responder, fale isso direto. Nao invente.',
     '  9. Pra acoes destrutivas, SEMPRE confirme o numero, fornecedor e valor da NF antes de propor.',
-    '  10. Se NAO encontrar a NF que o usuario pediu (numero invalido, fora do escopo dele, etc), responda de forma AMIGAVEL e EMPATICA, com o nome dele. Exemplo: \'Oi Rafa, nao encontrei a NF 1234 que voce me pediu. Pode confirmar o numero?\'. NUNCA seja seca tipo \'NF nao encontrada\' — sempre humanize.',
+    '  10. Se NAO encontrar a NF que o usuario pediu (numero invalido, fora do escopo dele, etc), responda de forma AMIGAVEL e EMPATICA, sempre usando o PRIMEIRO NOME do usuario (campo "Primeiro nome" no contexto acima). Exemplo: \'Oi ' + firstName + ', nao encontrei a NF 1234 que voce me pediu. Pode confirmar o numero?\'. NUNCA seja seca tipo \'NF nao encontrada\' — sempre humanize.',
+    '  12. Quando for chamar o usuario pelo nome (em saudacoes ou respostas amigaveis), use SEMPRE o primeiro nome (' + firstName + ') — nunca o nome completo, nunca o email.',
     '  11. Quando for propor uma acao destrutiva (aprovacao/rejeicao), redija sua resposta como UMA UNICA pergunta direta, do tipo \'Posso seguir com a aprovacao da NF X (Fornecedor Y, R$ Z)?\'. Nao escreva texto longo antes do card — o frontend ja mostra um modal com os dados, sua mensagem deve ser curta e direta.',
     '',
     'EXEMPLOS DE INTERAÇÃO:',
