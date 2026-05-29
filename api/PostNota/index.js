@@ -238,6 +238,7 @@ async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj
   const colHash    = (colMap && colMap['HashSHA256']) || 'HashSHA256';
   const colCNPJ    = (colMap && colMap['CNPJFornecedor']) || 'CNPJFornecedor';
   const colNumero  = (colMap && colMap['NumeroNF']) || 'NumeroNF';
+  const colChave   = (colMap && colMap['ChaveAcesso']) || 'ChaveAcesso';
 
   for (const item of (resp.value || [])) {
     const f = item.fields || {};
@@ -245,10 +246,16 @@ async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj
     // Pula NFs rejeitadas — usuario pode reenviar com a NF corrigida
     if (String(itemStatus).toLowerCase() === 'rejeitada') continue;
 
-    const itemHash = f[colHash] || f.HashSHA256 || '';
-    const itemDoc  = f[colCNPJ] || f.CNPJFornecedor || '';
-    const itemNum  = f[colNumero] || f.NumeroNF || '';
+    const itemHash  = f[colHash]   || f.HashSHA256     || '';
+    const itemDoc   = f[colCNPJ]   || f.CNPJFornecedor || '';
+    const itemNum   = f[colNumero] || f.NumeroNF       || '';
+    const itemChave = f[colChave]  || f.ChaveAcesso    || '';
 
+    // Criterio MAIS FORTE: chave de acesso de 44 digitos (identificador legal unico).
+    // Mesmo se PDF for re-emitido (hash muda) ou numero reusado, a chave eh constante.
+    if (chaveAcesso && itemChave && String(chaveAcesso).replace(/\D/g,'') === String(itemChave).replace(/\D/g,'')) {
+      return { motivo: 'chave_acesso', notaId: item.id, status: itemStatus, chave: itemChave };
+    }
     if (hash && itemHash && hash === itemHash) {
       return { motivo: 'hash', notaId: item.id, status: itemStatus };
     }
@@ -318,8 +325,12 @@ module.exports = async function (context, req) {
     diag.colTypes = cache.colTypes;
     diag.colRaw = cache.colRaw;
 
+    diag.step = 'extrair_chave_acesso';
+    const chaveAcesso = await extrairChaveAcesso(pdfBuffer);
+    diag.chaveAcesso = chaveAcesso || '(nao encontrada — pode ser NFS-e municipal)';
+
     diag.step = 'check_duplicate';
-    const dup = await verificaDuplicata(client, siteId, listNotasId, colMap, hash, fornecedorCNPJ, numero, serie);
+    const dup = await verificaDuplicata(client, siteId, listNotasId, colMap, hash, fornecedorCNPJ, numero, serie, chaveAcesso);
     if (dup) {
       context.res = { status: 409, headers: { 'Content-Type': 'application/json' },
         body: { error: 'Duplicidade detectada', motivo: dup.motivo, notaId: dup.notaId, status: dup.status, diag } };
@@ -368,6 +379,7 @@ module.exports = async function (context, req) {
       AprovadoEm:      null,                        // <-- null em vez de '' (campo data)
       MotivoRejeicao:  '',
       HashSHA256:      hash,
+      ChaveAcesso:     chaveAcesso || '',
       UrlPDF:          uploadResp.webUrl || '',  // formatByType detecta Hyperlink no SP e formata { Url, Description }
       UrlPDFAprovado:  null                       // preenchido na aprovacao
     };
