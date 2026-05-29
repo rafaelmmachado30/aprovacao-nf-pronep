@@ -161,30 +161,62 @@ function decidirTipoAlerta(req) {
 }
 
 // =============================================================================
-// Geracao de paragrafo de insight via OpenAI
+// =============================================================================
+// Geracao de paragrafo de insight via Anthropic (com fallback OpenAI)
 // =============================================================================
 async function gerarInsight(contexto, tipo) {
-  if (!process.env.OPENAI_API_KEY) return null;
-  let OpenAI;
-  try { OpenAI = require('openai'); } catch (e) { return null; }
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-
-  const prompt = tipo === 'semanal'
-    ? `Voce e a SOL, assistente IA do sistema de aprovacao de NF Pronep. Gere UM unico paragrafo curto (3-4 linhas, max 350 chars) de insight executivo sobre a semana do gestor. Foque em: padroes (concentracao em fornecedor/diretoria), comparacao com pendencias atuais, ou alerta acionavel. Tom profissional e direto, sem floreio. NUNCA repita os numeros que ja estao na tabela — adicione interpretacao.
-
-Dados:
-${JSON.stringify(contexto, null, 2)}
-
-Responda com apenas o paragrafo, sem cabecalho.`
-    : `Voce e a SOL. Gere UM unico paragrafo curto (2-3 linhas, max 280 chars) de insight sobre as NFs pendentes do gestor.\n\nPRIORIZE NESSA ORDEM (se aplicavel):\n1) NFs VENCIDAS ou vencendo em ≤5 dias — cite numero e fornecedor delas\n2) Valores muito acima da media do fornecedor\n3) Concentracao em 1 fornecedor\n\nSE houver NFs em D+5, abra o paragrafo destacando-as por nome/numero. Tom direto, acionavel. Nao repita totais da tabela.
+  const promptSemanal = `Voce e a SOL, assistente IA do sistema de aprovacao de NF Pronep. Gere UM unico paragrafo curto (3-4 linhas, max 350 chars) de insight executivo sobre a semana do gestor. Foque em: padroes (concentracao em fornecedor/diretoria), comparacao com pendencias atuais, ou alerta acionavel. Tom profissional e direto, sem floreio. NUNCA repita os numeros que ja estao na tabela — adicione interpretacao.
 
 Dados:
 ${JSON.stringify(contexto, null, 2)}
 
 Responda com apenas o paragrafo, sem cabecalho.`;
 
+  const promptDiario = `Voce e a SOL. Gere UM unico paragrafo curto (2-3 linhas, max 280 chars) de insight sobre as NFs pendentes do gestor.
+
+PRIORIZE NESSA ORDEM (se aplicavel):
+1) NFs VENCIDAS ou vencendo em <=5 dias — cite numero e fornecedor delas
+2) Valores muito acima da media do fornecedor
+3) Concentracao em 1 fornecedor
+
+SE houver NFs em D+5, abra o paragrafo destacando-as por nome/numero. Tom direto, acionavel. Nao repita totais da tabela.
+
+Dados:
+${JSON.stringify(contexto, null, 2)}
+
+Responda com apenas o paragrafo, sem cabecalho.`;
+
+  const prompt = tipo === 'semanal' ? promptSemanal : promptDiario;
+
+  // Tenta Anthropic primeiro
+  if (process.env.ANTHROPIC_API_KEY) {
+    try {
+      let Anthropic;
+      try { Anthropic = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk'); } catch (e) {}
+      if (Anthropic) {
+        const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+        const model = process.env.ANTHROPIC_MODEL_HAIKU || 'claude-haiku-4-5-20251001';
+        const r = await client.messages.create({
+          model: model,
+          max_tokens: 200,
+          temperature: 0.3,
+          messages: [{ role: 'user', content: prompt }]
+        });
+        const txt = (r.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim();
+        if (txt) return txt;
+      }
+    } catch (e) {
+      console.error('[AlertaDiario] Anthropic falhou, caindo pra OpenAI:', e.message || e);
+    }
+  }
+
+  // Fallback OpenAI
+  if (!process.env.OPENAI_API_KEY) return null;
+  let OpenAI;
+  try { OpenAI = require('openai'); } catch (e) { return null; }
   try {
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
     const r = await client.chat.completions.create({
       model: model,
       messages: [{ role: 'user', content: prompt }],

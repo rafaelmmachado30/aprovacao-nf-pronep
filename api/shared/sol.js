@@ -20,18 +20,33 @@
  */
 
 require('isomorphic-fetch');
+// Anthropic Claude (primary)
+const Anthropic = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk');
+// OpenAI (fallback)
 const OpenAI = require('openai');
 
-const DEFAULT_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const MODEL_HAIKU = process.env.ANTHROPIC_MODEL_HAIKU || 'claude-haiku-4-5-20251001';
+const MODEL_SONNET = process.env.ANTHROPIC_MODEL_SONNET || 'claude-sonnet-4-6';
+const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || MODEL_HAIKU;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
 // =============================================================================
-// CLIENTE OpenAI
+// CLIENTES (Anthropic primario, OpenAI fallback)
 // =============================================================================
+let _anthropic = null;
+function getAnthropic() {
+  if (_anthropic) return _anthropic;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  _anthropic = new Anthropic({ apiKey: apiKey });
+  return _anthropic;
+}
+
 let _openai = null;
 function getOpenAI() {
   if (_openai) return _openai;
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error('OPENAI_API_KEY nao configurada');
+  if (!apiKey) return null;
   _openai = new OpenAI({ apiKey: apiKey });
   return _openai;
 }
@@ -594,66 +609,108 @@ const TOOL_IMPL = {
  * @param {Object} opts  { viewAtual, isAdmin, model, maxIter }
  * @returns {Object} { resposta, acoes_propostas: [], tokensUsed }
  */
+// =============================================================================
+// Converte TOOLS do formato OpenAI pro formato Anthropic
+// =============================================================================
+function toolsParaAnthropic(tools) {
+  return tools.map(t => ({
+    name: t.function.name,
+    description: t.function.description,
+    input_schema: t.function.parameters || { type: 'object', properties: {} }
+  }));
+}
+
+// =============================================================================
+// LOOP PRINCIPAL: tenta Anthropic primeiro, cai pra OpenAI se falhar
+// =============================================================================
 async function runSol(history, userMessage, user, opts) {
   opts = opts || {};
-  const model = opts.model || DEFAULT_MODEL;
   const maxIter = opts.maxIter || 8;
   const viewAtual = opts.viewAtual || 'fila-aprovacao';
   const isAdmin = !!opts.isAdmin;
 
-  const openai = getOpenAI();
   const client = await getGraphClient();
   const { siteId, listNotasId, invColMap } = await resolveSiteAndLists(client);
+  const ctx = { user, isAdmin, gr: { client, siteId, listNotasId, invColMap } };
+  const systemPrompt = buildSystemPrompt(user, viewAtual);
 
-  const ctx = {
-    user: user,
-    isAdmin: isAdmin,
-    gr: { client, siteId, listNotasId, invColMap }
-  };
+  // Tenta Anthropic primeiro
+  const anthropic = getAnthropic();
+  if (anthropic) {
+    try {
+      return await runSolAnthropic(anthropic, history, userMessage, systemPrompt, ctx, maxIter, opts.model);
+    } catch (e) {
+      console.error('[SOL] Anthropic falhou:', e.message || e);
+      // Cai pro fallback OpenAI
+    }
+  }
 
-  // Monta mensagens
-  const messages = [
-    { role: 'system', content: buildSystemPrompt(user, viewAtual) }
-  ];
-  // Adiciona historico previo (filtra so role+content e tool_calls/tool responses)
+  // Fallback OpenAI
+  const openai = getOpenAI();
+  if (!openai) {
+    throw new Error('Nenhum provider IA disponivel: ANTHROPIC_API_KEY e OPENAI_API_KEY ambos vazios');
+  }
+  return await runSolOpenAI(openai, history, userMessage, systemPrompt, ctx, maxIter);
+}
+
+// =============================================================================
+// Anthropic — formato com content blocks + tool_use/tool_result
+// =============================================================================
+async function runSolAnthropic(client, history, userMessage, systemPrompt, ctx, maxIter, modelOverride) {
+  let model = modelOverride || DEFAULT_MODEL;
+  const anthropicTools = toolsParaAnthropic(TOOLS);
+
+  // Anthropic messages: alterna user/assistant. system vai como param separado.
+  const messages = [];
   for (const h of (history || [])) {
     if (!h || !h.role) continue;
     if (h.role === 'user' || h.role === 'assistant') {
-      messages.push({ role: h.role, content: h.content || '' });
+      messages.push({ role: h.role, content: String(h.content || '') });
     }
   }
   messages.push({ role: 'user', content: userMessage });
 
   const acoesPropostas = [];
-  const toolCallsDebug = [];  // pra debug: lista o que a SOL chamou e com quais args
+  const toolCallsDebug = [];
   let totalTokens = 0;
   let resposta = '';
+  let toolCallsCount = 0;
 
   for (let i = 0; i < maxIter; i++) {
-    const completion = await openai.chat.completions.create({
+    // Escalation: se ja chamou >3 tools nesta turn, sobe pra Sonnet
+    if (toolCallsCount >= 3 && model === MODEL_HAIKU) {
+      model = MODEL_SONNET;
+      console.log('[SOL] Escalando Haiku → Sonnet apos', toolCallsCount, 'tool calls');
+    }
+
+    const completion = await client.messages.create({
       model: model,
-      messages: messages,
-      tools: TOOLS,
-      tool_choice: 'auto',
+      max_tokens: 2000,
       temperature: 0.2,
-      max_tokens: 1500
+      system: systemPrompt,
+      messages: messages,
+      tools: anthropicTools
     });
-    totalTokens += (completion.usage && completion.usage.total_tokens) || 0;
 
-    const msg = completion.choices[0].message;
-    messages.push(msg);
+    totalTokens += (completion.usage && (completion.usage.input_tokens + completion.usage.output_tokens)) || 0;
 
-    // Se nao tem tool calls, eh a resposta final
-    if (!msg.tool_calls || msg.tool_calls.length === 0) {
-      resposta = msg.content || '';
+    // Adiciona resposta do assistant ao historico (preservando content blocks)
+    messages.push({ role: 'assistant', content: completion.content });
+
+    // Se stop_reason !== 'tool_use', terminou — extrai texto
+    if (completion.stop_reason !== 'tool_use') {
+      const textBlocks = (completion.content || []).filter(b => b.type === 'text');
+      resposta = textBlocks.map(b => b.text).join('\n').trim();
       break;
     }
 
-    // Executa cada tool call
-    for (const tc of msg.tool_calls) {
-      const fnName = tc.function && tc.function.name;
-      let args = {};
-      try { args = JSON.parse(tc.function.arguments || '{}'); } catch (e) {}
+    // Executa as tools chamadas
+    const toolUseBlocks = (completion.content || []).filter(b => b.type === 'tool_use');
+    const toolResults = [];
+
+    for (const tu of toolUseBlocks) {
+      const fnName = tu.name;
+      const args = tu.input || {};
       const impl = TOOL_IMPL[fnName];
       let result;
       if (!impl) {
@@ -665,7 +722,7 @@ async function runSol(history, userMessage, user, opts) {
           result = { erro: 'falha ao executar ' + fnName + ': ' + (e.message || String(e)) };
         }
       }
-      // Debug: registra o que foi chamado e um snapshot do resultado
+      toolCallsCount++;
       toolCallsDebug.push({
         tool: fnName,
         args: args,
@@ -674,19 +731,85 @@ async function runSol(history, userMessage, user, opts) {
                        (result && result.id ? { id: result.id, numero: result.numero, fornecedor: result.fornecedor } :
                        { tipo: typeof result }))
       });
-      // Se for uma proposta de acao, guarda pra retornar pro frontend
       if (result && result.confirmar_no_frontend) {
         acoesPropostas.push(result);
       }
-      messages.push({
-        role: 'tool',
-        tool_call_id: tc.id,
+      toolResults.push({
+        type: 'tool_result',
+        tool_use_id: tu.id,
         content: JSON.stringify(result)
       });
     }
+
+    // Continua a conversa com os resultados
+    messages.push({ role: 'user', content: toolResults });
   }
 
-  return { resposta: resposta, acoes_propostas: acoesPropostas, tokens: totalTokens, model: model, tool_calls_debug: toolCallsDebug };
+  return { resposta: resposta, acoes_propostas: acoesPropostas, tokens: totalTokens, model: model, tool_calls_debug: toolCallsDebug, provider: 'anthropic' };
 }
+
+// =============================================================================
+// OpenAI — formato function calling (fallback caso Anthropic falhe)
+// =============================================================================
+async function runSolOpenAI(openai, history, userMessage, systemPrompt, ctx, maxIter) {
+  const messages = [{ role: 'system', content: systemPrompt }];
+  for (const h of (history || [])) {
+    if (!h || !h.role) continue;
+    if (h.role === 'user' || h.role === 'assistant') {
+      messages.push({ role: h.role, content: h.content || '' });
+    }
+  }
+  messages.push({ role: 'user', content: userMessage });
+
+  const acoesPropostas = [];
+  const toolCallsDebug = [];
+  let totalTokens = 0;
+  let resposta = '';
+
+  for (let i = 0; i < maxIter; i++) {
+    const completion = await openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages: messages,
+      tools: TOOLS,
+      tool_choice: 'auto',
+      temperature: 0.2,
+      max_tokens: 1500
+    });
+    totalTokens += (completion.usage && completion.usage.total_tokens) || 0;
+    const msg = completion.choices[0].message;
+    messages.push(msg);
+    if (!msg.tool_calls || msg.tool_calls.length === 0) {
+      resposta = msg.content || '';
+      break;
+    }
+    for (const tc of msg.tool_calls) {
+      const fnName = tc.function && tc.function.name;
+      let args = {};
+      try { args = JSON.parse(tc.function.arguments || '{}'); } catch (e) {}
+      const impl = TOOL_IMPL[fnName];
+      let result;
+      if (!impl) {
+        result = { erro: 'tool desconhecida: ' + fnName };
+      } else {
+        try { result = await impl(args, ctx); }
+        catch (e) { result = { erro: 'falha ao executar ' + fnName + ': ' + (e.message || String(e)) }; }
+      }
+      toolCallsDebug.push({
+        tool: fnName,
+        args: args,
+        resultSummary: result && result.erro ? { erro: result.erro } :
+                       (result && Array.isArray(result.notas) ? { totalNotas: result.notas.length } :
+                       (result && result.id ? { id: result.id, numero: result.numero, fornecedor: result.fornecedor } : { tipo: typeof result }))
+      });
+      if (result && result.confirmar_no_frontend) {
+        acoesPropostas.push(result);
+      }
+      messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+    }
+  }
+
+  return { resposta: resposta, acoes_propostas: acoesPropostas, tokens: totalTokens, model: OPENAI_MODEL, tool_calls_debug: toolCallsDebug, provider: 'openai-fallback' };
+}
+
 
 module.exports = { runSol, DEFAULT_MODEL };
