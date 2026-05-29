@@ -135,12 +135,12 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'detalhes_nf',
-      description: 'Retorna detalhes completos de uma NF pelo id interno (spListItemId) ou pelo NumeroNF. Use quando o usuario perguntar sobre uma NF especifica.',
+      description: 'Retorna detalhes completos de uma NF. Quando o usuario disser "NF X" ou "nota X", X eh o NumeroNF (que ele digitou no lancamento). USE SEMPRE o parametro "numero" pra esses casos. Use "id" apenas quando voce ja tem o spListItemId interno de uma chamada anterior (ex: tool listar_fila retornou n.id).',
       parameters: {
         type: 'object',
         properties: {
-          id: { type: 'string', description: 'spListItemId (preferido)' },
-          numero: { type: 'string', description: 'NumeroNF (fallback - pode ter mais de uma)' }
+          id: { type: 'string', description: 'spListItemId interno do SharePoint (item.id retornado por listar_fila). NAO use isso pro numero que o usuario falou.' },
+          numero: { type: 'string', description: 'NumeroNF — eh o que o usuario digitou ao lancar a NF (ex: "36534", "NF-2026-045"). USE ESTE quando o usuario disser "NF X".' }
         }
       }
     }
@@ -372,14 +372,19 @@ async function tool_listar_aprovadas(args, ctx) {
 async function tool_detalhes_nf(args, ctx) {
   const { client, siteId, listNotasId, invColMap } = ctx.gr;
   let item = null;
+  // Se passou id, tenta GET direto. Pode ser tanto spListItemId quanto NumeroNF
+  // (a SOL nem sempre acerta a distincao, entao tratamos os dois)
   if (args.id) {
     try {
       item = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items/' + args.id + '?expand=fields').get();
     } catch (e) { /* nao achou pelo id, tenta por numero */ }
   }
-  if (!item && args.numero) {
+  // FALLBACK CRUCIAL: se nao passou numero mas passou id, usa id como numero tambem
+  // (resolve o caso da SOL passar "36534" como id quando na verdade eh NumeroNF)
+  const numeroAlvo = args.numero || args.id;
+  if (!item && numeroAlvo) {
     // Pagina por todas as NFs ate achar (max 30 paginas = 15k items)
-    const alvoNum = String(args.numero).replace(/\D/g, '');
+    const alvoNum = String(numeroAlvo).replace(/\D/g, '');
     let url = '/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=500';
     let pages = 0;
     while (url && pages < 30 && !item) {
@@ -388,7 +393,7 @@ async function tool_detalhes_nf(args, ctx) {
         const n = normalizeItem(it, invColMap);
         const numStr = String(n.NumeroNF || '');
         // Match exato OU normalizado (so digitos) pra tolerar formatacao tipo "NF-48" vs "48"
-        if (numStr === String(args.numero) || numStr.replace(/\D/g,'') === alvoNum) {
+        if (numStr === String(numeroAlvo) || numStr.replace(/\D/g,'') === alvoNum) {
           item = { id: n._id, fields: it.fields };
           break;
         }
