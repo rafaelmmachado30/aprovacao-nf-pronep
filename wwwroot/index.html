@@ -731,6 +731,53 @@
     0%, 100% { box-shadow: 0 0 0 0 rgba(198,40,40,0.6); }
     50% { box-shadow: 0 0 0 10px rgba(198,40,40,0); }
   }
+  .sol-modal-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(31, 78, 121, 0.55); backdrop-filter: blur(3px);
+    z-index: 9999; display: flex; align-items: center; justify-content: center;
+    padding: 20px; animation: solFadeIn 0.18s ease;
+  }
+  @keyframes solFadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes solSlideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .sol-modal {
+    background: #fff; border-radius: 14px; max-width: 480px; width: 100%;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.3); overflow: hidden;
+    animation: solSlideUp 0.22s ease;
+  }
+  .sol-modal-header {
+    background: linear-gradient(135deg, #1F4E79 0%, #27AAE1 100%);
+    color: #fff; padding: 18px 24px;
+  }
+  .sol-modal-header h3 {
+    margin: 0; font-size: 16px; font-weight: 600;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .sol-modal-body { padding: 22px 24px; color: #2C3E50; }
+  .sol-modal-pergunta {
+    font-size: 16px; font-weight: 500; color: #1F4E79;
+    margin: 0 0 18px; line-height: 1.4;
+  }
+  .sol-modal-dados {
+    background: #F4F8FB; border-radius: 8px; padding: 14px 18px;
+    font-size: 13px; line-height: 1.8; color: #37474F;
+  }
+  .sol-modal-dados b { color: #1F4E79; }
+  .sol-modal-footer {
+    padding: 14px 24px; background: #FAFCFE;
+    display: flex; justify-content: flex-end; gap: 10px;
+    border-top: 1px solid #ECEFF1;
+  }
+  .sol-modal-footer button {
+    padding: 10px 22px; border-radius: 6px; border: 0;
+    font-weight: 600; font-size: 13px; cursor: pointer;
+  }
+  .sol-modal-cancelar { background: #ECEFF1; color: #37474F; }
+  .sol-modal-cancelar:hover { background: #CFD8DC; }
+  .sol-modal-confirmar { background: #2E7D32; color: #fff; }
+  .sol-modal-confirmar:hover { background: #1B5E20; }
+  .sol-modal-confirmar.rejeitar { background: #C62828; }
+  .sol-modal-confirmar.rejeitar:hover { background: #B71C1C; }
+  .sol-modal-confirmar:disabled { background: #A5D6A7; cursor: wait; }
   .sol-mic-status {
     font-size:12px; color:#fff; margin-top:6px; padding:4px 10px;
     background:rgba(198,40,40,0.85); border-radius:14px; display:inline-block;
@@ -1069,6 +1116,10 @@ window.solChat = (function() {
         state.history.push({ role: 'assistant', content: '❌ ' + (data.error || 'Falha ao chamar SOL.') + (data.detail ? '\n\n' + data.detail : '') });
       } else {
         state.history.push({ role: 'assistant', content: data.resposta || '(SOL não respondeu)', actions: data.acoes_propostas || [] });
+        // Se a SOL propos uma acao, abre o modal de confirmacao
+        if (Array.isArray(data.acoes_propostas) && data.acoes_propostas.length > 0) {
+          setTimeout(function(){ abrirModalAcao(data.acoes_propostas[0]); }, 350);
+        }
       }
     } catch (e) {
       state.history.push({ role: 'assistant', content: '❌ Erro de rede: ' + (e.message || e) });
@@ -1242,11 +1293,12 @@ window.solChat = (function() {
       btn.textContent = '🎤';
       btn.title = 'Ditar por voz';
       inp.placeholder = 'Pergunte algo ou diga: SOL, aprove a NF 1234...';
-      // Texto final ja foi populado pelo onresult; foca o input pra usuario revisar/enviar
-      if (finalTranscript) {
-        inp.focus();
-        // posiciona cursor no fim
-        try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch(e){}
+      // AUTO-ENVIO: se houve transcricao final, envia direto pra SOL
+      // (a SOL ja exibe um modal de confirmacao pra acoes destrutivas)
+      if (finalTranscript && finalTranscript.trim().length > 2) {
+        var textoFinal = inp.value.trim();
+        inp.value = '';
+        sendText(textoFinal);
       }
     };
 
@@ -1254,7 +1306,74 @@ window.solChat = (function() {
     catch (e) { alert('Erro ao iniciar microfone: ' + e.message); }
   }
 
-  return { mount: mount, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar };
+  // === Modal de confirmacao de acao destrutiva ===
+  function abrirModalAcao(acao) {
+    fecharModal();
+    var d = acao.dados || {};
+    var tipo = acao.tipo || acao.acao_proposta;
+    var ehAprovacao = tipo === 'aprovacao';
+    var valor = Number(d.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    var vencFmt = d.vencimento ? d.vencimento.split('-').reverse().join('/') : '—';
+    var pergunta = ehAprovacao
+      ? 'Posso seguir com a aprovação da NF ' + (d.numero || '—') + '?'
+      : 'Posso seguir com a rejeição da NF ' + (d.numero || '—') + '?';
+    var motivoLinha = '';
+    if (!ehAprovacao && acao.motivo) {
+      motivoLinha = '<br><b>Motivo:</b> <i>' + String(acao.motivo).replace(/</g,'&lt;') + '</i>';
+    }
+    var headerIcon = ehAprovacao ? '✓' : '✕';
+    var btnClass = ehAprovacao ? '' : 'rejeitar';
+    var btnLabel = ehAprovacao ? 'Sim, aprovar' : 'Sim, rejeitar';
+    var motivoArg = acao.motivo ? acao.motivo.replace(/'/g,"\\'") : '';
+
+    var modal = document.createElement('div');
+    modal.className = 'sol-modal-overlay';
+    modal.id = 'sol-modal-overlay';
+    modal.innerHTML =
+      '<div class="sol-modal" onclick="event.stopPropagation()">'+
+        '<div class="sol-modal-header"><h3><span style="font-size:18px">'+headerIcon+'</span> SOL — Confirmação necessária</h3></div>'+
+        '<div class="sol-modal-body">'+
+          '<p class="sol-modal-pergunta">'+pergunta+'</p>'+
+          '<div class="sol-modal-dados">'+
+            '<b>NF:</b> ' + (d.numero || '—') + '<br>'+
+            '<b>Fornecedor:</b> ' + (d.fornecedor || '—') + '<br>'+
+            '<b>Valor:</b> ' + valor + '<br>'+
+            '<b>Vencimento:</b> ' + vencFmt + '<br>'+
+            '<b>Unidade · Diretoria:</b> ' + (d.unidade || '—') + ' · ' + (d.diretoria || '—') +
+            motivoLinha +
+          '</div>'+
+        '</div>'+
+        '<div class="sol-modal-footer">'+
+          '<button class="sol-modal-cancelar" onclick="solChat.fecharModal();solChat.cancelarAcao(\''+acao.id+'\')">Não, cancelar</button>'+
+          '<button class="sol-modal-confirmar '+btnClass+'" onclick="solChat.confirmarAcaoModal(\''+acao.id+'\',\''+tipo+'\',\''+motivoArg+'\')">'+btnLabel+'</button>'+
+        '</div>'+
+      '</div>';
+    // Fecha ao clicar fora
+    modal.onclick = function(){ fecharModal(); cancelarAcao(acao.id); };
+    document.body.appendChild(modal);
+    // ESC fecha
+    var escHandler = function(ev) {
+      if (ev.key === 'Escape') { fecharModal(); cancelarAcao(acao.id); document.removeEventListener('keydown', escHandler); }
+    };
+    document.addEventListener('keydown', escHandler);
+  }
+
+  function fecharModal() {
+    var el = document.getElementById('sol-modal-overlay');
+    if (el) el.remove();
+  }
+
+  async function confirmarAcaoModal(id, tipo, motivo) {
+    var modal = document.getElementById('sol-modal-overlay');
+    if (modal) {
+      var btn = modal.querySelector('.sol-modal-confirmar');
+      if (btn) { btn.disabled = true; btn.textContent = 'Processando...'; }
+    }
+    await confirmarAcao(id, tipo, motivo);
+    fecharModal();
+  }
+
+  return { mount: mount, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar, abrirModalAcao: abrirModalAcao, fecharModal: fecharModal, confirmarAcaoModal: confirmarAcaoModal };
 })();
 
 

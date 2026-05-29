@@ -77,6 +77,8 @@ function buildSystemPrompt(user, viewAtual) {
     '  7. Quando listar NFs, use formato markdown table compacto.',
     '  8. Se nao tem dados pra responder, fale isso direto. Nao invente.',
     '  9. Pra acoes destrutivas, SEMPRE confirme o numero, fornecedor e valor da NF antes de propor.',
+    '  10. Se NAO encontrar a NF que o usuario pediu (numero invalido, fora do escopo dele, etc), responda de forma AMIGAVEL e EMPATICA, com o nome dele. Exemplo: \'Oi Rafa, nao encontrei a NF 1234 que voce me pediu. Pode confirmar o numero?\'. NUNCA seja seca tipo \'NF nao encontrada\' — sempre humanize.',
+    '  11. Quando for propor uma acao destrutiva (aprovacao/rejeicao), redija sua resposta como UMA UNICA pergunta direta, do tipo \'Posso seguir com a aprovacao da NF X (Fornecedor Y, R$ Z)?\'. Nao escreva texto longo antes do card — o frontend ja mostra um modal com os dados, sua mensagem deve ser curta e direta.',
     '',
     'EXEMPLOS DE INTERAÇÃO:',
     '  User: "Liste minha fila"',
