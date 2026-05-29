@@ -570,6 +570,7 @@ async function runSol(history, userMessage, user, opts) {
   messages.push({ role: 'user', content: userMessage });
 
   const acoesPropostas = [];
+  const toolCallsDebug = [];  // pra debug: lista o que a SOL chamou e com quais args
   let totalTokens = 0;
   let resposta = '';
 
@@ -609,6 +610,15 @@ async function runSol(history, userMessage, user, opts) {
           result = { erro: 'falha ao executar ' + fnName + ': ' + (e.message || String(e)) };
         }
       }
+      // Debug: registra o que foi chamado e um snapshot do resultado
+      toolCallsDebug.push({
+        tool: fnName,
+        args: args,
+        resultSummary: result && result.erro ? { erro: result.erro } :
+                       (result && Array.isArray(result.notas) ? { totalNotas: result.notas.length, primeiras3: result.notas.slice(0,3).map(n => ({ id: n.id, numero: n.numero })) } :
+                       (result && result.id ? { id: result.id, numero: result.numero, fornecedor: result.fornecedor } :
+                       { tipo: typeof result }))
+      });
       // Se for uma proposta de acao, guarda pra retornar pro frontend
       if (result && result.confirmar_no_frontend) {
         acoesPropostas.push(result);
@@ -621,7 +631,7 @@ async function runSol(history, userMessage, user, opts) {
     }
   }
 
-  return { resposta: resposta, acoes_propostas: acoesPropostas, tokens: totalTokens, model: model };
+  return { resposta: resposta, acoes_propostas: acoesPropostas, tokens: totalTokens, model: model, tool_calls_debug: toolCallsDebug };
 }
 
 module.exports = { runSol, DEFAULT_MODEL };

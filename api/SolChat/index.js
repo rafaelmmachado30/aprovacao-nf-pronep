@@ -80,7 +80,8 @@ module.exports = async function (context, req) {
         acoes_propostas: result.acoes_propostas || [],
         tokens: result.tokens || 0,
         model: result.model,
-        elapsedMs: elapsedMs
+        elapsedMs: elapsedMs,
+        tool_calls_debug: result.tool_calls_debug || []
       }
     };
   } catch (err) {
