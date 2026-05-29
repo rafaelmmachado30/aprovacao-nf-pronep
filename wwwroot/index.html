@@ -716,6 +716,25 @@
   .sol-suggestions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
   .sol-suggestion { background:rgba(255,255,255,0.18); border:0; color:#fff; padding:5px 11px; border-radius:14px; font-size:11px; cursor:pointer; }
   .sol-suggestion:hover { background:rgba(255,255,255,0.32); }
+  .sol-mic-btn {
+    padding:9px 14px; background:#fff; color:#1F4E79; border:0; border-radius:6px;
+    font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    transition: all 0.2s;
+  }
+  .sol-mic-btn:hover { background:#E1F5FE; }
+  .sol-mic-btn:disabled { opacity:0.5; cursor:not-allowed; }
+  .sol-mic-btn.gravando {
+    background:#C62828; color:#fff;
+    animation: solMicPulse 1.2s ease-in-out infinite;
+  }
+  @keyframes solMicPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(198,40,40,0.6); }
+    50% { box-shadow: 0 0 0 10px rgba(198,40,40,0); }
+  }
+  .sol-mic-status {
+    font-size:12px; color:#fff; margin-top:6px; padding:4px 10px;
+    background:rgba(198,40,40,0.85); border-radius:14px; display:inline-block;
+  }
   .sol-msg-actions { display:flex; gap:8px; margin-top:6px; }
   .sol-export-btn {
     background:#ECEFF1; color:#37474F; border:0; border-radius:14px;
@@ -1001,6 +1020,7 @@ window.solChat = (function() {
         (msgsHtml ? '<div class="sol-messages" id="sol-msgs">'+msgsHtml+'</div>' : '')+
         '<div class="sol-input-row">'+
           '<input id="sol-input" type="text" placeholder="Pergunte algo ou diga: SOL, aprove a NF 1234..." onkeydown="if(event.key===\'Enter\')solChat.send()" '+(state.busy?'disabled':'')+'>'+
+          '<button id="sol-mic" class="sol-mic-btn" onclick="solChat.gravar()" '+(state.busy?'disabled':'')+' title="Ditar por voz">🎤</button>'+
           '<button onclick="solChat.send()" '+(state.busy?'disabled':'')+'>'+(state.busy?'...':'Enviar')+'</button>'+
         '</div>'+
         loading + sugHtml +
@@ -1164,7 +1184,77 @@ window.solChat = (function() {
     setTimeout(function(){ try { w.focus(); } catch(e){} }, 100);
   }
 
-  return { mount: mount, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF };
+  // === Reconhecimento de voz (Web Speech API) ===
+  var _recognition = null;
+  var _gravando = false;
+  function gravar() {
+    if (_gravando) { try { _recognition && _recognition.stop(); } catch(e){} return; }
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      alert('Seu navegador não suporta reconhecimento de voz. Use Chrome, Edge ou Safari.');
+      return;
+    }
+    var inp = document.getElementById('sol-input');
+    var btn = document.getElementById('sol-mic');
+    if (!inp || !btn) return;
+
+    _recognition = new SR();
+    _recognition.lang = 'pt-BR';
+    _recognition.continuous = false;
+    _recognition.interimResults = true;
+    _recognition.maxAlternatives = 1;
+
+    var finalTranscript = '';
+    var startState = inp.value;
+
+    _recognition.onstart = function() {
+      _gravando = true;
+      btn.classList.add('gravando');
+      btn.textContent = '⏺';
+      btn.title = 'Clique pra parar';
+      inp.placeholder = '🎤 Ouvindo... fale agora';
+    };
+    _recognition.onresult = function(ev) {
+      var interim = '';
+      for (var i = ev.resultIndex; i < ev.results.length; i++) {
+        var transcript = ev.results[i][0].transcript;
+        if (ev.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interim += transcript;
+        }
+      }
+      inp.value = (startState ? startState + ' ' : '') + finalTranscript + interim;
+    };
+    _recognition.onerror = function(ev) {
+      console.error('SOL voz erro:', ev.error);
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+        alert('Permissão de microfone negada. Libere no navegador e tente de novo.');
+      } else if (ev.error === 'no-speech') {
+        // silencio — sem alerta
+      } else {
+        alert('Erro no reconhecimento: ' + ev.error);
+      }
+    };
+    _recognition.onend = function() {
+      _gravando = false;
+      btn.classList.remove('gravando');
+      btn.textContent = '🎤';
+      btn.title = 'Ditar por voz';
+      inp.placeholder = 'Pergunte algo ou diga: SOL, aprove a NF 1234...';
+      // Texto final ja foi populado pelo onresult; foca o input pra usuario revisar/enviar
+      if (finalTranscript) {
+        inp.focus();
+        // posiciona cursor no fim
+        try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch(e){}
+      }
+    };
+
+    try { _recognition.start(); }
+    catch (e) { alert('Erro ao iniciar microfone: ' + e.message); }
+  }
+
+  return { mount: mount, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar };
 })();
 
 
