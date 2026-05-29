@@ -115,7 +115,7 @@ module.exports = async function (context, req) {
     diag.step = 'check_duplicate';
     if (docDigits) {
       const checkResp = await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
-        .expand('fields(select=Title,field_2)')
+        .expand('fields')
         .filter("fields/field_2 eq '" + String(body.documento).trim().replace(/'/g, "''") + "'")
         .header('Prefer', 'HonorNonIndexedQueriesWarningMayFailRandomly')
         .top(1)
