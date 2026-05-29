@@ -716,6 +716,13 @@
   .sol-suggestions { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
   .sol-suggestion { background:rgba(255,255,255,0.18); border:0; color:#fff; padding:5px 11px; border-radius:14px; font-size:11px; cursor:pointer; }
   .sol-suggestion:hover { background:rgba(255,255,255,0.32); }
+  .sol-msg-actions { display:flex; gap:8px; margin-top:6px; }
+  .sol-export-btn {
+    background:#ECEFF1; color:#37474F; border:0; border-radius:14px;
+    padding:3px 10px; font-size:11px; font-weight:500; cursor:pointer;
+    display:inline-flex; align-items:center; gap:4px;
+  }
+  .sol-export-btn:hover { background:#CFD8DC; color:#1F4E79; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 
@@ -968,12 +975,15 @@ window.solChat = (function() {
     var sugestoes = viewAtual === 'aprovadas'
       ? ['Quanto liberei este mês?', 'Aprovadas hoje', 'Top 5 fornecedores aprovados']
       : ['Lista minha fila por vencimento', 'NFs vencendo em D+5', 'Detecte anomalias na minha fila'];
-    var msgsHtml = state.history.map(function(m){
+    var msgsHtml = state.history.map(function(m, idx){
       if (m.role === 'user') {
         return '<div class="sol-msg"><div class="sol-msg-user">Você</div><div class="sol-msg-content">'+md(m.content)+'</div></div>';
       }
       var actions = (m.actions||[]).map(renderAcao).join('');
-      return '<div class="sol-msg"><div class="sol-msg-sol">SOL</div><div class="sol-msg-content">'+md(m.content)+actions+'</div></div>';
+      var exportBtn = m.content && m.content.length > 30 && !m.content.startsWith('❌')
+        ? '<div class="sol-msg-actions"><button class="sol-export-btn" onclick="solChat.exportarPDF('+idx+')">📄 Exportar PDF</button></div>'
+        : '';
+      return '<div class="sol-msg"><div class="sol-msg-sol">SOL</div><div class="sol-msg-content">'+md(m.content)+actions+exportBtn+'</div></div>';
     }).join('');
     var loading = state.busy ? '<div class="sol-loading">SOL está pensando...</div>' : '';
     var sugHtml = state.history.length === 0
@@ -1089,7 +1099,72 @@ window.solChat = (function() {
     container.innerHTML = state.open ? renderOpen(viewAtual) : renderCollapsed();
   }
 
-  return { mount: mount, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh };
+  function exportarPDF(idx) {
+    var msg = state.history[idx];
+    if (!msg || msg.role !== 'assistant') return;
+    // Acha a pergunta do user imediatamente antes
+    var pergunta = '';
+    for (var i = idx - 1; i >= 0; i--) {
+      if (state.history[i].role === 'user') { pergunta = state.history[i].content; break; }
+    }
+    var nomeUsuario = (window.currentUser && currentUser.nome) || (window.currentPersona && currentPersona.name) || '';
+    var emailUsuario = (window.currentUser && currentUser.email) || '';
+    var agora = new Date();
+    var dataStr = agora.toLocaleDateString('pt-BR') + ' às ' + agora.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit'});
+    var conteudoHtml = md(msg.content);
+    // Monta documento HTML standalone pra janela de impressao
+    var doc = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório SOL — '+dataStr+'</title>'+
+      '<style>'+
+        '@page { margin: 18mm 14mm; }'+
+        'body { font-family: Arial, sans-serif; color: #2C3E50; margin: 0; line-height: 1.5; }'+
+        '.header { background: linear-gradient(135deg, #1F4E79 0%, #27AAE1 100%); color: #fff; padding: 18px 22px; border-radius: 8px; margin-bottom: 18px; }'+
+        '.header h1 { margin: 0; font-size: 18px; font-weight: 600; }'+
+        '.header p { margin: 4px 0 0; font-size: 12px; opacity: 0.92; }'+
+        '.meta { background: #F4F8FB; border-left: 3px solid #27AAE1; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; }'+
+        '.meta b { color: #1F4E79; }'+
+        '.pergunta { background: #FFF9C4; border-left: 3px solid #F9A825; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; font-style: italic; color: #5D4037; }'+
+        '.conteudo { font-size: 13px; }'+
+        '.conteudo h1, .conteudo h2, .conteudo h3 { color: #1F4E79; }'+
+        '.conteudo table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 12px; }'+
+        '.conteudo th, .conteudo td { padding: 6px 10px; border-bottom: 1px solid #ECEFF1; text-align: left; }'+
+        '.conteudo th { background: #F4F8FB; color: #1F4E79; font-weight: 600; }'+
+        '.conteudo tr:nth-child(even) td { background: #FAFCFE; }'+
+        '.conteudo code { background: #F4F8FB; padding: 1px 5px; border-radius: 3px; font-size: 12px; color: #C62828; }'+
+        '.conteudo ul, .conteudo ol { margin: 6px 0 6px 22px; }'+
+        '.footer { margin-top: 30px; padding-top: 12px; border-top: 1px solid #ECEFF1; font-size: 10px; color: #647883; text-align: center; }'+
+        '.print-bar { background:#1F4E79; color:#fff; padding:14px 22px; text-align:center; margin: -8px -8px 18px; border-radius: 0 0 8px 8px; }'+
+        '.print-bar button { background:#fff; color:#1F4E79; border:0; padding:8px 18px; border-radius:6px; font-weight:600; cursor:pointer; font-size:13px; margin: 0 4px; }'+
+        '@media print { .print-bar { display: none !important; } body { margin: 0; } }'+
+      '</style></head><body>'+
+        '<div class="print-bar">'+
+          '<span style="margin-right:14px;font-size:13px">Use o botão abaixo para salvar este relatório como PDF</span>'+
+          '<button onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>'+
+          '<button onclick="window.close()" style="background:#ECEFF1;color:#37474F">Fechar</button>'+
+        '</div>'+
+        '<div class="header">'+
+          '<h1>Relatório SOL — Pronep Life Care</h1>'+
+          '<p>Sistema de Aprovação de Notas Fiscais</p>'+
+        '</div>'+
+        '<div class="meta">'+
+          '<b>Gerado em:</b> '+dataStr+'<br>'+
+          (nomeUsuario ? '<b>Usuário:</b> '+nomeUsuario+(emailUsuario?' ('+emailUsuario+')':'') : '')+
+        '</div>'+
+        (pergunta ? '<div class="pergunta"><b>Consulta:</b> '+pergunta.replace(/</g,'&lt;')+'</div>' : '')+
+        '<div class="conteudo">'+conteudoHtml+'</div>'+
+        '<div class="footer">Gerado pela SOL — assistente IA do sistema de Aprovação de NF · Pronep Life Care</div>'+
+      '</body></html>';
+    var w = window.open('', '_blank', 'width=900,height=700');
+    if (!w) {
+      alert('O navegador bloqueou a janela. Permita pop-ups deste site e tente novamente.');
+      return;
+    }
+    w.document.write(doc);
+    w.document.close();
+    // Foca a nova janela (usuario ja pode clicar Imprimir)
+    setTimeout(function(){ try { w.focus(); } catch(e){} }, 100);
+  }
+
+  return { mount: mount, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF };
 })();
 
 
