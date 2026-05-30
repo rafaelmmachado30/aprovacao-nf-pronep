@@ -648,21 +648,33 @@ async function runSol(history, userMessage, user, opts) {
 
   // Tenta Anthropic primeiro
   const anthropic = getAnthropic();
+  let anthropicError = null;
   if (anthropic) {
     try {
       return await runSolAnthropic(anthropic, history, userMessage, systemPrompt, ctx, maxIter, opts.model);
     } catch (e) {
-      console.error('[SOL] Anthropic falhou:', e.message || e);
+      anthropicError = {
+        message: e.message || String(e),
+        status: e.status || (e.response && e.response.status),
+        type: e.constructor && e.constructor.name,
+        stack: (e.stack || '').split('\n').slice(0, 5).join(' | ')
+      };
+      console.error('[SOL] Anthropic falhou:', anthropicError);
       // Cai pro fallback OpenAI
     }
+  } else {
+    anthropicError = { message: 'ANTHROPIC_API_KEY nao configurada ou Anthropic SDK nao carregou' };
   }
 
   // Fallback OpenAI
   const openai = getOpenAI();
   if (!openai) {
-    throw new Error('Nenhum provider IA disponivel: ANTHROPIC_API_KEY e OPENAI_API_KEY ambos vazios');
+    throw new Error('Nenhum provider IA disponivel: ANTHROPIC_API_KEY e OPENAI_API_KEY ambos vazios. anthropic_error=' + JSON.stringify(anthropicError));
   }
-  return await runSolOpenAI(openai, history, userMessage, systemPrompt, ctx, maxIter);
+  const result = await runSolOpenAI(openai, history, userMessage, systemPrompt, ctx, maxIter);
+  // Anexa o erro do Anthropic no response pra debug
+  result.anthropic_error = anthropicError;
+  return result;
 }
 
 // =============================================================================
