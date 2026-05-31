@@ -64,10 +64,12 @@ module.exports = async function (context, req) {
       return;
     }
 
+    // NAO passar 'model' aqui — runSol() decide internamente baseado no provider:
+    // Anthropic usa ANTHROPIC_MODEL_HAIKU, OpenAI (fallback) usa OPENAI_MODEL.
+    // Passar 'gpt-4o-mini' como override quebra o Anthropic com 404 (model not found).
     const result = await runSol(history, message, user, {
       viewAtual: viewAtual,
       isAdmin: isAdmin,
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       maxIter: 8
     });
 
@@ -89,12 +91,4 @@ module.exports = async function (context, req) {
   } catch (err) {
     context.log && context.log.error && context.log.error('SolChat error:', err);
     context.res = {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-      body: {
-        error: 'Erro interno da SOL',
-        detail: (err && err.message) || String(err)
-      }
-    };
-  }
-};
+   

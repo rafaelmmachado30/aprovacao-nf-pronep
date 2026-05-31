@@ -681,7 +681,10 @@ async function runSol(history, userMessage, user, opts) {
 // Anthropic — formato com content blocks + tool_use/tool_result
 // =============================================================================
 async function runSolAnthropic(client, history, userMessage, systemPrompt, ctx, maxIter, modelOverride) {
-  let model = modelOverride || DEFAULT_MODEL;
+  // Defesa em profundidade: se vier um modelo OpenAI (gpt-*) por engano, ignora e usa o default Anthropic.
+  // Isso evita o 404 "model not found" quando o caller esquece de remover o param model do opts.
+  const safeOverride = (modelOverride && !/^gpt[-_]/i.test(String(modelOverride))) ? modelOverride : null;
+  let model = safeOverride || DEFAULT_MODEL;
   const anthropicTools = toolsParaAnthropic(TOOLS);
 
   // Anthropic messages: alterna user/assistant. system vai como param separado.
@@ -828,12 +831,4 @@ async function runSolOpenAI(openai, history, userMessage, systemPrompt, ctx, max
       if (result && result.confirmar_no_frontend) {
         acoesPropostas.push(result);
       }
-      messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
-    }
-  }
-
-  return { resposta: resposta, acoes_propostas: acoesPropostas, tokens: totalTokens, model: OPENAI_MODEL, tool_calls_debug: toolCallsDebug, provider: 'openai-fallback' };
-}
-
-
-module.exports = { runSol, DEFAULT_MODEL };
+      messa
