@@ -92,8 +92,15 @@ function normalizeFields(fields, invMap) {
 }
 
 module.exports = async function (context, req) {
-  const diag = { step: 'start' };
+  // DEBUG: garante que SEMPRE retorna algo, mesmo se algo der erro logo no inicio
+  try { context.log && context.log('IntegrarOmie called, method=' + req.method); } catch(e){}
+  const diag = { step: 'start', method: req.method, hasBody: !!req.body, bodyKeys: req.body ? Object.keys(req.body) : [] };
   try {
+    // Validacao precoce do body — se nao for JSON valido com {id}, retorna 400 com diag
+    if (!req.body || typeof req.body !== 'object') {
+      context.res = { status: 400, headers: {'Content-Type':'application/json'}, body: { error: 'Body invalido (esperado JSON com {id})', diag, bodyType: typeof req.body, bodyRaw: typeof req.body === 'string' ? req.body.slice(0,200) : null } };
+      return;
+    }
     diag.step = 'principal';
     const user = await getUser(req);
     if (!user) {
