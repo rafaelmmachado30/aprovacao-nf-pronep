@@ -2114,7 +2114,10 @@ function tentarAbrirNFDoTeams() {
     var alvo = null;
     if (Array.isArray(window.notas)) {
       alvo = window.notas.find(function (n) {
-        return String(n.spId) === String(nfId) || String(n.id) === 'NF-' + nfId || String(n.id) === String(nfId);
+        return String(n.spId) === String(nfId)
+          || String(n.id) === 'ID-' + nfId
+          || String(n.id) === 'NF-' + nfId  // legacy: deep links Teams antigos
+          || String(n.id) === String(nfId);
       });
     }
     if (alvo) {
@@ -2225,7 +2228,7 @@ async function carregarNotasReais() {
       );
       const statusMap = { 'Lancada': 'pendente', 'AguardandoN2': 'pendente', 'Aprovada': 'aprovada', 'Rejeitada': 'rejeitada' };
       return {
-        id: 'NF-' + n.id,
+        id: 'ID-' + n.id,
         spId: n.id,
         numero: String(n.NumeroNF || ''),
         serie: '',
@@ -6003,7 +6006,7 @@ async function submitNF() {
     const novoId = data.id;
     const agora = agoraBRT();
     notas.unshift({
-      id: 'NF-' + novoId,
+      id: 'ID-' + novoId,
       numero: numero,
       serie: payload.serie,
       fornecedorIdx: parseInt(fornIdx),
@@ -6034,7 +6037,7 @@ async function submitNF() {
       <div style="text-align:center;padding:8px 0 4px">
         <div style="width:64px;height:64px;border-radius:50%;background:var(--verde-bg);color:var(--verde);display:inline-grid;place-items:center;font-size:34px;margin-bottom:14px">✓</div>
         <h3 style="margin-bottom:6px">Nota enviada com sucesso!</h3>
-        <div class="muted" style="font-size:14px;margin-bottom:6px">Identificador: <b style="color:var(--azul-escuro);font-family:monospace">NF-${novoId}</b></div>
+        <div class="muted" style="font-size:14px;margin-bottom:6px">Identificador: <b style="color:var(--azul-escuro);font-family:monospace">ID-${novoId}</b></div>
         <div class="small muted">Arquivo salvo em <span class="mono">SharePoint/Notas Fiscais/Pendentes/${forn.unidade}/Diretoria ${forn.diretoria}/</span></div>
         <div class="small muted" style="margin-top:4px">Aprovador: <b>${data.aprovador.nome}</b> (${data.aprovador.email})</div>
         ${extraInfo}
