@@ -8,6 +8,7 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
+const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -113,6 +114,13 @@ module.exports = async function (context, req) {
       // Update existente
       await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + item.id + '/fields')
         .patch({ ConfigJson: configJsonStr });
+
+      auditRegistrar(user, 'config_update',
+        { tipo: 'config', id: item.id },
+        'sucesso',
+        { action: 'updated', config: config }
+      ).catch(function(){});
+
       context.res = {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -122,6 +130,13 @@ module.exports = async function (context, req) {
       // Cria novo
       const created = await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
         .post({ fields: { Title: CONFIG_TITLE, ConfigJson: configJsonStr } });
+
+      auditRegistrar(user, 'config_update',
+        { tipo: 'config', id: created.id },
+        'sucesso',
+        { action: 'created', config: config }
+      ).catch(function(){});
+
       context.res = {
         status: 201,
         headers: { 'Content-Type': 'application/json' },

@@ -29,6 +29,7 @@
 
 require('isomorphic-fetch');
 const { notificar } = require('../shared/notificar');
+const { registrar: auditRegistrar } = require('../shared/auditLog');
 const crypto = require('crypto');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
@@ -377,6 +378,12 @@ module.exports = async function (context, req) {
     diag.step = 'check_duplicate';
     const dup = await verificaDuplicata(client, siteId, listNotasId, colMap, hash, fornecedorCNPJ, numero, serie, chaveAcesso);
     if (dup) {
+      auditRegistrar(user, 'lancamento',
+        { tipo: 'nf', numero: numero },
+        'bloqueado',
+        { fornecedor: fornecedorCNPJ, valor: valor, motivo: 'duplicidade: ' + (dup.motivo || ''), notaIdConflito: dup.notaId, statusConflito: dup.status }
+      ).catch(function(){});
+
       context.res = { status: 409, headers: { 'Content-Type': 'application/json' },
         body: { error: 'Duplicidade detectada', motivo: dup.motivo, notaId: dup.notaId, status: dup.status, diag } };
       return;
@@ -506,6 +513,12 @@ module.exports = async function (context, req) {
     });
     diag.notificado = true;
     diag.notifResult = notifResult;  // <-- expoe detalhe (email, teamsAtividade, teamsWebhook) pra debug
+
+    auditRegistrar(user, 'lancamento',
+      { tipo: 'nf', id: itemResp.id, numero: numero },
+      'sucesso',
+      { fornecedor: fornecedorCNPJ, valor: valor, vencimento: vencimento, unidade: unidade, diretoria: diretoria, aprovador: aprovador && aprovador.email }
+    ).catch(function(){});
 
     context.res = {
       status: 200,

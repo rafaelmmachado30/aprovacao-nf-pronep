@@ -19,6 +19,7 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
+const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { notificar } = require('../shared/notificar');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
@@ -462,6 +463,13 @@ module.exports = async function (context, req) {
       aprovador: aprovadorEmail, submitter: f.LancadoPor,
       urlPDF: uploadResp.webUrl
     });
+
+    // Audit log — best effort
+    auditRegistrar(user, 'aprovacao',
+      { tipo: 'nf', id: itemId, numero: f.NumeroNF },
+      'sucesso',
+      { fornecedor: f.CNPJFornecedor, valor: f.Valor, vencimento: f.DataVencimento, unidade: f.Unidade, diretoria: f.Diretoria, urlPDF: uploadResp.webUrl }
+    ).catch(function(){});
 
     context.res = {
       status: 200,

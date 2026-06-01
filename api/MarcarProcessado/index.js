@@ -7,6 +7,7 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
+const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -73,6 +74,13 @@ module.exports = async function (context, req) {
     patch[processadoInternal] = processado;
     await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + itemId + '/fields')
       .patch(patch);
+
+    auditRegistrar(user, 'processado',
+      { tipo: 'nf', id: itemId },
+      'sucesso',
+      { processado: processado }
+    ).catch(function(){});
+
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

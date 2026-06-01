@@ -15,6 +15,7 @@
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { notificar } = require('../shared/notificar');
+const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -286,6 +287,12 @@ module.exports = async function (context, req) {
       motivo: motivoCompletoStr,
       urlPDF: urlPDFRejeitado
     });
+
+    auditRegistrar(user, 'rejeicao',
+      { tipo: 'nf', id: itemId, numero: f.NumeroNF },
+      'sucesso',
+      { fornecedor: f.CNPJFornecedor, valor: f.Valor, motivo: motivoCompletoStr, unidade: f.Unidade, diretoria: f.Diretoria }
+    ).catch(function(){});
 
     context.res = {
       status: 200,
