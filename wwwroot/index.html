@@ -1225,6 +1225,7 @@ window.solChat = (function() {
       '<div class="san-panel-header">'+
         '<div class="sol-avatar">S</div>'+
         '<div class="sol-title" style="flex:1"><h4>SAN — sua assistente</h4><p>Posso ajudar com sua fila, aprovadas, lancamentos e duvidas do sistema.</p></div>'+
+        '<button class="san-panel-close" onclick="solChat.limparHistorico()" title="Limpar conversa" style="margin-right:4px;font-size:14px">🧹</button>'+
         '<button class="san-panel-close" onclick="solChat.toggle()" title="Fechar">✕</button>'+
       '</div>'+
       '<div class="san-panel-body">'+
@@ -1367,6 +1368,44 @@ window.solChat = (function() {
     panel.id = 'san-panel';
     panel.className = 'san-panel';
     document.body.appendChild(panel);
+
+    // Hidrata historico persistente do SP (se ainda nao foi carregado)
+    if (!state.historicoHidratado) {
+      state.historicoHidratado = true;
+      hidratarHistorico();
+    }
+  }
+
+  async function hidratarHistorico() {
+    try {
+      var r = await fetch('/api/SolHistorico?limit=20', { credentials: 'include' });
+      if (!r.ok) return;
+      var data = await r.json();
+      if (Array.isArray(data.history) && data.history.length > 0 && state.history.length === 0) {
+        // So hidrata se o estado local estiver vazio (nao sobrescreve conversa em andamento)
+        state.history = data.history.map(function(m){
+          return { role: m.role, content: m.content, timestamp: m.timestamp };
+        });
+        if (state.open) refresh();
+      }
+    } catch (e) {
+      console.warn('[SAN] falha ao hidratar historico:', e && e.message);
+    }
+  }
+
+  async function limparHistorico() {
+    if (!confirm('Apagar TODO o historico de conversa com a SAN? Essa acao nao pode ser desfeita.')) return;
+    try {
+      var r = await fetch('/api/SolHistorico', { method: 'DELETE', credentials: 'include' });
+      if (r.ok) {
+        state.history = [];
+        refresh();
+      } else {
+        alert('Falha ao limpar historico.');
+      }
+    } catch (e) {
+      alert('Erro: ' + (e.message || e));
+    }
   }
 
   function exportarPDF(idx) {
@@ -1638,7 +1677,7 @@ window.solChat = (function() {
     fecharModal();
   }
 
-  return { mount: mount, init: init, setView: setView, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar, abrirModalAcao: abrirModalAcao, fecharModal: fecharModal, confirmarAcaoModal: confirmarAcaoModal };
+  return { mount: mount, init: init, setView: setView, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar, abrirModalAcao: abrirModalAcao, fecharModal: fecharModal, confirmarAcaoModal: confirmarAcaoModal, limparHistorico: limparHistorico, hidratarHistorico: hidratarHistorico };
 })();
 
 

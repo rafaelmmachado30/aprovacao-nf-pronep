@@ -20,6 +20,7 @@
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { runSol } = require('../shared/sol');
+const { salvar: salvarHistorico } = require('../shared/solHistorico');
 
 // Detecta se o usuario tem perfil admin/financeiro (ve tudo) pelos grupos Entra ID
 // Replica logica de MeusGrupos — verifica se o oid eh membro de grupos privilegiados.
@@ -74,6 +75,14 @@ module.exports = async function (context, req) {
     });
 
     const elapsedMs = Date.now() - start;
+
+    // Persiste o turno no historico SP (best-effort, nao bloqueia a resposta)
+    // Salva user msg + assistant response em paralelo (Promise.allSettled).
+    Promise.allSettled([
+      salvarHistorico(user, 'user', message, {}),
+      salvarHistorico(user, 'assistant', result.resposta || '', { tokensUsed: result.tokens || 0 })
+    ]).catch(function(e){ /* silencia */ });
+
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
