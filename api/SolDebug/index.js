@@ -1,16 +1,11 @@
 /**
  * SolDebug — endpoint de diagnostico do SOL.
  *
- * Retorna info sobre:
- *  - Se as App Settings ANTHROPIC_API_KEY / OPENAI_API_KEY estao setadas
- *  - Se os SDKs @anthropic-ai/sdk e openai carregam sem erro
- *  - Quais modelos estao configurados
- *  - Testa uma chamada minima ao Anthropic (?test=anthropic na query)
+ * GET /api/SolDebug                  — info basica de env, requires e module load
+ * GET /api/SolDebug?test=anthropic   — testa uma chamada simples ao Anthropic
+ * GET /api/SolDebug?test=runsol      — chama runSol() inteiro com user fake (mesmo path do SolChat)
  *
- * Uso: GET /api/SolDebug ou GET /api/SolDebug?test=anthropic
- *
- * NAO requer auth (anonymous) pra facilitar debug, mas nao expoe valores
- * sensiveis (so booleanos de "ta setado?").
+ * Anonymous, mas nao expoe valores sensiveis (so booleanos).
  */
 
 module.exports = async function (context, req) {
@@ -27,10 +22,10 @@ module.exports = async function (context, req) {
     },
     requires: {},
     sol: {},
-    testCall: null
+    testCall: null,
+    runSolTest: null
   };
 
-  // Tenta require dos SDKs
   try {
     const mod = require('@anthropic-ai/sdk');
     out.requires.anthropic = {
@@ -50,7 +45,6 @@ module.exports = async function (context, req) {
     out.requires.openai = { ok: false, error: e.message, stack: (e.stack || '').split('\n').slice(0, 5) };
   }
 
-  // Tenta carregar o shared/sol.js
   try {
     const sol = require('../shared/sol');
     const anth = sol.getAnthropic && sol.getAnthropic();
@@ -68,8 +62,8 @@ module.exports = async function (context, req) {
     out.sol = { loaded: false, error: e.message, stack: (e.stack || '').split('\n').slice(0, 8) };
   }
 
-  // Teste real: faz uma chamada minima pro Anthropic se ?test=anthropic
   const testParam = (req.query && req.query.test) || '';
+
   if (testParam === 'anthropic') {
     try {
       const mod = require('@anthropic-ai/sdk');
@@ -81,28 +75,38 @@ module.exports = async function (context, req) {
         max_tokens: 50,
         messages: [{ role: 'user', content: 'Diga apenas: ok' }]
       });
-      out.testCall = {
+      out.testCall = { ok: true, model: model, stop_reason: resp.stop_reason, content: resp.content, usage: resp.usage };
+    } catch (e) {
+      out.testCall = { ok: false, error: e.message, status: e.status, type: e.constructor && e.constructor.name, stack: (e.stack || '').split('\n').slice(0, 8) };
+    }
+  }
+
+  if (testParam === 'runsol') {
+    try {
+      const sol = require('../shared/sol');
+      const fakeUser = { email: 'rafael.machado@pronep.com.br', name: 'Rafael Machado', oid: '00000000-0000-0000-0000-000000000000' };
+      const t0 = Date.now();
+      const result = await sol.runSol([], 'Diga apenas: ok', fakeUser, { viewAtual: 'fila-aprovacao', isAdmin: true, maxIter: 2 });
+      out.runSolTest = {
         ok: true,
-        model: model,
-        stop_reason: resp.stop_reason,
-        content: resp.content,
-        usage: resp.usage
+        elapsedMs: Date.now() - t0,
+        provider: result.provider,
+        model: result.model,
+        resposta: result.resposta,
+        tokens: result.tokens,
+        tool_calls_count: (result.tool_calls_debug || []).length,
+        anthropic_error: result.anthropic_error
       };
     } catch (e) {
-      out.testCall = {
+      out.runSolTest = {
         ok: false,
-        model: process.env.ANTHROPIC_MODEL_HAIKU || 'claude-haiku-4-5-20251001',
         error: e.message,
-        status: e.status,
         type: e.constructor && e.constructor.name,
-        stack: (e.stack || '').split('\n').slice(0, 8)
+        status: e.status,
+        stack: (e.stack || '').split('\n').slice(0, 15)
       };
     }
   }
 
-  context.res = {
-    status: 200,
-    headers: { 'Content-Type': 'application/json' },
-    body: out
-  };
+  context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: out };
 };
