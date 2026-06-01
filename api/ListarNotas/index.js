@@ -96,15 +96,19 @@ module.exports = async function (context, req) {
       return;
     }
     const userEmail = (user.email || '').toLowerCase();
-    // userRoles vem de 3 fontes (em ordem de preferencia):
-    //  1. claims.roles do JWT (Teams SSO ou claims customizados)
-    //  2. principal.userRoles do Easy Auth (SWA — geralmente vazio)
-    //  3. Graph API consultando /users/{user}/transitiveMemberOf (autoritativo)
-    // O Graph eh a fonte de verdade pra grupos AAD — Easy Auth nao popula isso por default.
-    let userRoles = (user.claims && user.claims.roles) || (user.source === 'easy-auth' ? readClientPrincipalRoles(req) : []);
-    if (!Array.isArray(userRoles) || userRoles.length === 0) {
-      userRoles = await getUserRoles(user);
-    }
+    // userRoles vem de 3 fontes mescladas:
+    //  1. claims.roles do JWT (Teams SSO — Entra popula com grupos AAD nas claims)
+    //  2. principal.userRoles do Easy Auth (SWA — so retorna ["authenticated","anonymous"], inutil)
+    //  3. Graph API consultando /users/{user}/transitiveMemberOf (fonte de verdade)
+    // SEMPRE chamamos o Graph (com cache 5min) porque o (2) NUNCA tem grupos AAD —
+    // se confiar so nele, gestor/financeiro/ti caem no fluxo do submetedor e veem nada.
+    const claimsRoles = (user.claims && user.claims.roles) || [];
+    const principalRoles = (user.source === 'easy-auth' ? readClientPrincipalRoles(req) : []) || [];
+    // Filtra as roles default do SWA que nao indicam grupo real
+    const usefulPrincipalRoles = principalRoles.filter(r => r !== 'authenticated' && r !== 'anonymous');
+    const graphRoles = await getUserRoles(user);
+    // Mescla, dedupe
+    const userRoles = Array.from(new Set([...claimsRoles, ...usefulPrincipalRoles, ...graphRoles]));
     diag.userEmail = userEmail;
     diag.userRoles = userRoles;
 
