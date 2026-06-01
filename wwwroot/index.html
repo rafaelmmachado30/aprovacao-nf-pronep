@@ -3614,7 +3614,7 @@ const views = {
         </div>
         <div class="form-row">
           <label>Vencimento * <span class="small muted" style="font-weight:400">(mínimo: D+5 dias úteis)</span></label>
-          <input id="frm-venc" type="date" onchange="onVencChange()" oninput="onVencChange()">
+          <input id="frm-venc" type="date" onchange="onVencChange()" onblur="onVencChange()">
           <div id="frm-venc-info" class="small" style="margin-top:4px"></div>
         </div>
 
@@ -5684,6 +5684,12 @@ function onVencChange() {
     return;
   }
   const venc = new Date(vencEl.value + 'T00:00:00');
+  // Protege contra datas invalidas/incompletas (ex: 0000-02-20 durante digitacao)
+  if (isNaN(venc.getTime()) || venc.getFullYear() < 1900 || venc.getFullYear() > 9999) {
+    info.innerHTML = '';
+    blocoForaPrazo.style.display = 'none';
+    return;
+  }
   const dias = diasEntre(HOJE, venc);
   if (dias < 5) {
     vencEl.style.color = 'var(--vermelho)';

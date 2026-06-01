@@ -350,6 +350,13 @@ module.exports = async function (context, req) {
     const principal = readClientPrincipal(req);
     const submitterEmail = (principal && principal.userDetails) || 'desconhecido@pronep.com.br';
     diag.submitter = submitterEmail;
+    // Constroi objeto user pra audit log (formato esperado: { oid, email, name })
+    const submitterOid = (principal && principal.userId) ||
+      (principal && principal.claims && (
+        (principal.claims.find && principal.claims.find(c => c.typ === 'http://schemas.microsoft.com/identity/claims/objectidentifier'))
+        || (principal.claims.find && principal.claims.find(c => c.typ === 'oid'))
+      ) || { val: '' }).val || '';
+    const user = { oid: submitterOid, email: submitterEmail, name: submitterEmail };
 
     diag.step = 'graph';
     const client = await getGraphClient();
