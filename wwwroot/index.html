@@ -721,9 +721,9 @@
     display: block;     /* nao usar flex aqui — deixa o conteudo fluir naturalmente */
   }
   .san-panel-footer {
+    grid-area: footer;
     padding: 12px 18px 16px;
     border-top: 1px solid rgba(255,255,255,0.18);
-    flex-shrink: 0;     /* footer sempre visivel */
     background: rgba(0,0,0,0.08);
   }
   .san-panel-body .sol-messages { max-height: none; margin-bottom: 0; }
@@ -1165,14 +1165,13 @@ window.solChat = (function() {
     var panel = document.getElementById('san-panel');
     var overlay = document.getElementById('san-panel-overlay');
     var fab = document.getElementById('san-fab');
-    var inner = document.getElementById('san-panel-inner');
-    if (!panel || !inner) return;
+    if (!panel) return;
     var view = state.viewAtual || 'fila-aprovacao';
     if (state.open) {
       panel.classList.add('open');
       overlay && overlay.classList.add('open');
       if (fab) fab.classList.add('hidden');
-      inner.innerHTML = renderPanel(view);
+      panel.innerHTML = renderPanel(view);
       setTimeout(function(){ var el = document.getElementById('sol-input'); if (el && !state.busy) el.focus(); }, 60);
       var msgs = document.getElementById('sol-msgs');
       if (msgs) msgs.scrollTop = msgs.scrollHeight;
@@ -1367,7 +1366,6 @@ window.solChat = (function() {
     var panel = document.createElement('aside');
     panel.id = 'san-panel';
     panel.className = 'san-panel';
-    panel.innerHTML = '<div id="san-panel-inner"></div>';
     document.body.appendChild(panel);
   }
 

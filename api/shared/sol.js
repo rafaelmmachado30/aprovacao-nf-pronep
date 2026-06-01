@@ -926,7 +926,7 @@ async function runSolAnthropic(client, history, userMessage, systemPrompt, ctx, 
                        (result && result.id ? { id: result.id, numero: result.numero, fornecedor: result.fornecedor } :
                        { tipo: typeof result }))
       });
-      if (result && result.confirmar_no_frontend) {
+      if (result && (result.confirmar_no_frontend || result.acao_imediata)) {
         acoesPropostas.push(result);
       }
       toolResults.push({
@@ -1002,7 +1002,7 @@ async function runSolOpenAI(openai, history, userMessage, systemPrompt, ctx, max
                        (result && result.id ? { id: result.id, numero: result.numero, fornecedor: result.fornecedor } :
                        { tipo: typeof result }))
       });
-      if (result && result.confirmar_no_frontend) {
+      if (result && (result.confirmar_no_frontend || result.acao_imediata)) {
         acoesPropostas.push(result);
       }
       messages.push({
