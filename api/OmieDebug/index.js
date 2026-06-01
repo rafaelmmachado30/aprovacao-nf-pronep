@@ -84,7 +84,16 @@ module.exports = async function (context, req) {
         totalContas: (data && data.total_de_registros) || (data && data.conta_pagar_cadastro && data.conta_pagar_cadastro.length) || 0,
         faultstring: data && data.faultstring,
         faultcode: data && data.faultcode,
-        rawSample: typeof data === 'object' ? Object.keys(data || {}).slice(0, 10) : null
+        // Tudo abaixo eh debug bruto
+        responseHeaders: {
+          contentType: resp.headers && resp.headers.get && resp.headers.get('content-type'),
+          server: resp.headers && resp.headers.get && resp.headers.get('server')
+        },
+        rawBody: text.slice(0, 1500),  // body COMPLETO (truncado em 1500 chars)
+        requestSent: {
+          url: 'https://app.omie.com.br/api/v1/financas/contapagar/',
+          body: { call: body.call, app_key: (body.app_key||'').slice(0,4)+'...', app_secret: '***hidden***', param: body.param }
+        }
       };
     } catch (e) {
       out.testCall = { ok: false, error: e.message, stack: (e.stack || '').split('\n').slice(0, 8) };
