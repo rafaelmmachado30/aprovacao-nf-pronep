@@ -36,6 +36,8 @@ require('isomorphic-fetch');
 // um nao crashe a Function inteira. Se @anthropic-ai/sdk nao tiver no
 // node_modules, getAnthropic() retorna null e cai no fallback OpenAI.
 
+const { getManualForView } = require('./sanManual');
+
 const MODEL_HAIKU = process.env.ANTHROPIC_MODEL_HAIKU || 'claude-haiku-4-5-20251001';
 const MODEL_SONNET = process.env.ANTHROPIC_MODEL_SONNET || 'claude-sonnet-4-6';
 const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || MODEL_HAIKU;
@@ -166,7 +168,12 @@ function buildSystemPrompt(user, viewAtual) {
     '  4. Datas: dd/mm/aaaa nas respostas (ISO YYYY-MM-DD nas tools).',
     '  5. Tabelas markdown compactas pra listar NFs.',
     '  6. Se nao tem dados pra responder, fale direto. NAO INVENTE.',
-    '  7. Se o usuario pedir algo fora do dominio do sistema (NF, fornecedor, aprovacao), recuse educadamente.'
+    '  7. Se o usuario pedir algo fora do dominio do sistema (NF, fornecedor, aprovacao), recuse educadamente.',
+    '',
+    'BASE DE CONHECIMENTO (do manual oficial do sistema):',
+    getManualForView(viewAtual),
+    '',
+    'USE essa base de conhecimento como FONTE DE VERDADE pra explicar campos, fluxos, validacoes, FAQ etc. Quando o usuario pergunta "como faco X", responda baseado no que esta acima. Se a pergunta for sobre algo nao coberto no manual, fale que nao sabe especificamente mas sugira contato com Admin/Financeiro.'
   ];
 
   // === REGRAS DE COMPORTAMENTO ESPECIFICAS DA VIEW ===
