@@ -669,19 +669,19 @@
   /* === SAN — Floating Action Button (FAB) === */
   .san-fab {
     position: fixed; bottom: 24px; right: 24px;
-    width: 60px; height: 60px;
+    height: 56px; padding: 0 18px 0 14px;
     background: linear-gradient(135deg, #1F4E79 0%, #27AAE1 100%);
-    color: #fff; border: 0; border-radius: 50%;
+    color: #fff; border: 0; border-radius: 28px;
     box-shadow: 0 6px 18px rgba(31,78,121,0.35);
     cursor: pointer; z-index: 9998;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 26px; font-weight: 700;
+    display: inline-flex; align-items: center; gap: 8px;
     transition: transform 0.2s, box-shadow 0.2s;
   }
-  .san-fab:hover { transform: scale(1.08); box-shadow: 0 8px 22px rgba(31,78,121,0.45); }
-  .san-fab:active { transform: scale(0.96); }
+  .san-fab:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(31,78,121,0.45); }
+  .san-fab:active { transform: translateY(0); }
   .san-fab.hidden { display: none !important; }
-  .san-fab .fab-icon { font-size: 22px; line-height: 1; letter-spacing: 1px; }
+  .san-fab .fab-icon { width: 26px; height: 26px; flex-shrink: 0; }
+  .san-fab .fab-label { font-size: 14px; font-weight: 700; letter-spacing: 0.6px; }
   .san-panel-overlay {
     position: fixed; inset: 0; background: rgba(31,78,121,0.18);
     z-index: 9998; opacity: 0; pointer-events: none;
@@ -1310,7 +1310,11 @@ window.solChat = (function() {
     fab.id = 'san-fab';
     fab.className = 'san-fab';
     fab.title = 'Abrir SAN';
-    fab.innerHTML = '<span class="fab-icon">SAN</span>';
+    fab.innerHTML = ''+
+      '<svg class="fab-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+
+        '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'+
+      '</svg>'+
+      '<span class="fab-label">SAN</span>';
     fab.onclick = function() { toggle(); };
     document.body.appendChild(fab);
 
