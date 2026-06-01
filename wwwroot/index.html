@@ -2243,6 +2243,10 @@ async function carregarNotasReais() {
         rawStatus: n.Status || '',
         descricao: n.Descricao || '',
         lancadoPor: n.LancadoPor || '',
+        integradoOmie: n.IntegradoOmie === true || n.IntegradoOmie === 'Sim',
+        integradoOmieEm: n.IntegradoOmieEm || '',
+        integradoOmieRef: n.IntegradoOmieRef || '',
+        integradoOmieEmpresa: n.IntegradoOmieEmpresa || '',
         lancadoEm: fmtDateTimeBRT(n.LancadoEm || ''),
         aprovadoPor: n.AprovadorAtual || '',
         aprovadoEm: n.AprovadoEm ? fmtDateTimeBRT(n.AprovadoEm) : null,
@@ -5106,9 +5110,9 @@ function renderAprovadasTable() {
     <div class="card data-table-desktop">
       ${contadorHtml}
       <table class="data">
-        <thead><tr><th class="center">✓</th><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Solicitante</th><th>Aprovador</th><th>Aprovado em</th><th>Vencimento</th><th class="center">Ações</th></tr></thead>
+        <thead><tr><th class="center">✓</th><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Solicitante</th><th>Aprovador</th><th>Aprovado em</th><th>Vencimento</th><th class="center">Omie</th><th class="center">Ações</th></tr></thead>
         <tbody>
-          ${lista.length === 0 ? `<tr><td colspan="11" style="text-align:center;padding:30px" class="muted">Nenhuma nota encontrada com os filtros atuais. <a href="#" onclick="event.preventDefault();limpaFiltroAprovadas()">Limpar filtros →</a></td></tr>` :
+          ${lista.length === 0 ? `<tr><td colspan="12" style="text-align:center;padding:30px" class="muted">Nenhuma nota encontrada com os filtros atuais. <a href="#" onclick="event.preventDefault();limpaFiltroAprovadas()">Limpar filtros →</a></td></tr>` :
           lista.slice(0, 500).map(n => {
             const apData = n.aprovadoEm ? new Date((n.aprovadoEm||'').substring(0,10) + 'T00:00:00') : null;
             const vencData = n.vencimento ? new Date(n.vencimento + 'T00:00:00') : null;
@@ -5135,14 +5139,22 @@ function renderAprovadasTable() {
                       : `${fmtDate(n.vencimento)}<br><span class="small muted">${diasAteVenc} dia(s) após aprov.</span>`)
                     : (n.vencimento ? fmtDate(n.vencimento) : '—')}
                 </td>
+                <td class="center" style="white-space:nowrap;font-size:11px">
+                  ${n.integradoOmie
+                    ? `<span style="display:inline-block;background:#E8F5E9;color:#2E7D32;padding:3px 8px;border-radius:10px;font-weight:600" title="Integrado em ${n.integradoOmieEm||''} - Empresa: ${n.integradoOmieEmpresa||''} - Ref: ${n.integradoOmieRef||''}">✓ ${n.integradoOmieEmpresa||'OK'}</span>`
+                    : '<span style="color:#999">—</span>'}
+                </td>
                 <td class="center" style="white-space:nowrap">
                   <button class="icon-btn" onclick="openApprovedPdf('${n.id}')" title="Ver PDF">Ver</button>
-                  ${(currentPersona && (currentPersona.roleKey === 'admin' || currentPersona.roleKey === 'financeiro')) ? `<button class="icon-btn" onclick="rejeitarAprovada('${n.id}','${(n.numero||'').replace(/'/g,"\\'")}','${((fornecedorOf(n)||{}).razao||'').replace(/'/g,"\\'").slice(0,30)}',${Number(n.valor||0)})" style="margin-left:4px;background:#FFEBEE;color:#C62828;border-color:#FFCDD2" title="Estornar (rejeitar pos-aprovacao)">Rejeitar</button>` : ''}
+                  ${(currentPersona && (currentPersona.roleKey === 'admin' || currentPersona.roleKey === 'financeiro')) ? `
+                    ${!n.integradoOmie ? `<button class="icon-btn" onclick="integrarOmie('${n.id}','${(n.numero||'').replace(/'/g,"\\'")}','${((fornecedorOf(n)||{}).razao||'').replace(/'/g,"\\'").slice(0,30)}','${n.unidade||''}')" style="margin-left:4px;background:#E3F2FD;color:#1976D2;border-color:#BBDEFB" title="Integrar com Omie ${n.unidade||''}">🔗 Omie</button>` : ''}
+                    <button class="icon-btn" onclick="rejeitarAprovada('${n.id}','${(n.numero||'').replace(/'/g,"\\'")}','${((fornecedorOf(n)||{}).razao||'').replace(/'/g,"\\'").slice(0,30)}',${Number(n.valor||0)})" style="margin-left:4px;background:#FFEBEE;color:#C62828;border-color:#FFCDD2" title="Estornar (rejeitar pos-aprovacao)">Rejeitar</button>
+                  ` : ''}
                 </td>
               </tr>
             `;
           }).join('')}
-          ${lista.length > 500 ? `<tr><td colspan="11" class="center muted" style="padding:14px;font-style:italic">Mostrando 500 de ${lista.length}. Refine os filtros.</td></tr>` : ''}
+          ${lista.length > 500 ? `<tr><td colspan="12" class="center muted" style="padding:14px;font-style:italic">Mostrando 500 de ${lista.length}. Refine os filtros.</td></tr>` : ''}
         </tbody>
       </table>
     </div>
@@ -6269,6 +6281,43 @@ async function doReject(id) {
     document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
     const prog = document.getElementById('reject-progress');
     if (prog) prog.remove();
+  }
+}
+
+async function integrarOmie(id, numero, fornecedor, unidade) {
+  // So Financeiro/Admin chega aqui. Defesa em profundidade:
+  const role = currentPersona && currentPersona.roleKey;
+  if (role !== 'admin' && role !== 'financeiro') {
+    alert('Apenas Admin ou Financeiro pode integrar com Omie.');
+    return;
+  }
+  if (!confirm(
+    'Integrar NF ' + numero + ' com Omie ' + unidade + '?\n\n' +
+    'Fornecedor: ' + fornecedor + '\n\n' +
+    '→ O sistema vai BUSCAR a conta a pagar correspondente no Omie ' + unidade + '\n' +
+    '→ Se encontrar, ANEXA o PDF aprovado na conta\n' +
+    '→ A acao eh registrada na Trilha de Auditoria\n\n' +
+    'Continuar?'
+  )) return;
+
+  try {
+    const r = await fetch('/api/IntegrarOmie', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ id: id })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const detail = data.detail || data.error || ('HTTP ' + r.status);
+      alert('❌ Falha na integracao com Omie:\n\n' + detail);
+      return;
+    }
+    toast('✓ NF ' + numero + ' integrada com Omie ' + (data.empresa || unidade) + '. Codigo: ' + (data.codigoLancamentoOmie || '—'), 'success');
+    try { if (typeof carregarNotasReais === 'function') await carregarNotasReais(); } catch (e) {}
+    showView(currentView);
+  } catch (e) {
+    alert('❌ Erro de rede: ' + (e.message || e));
   }
 }
 
