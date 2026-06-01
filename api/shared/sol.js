@@ -753,12 +753,10 @@ async function tool_propor_marcar_processado(args, ctx) {
   const det = await tool_detalhes_nf({ id: args.id }, ctx);
   if (det && det.erro) return det;
   return {
-    confirmar_no_frontend: true,
-    tipo: 'processado',
+    acao_proposta: 'processado',
     id: det.id,
-    numero: det.numero,
-    fornecedor: det.fornecedor,
-    valor: det.valor
+    confirmar_no_frontend: true,
+    dados: det
   };
 }
 

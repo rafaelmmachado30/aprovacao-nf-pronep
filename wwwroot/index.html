@@ -855,6 +855,8 @@
   .sol-modal-confirmar:hover { background: #1B5E20; }
   .sol-modal-confirmar.rejeitar { background: #C62828; }
   .sol-modal-confirmar.rejeitar:hover { background: #B71C1C; }
+  .sol-modal-confirmar.processado { background: #1F4E79; }
+  .sol-modal-confirmar.processado:hover { background: #163A5C; }
   .sol-modal-confirmar:disabled { background: #A5D6A7; cursor: wait; }
   .sol-mic-status {
     font-size:12px; color:#fff; margin-top:6px; padding:4px 10px;
@@ -1614,20 +1616,25 @@ window.solChat = (function() {
   function abrirModalAcao(acao) {
     fecharModal();
     var d = acao.dados || {};
-    var tipo = acao.tipo || acao.acao_proposta;
+    // Compat: aceita tanto 'tipo' (legado) quanto 'acao_proposta' (padrao novo)
+    var tipo = acao.acao_proposta || acao.tipo;
     var ehAprovacao = tipo === 'aprovacao';
+    var ehRejeicao = tipo === 'rejeicao';
+    var ehProcessado = tipo === 'processado';
     var valor = Number(d.valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     var vencFmt = d.vencimento ? d.vencimento.split('-').reverse().join('/') : '—';
     var pergunta = ehAprovacao
       ? 'Posso seguir com a aprovação da NF ' + (d.numero || '—') + '?'
-      : 'Posso seguir com a rejeição da NF ' + (d.numero || '—') + '?';
+      : (ehProcessado
+          ? 'Posso marcar a NF ' + (d.numero || '—') + ' como PROCESSADA?'
+          : 'Posso seguir com a rejeição da NF ' + (d.numero || '—') + '?');
     var motivoLinha = '';
-    if (!ehAprovacao && acao.motivo) {
+    if (ehRejeicao && acao.motivo) {
       motivoLinha = '<br><b>Motivo:</b> <i>' + String(acao.motivo).replace(/</g,'&lt;') + '</i>';
     }
-    var headerIcon = ehAprovacao ? '✓' : '✕';
-    var btnClass = ehAprovacao ? '' : 'rejeitar';
-    var btnLabel = ehAprovacao ? 'Sim, aprovar' : 'Sim, rejeitar';
+    var headerIcon = ehAprovacao ? '✓' : (ehProcessado ? '✓' : '✕');
+    var btnClass = ehAprovacao ? '' : (ehProcessado ? 'processado' : 'rejeitar');
+    var btnLabel = ehAprovacao ? 'Sim, aprovar' : (ehProcessado ? 'Sim, marcar como processada' : 'Sim, rejeitar');
     var motivoArg = acao.motivo ? acao.motivo.replace(/'/g,"\\'") : '';
 
     var modal = document.createElement('div');
