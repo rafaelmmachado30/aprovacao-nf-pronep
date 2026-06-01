@@ -56,7 +56,7 @@ module.exports = async function (context, req) {
     out.requires.graph = { ok: false, error: e.message };
   }
 
-  // Test call: ?test=SP|RJ|ES — chama ListarContasPagar pra verificar credenciais
+  // Test call: ?test=SP|RJ|ES — chama ListarContasPagar com VARIAS combinacoes pra cravar.
   const testParam = (req.query && req.query.test) || '';
   if (['SP','RJ','ES'].includes(testParam)) {
     try {
@@ -69,13 +69,31 @@ module.exports = async function (context, req) {
         app_secret: creds.appSecret,
         param: [{ pagina: 1, registros_por_pagina: 1, apenas_importado_api: 'N' }]
       };
-      const resp = await fetch('https://app.omie.com.br/api/v1/financas/contapagar/', {
-        method: 'POST',
-        headers: {
+
+      // Variavel: testUrl + testHeaders permitem testar combos via query strings
+      const urlMode = (req.query && req.query.url) || 'slash';  // slash | noslash | absolute
+      const headerMode = (req.query && req.query.hdr) || 'default'; // default | minimal | curl
+      let url;
+      if (urlMode === 'noslash') url = 'https://app.omie.com.br/api/v1/financas/contapagar';
+      else if (urlMode === 'absolute') url = 'https://app.omie.com.br/api/v1/financas/contapagar/?JSON';
+      else url = 'https://app.omie.com.br/api/v1/financas/contapagar/';
+
+      let headers;
+      if (headerMode === 'minimal') {
+        headers = { 'Content-Type': 'application/json' };
+      } else if (headerMode === 'curl') {
+        headers = { 'Content-Type': 'application/json', 'Accept': '*/*', 'User-Agent': 'curl/7.68.0' };
+      } else {
+        headers = {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'User-Agent': 'PronepNF/1.0 (Azure SWA Functions)'
-        },
+        };
+      }
+
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: headers,
         body: JSON.stringify(body)
       });
       const text = await resp.text();
@@ -95,7 +113,10 @@ module.exports = async function (context, req) {
         },
         rawBody: text.slice(0, 1500),  // body COMPLETO (truncado em 1500 chars)
         requestSent: {
-          url: 'https://app.omie.com.br/api/v1/financas/contapagar/',
+          url: url,
+          urlMode: urlMode,
+          headerMode: headerMode,
+          headers: headers,
           body: { call: body.call, app_key: (body.app_key||'').slice(0,4)+'...', app_secret: '***hidden***', param: body.param }
         }
       };
