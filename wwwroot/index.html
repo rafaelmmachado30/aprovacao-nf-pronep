@@ -1032,7 +1032,7 @@ window.solChat = (function() {
     return '<div class="sol-box collapsed" onclick="solChat.toggle()">'+
       '<div class="sol-header">'+
         '<div class="sol-avatar">S</div>'+
-        '<div class="sol-title"><h4>Peça à SOL ✨</h4><p>Sua assistente IA — listar fila, propor aprovações, detectar anomalias.</p></div>'+
+        '<div class="sol-title"><h4>Peça à SAN ✨</h4><p>Sua assistente IA — listar fila, propor aprovações, detectar anomalias.</p></div>'+
         '<button class="sol-toggle" onclick="event.stopPropagation();solChat.toggle()">Abrir</button>'+
       '</div></div>';
   }
@@ -1058,9 +1058,9 @@ window.solChat = (function() {
       var exportBtn = ehRelatorio
         ? '<div class="sol-msg-actions"><button class="sol-export-btn" onclick="solChat.exportarPDF('+idx+')">📄 Exportar PDF</button></div>'
         : '';
-      return '<div class="sol-msg"><div class="sol-msg-sol">SOL</div><div class="sol-msg-content">'+md(m.content)+actions+exportBtn+'</div></div>';
+      return '<div class="sol-msg"><div class="sol-msg-sol">SAN</div><div class="sol-msg-content">'+md(m.content)+actions+exportBtn+'</div></div>';
     }).join('');
-    var loading = state.busy ? '<div class="sol-loading">SOL está pensando...</div>' : '';
+    var loading = state.busy ? '<div class="sol-loading">SAN está pensando...</div>' : '';
     var sugHtml = state.history.length === 0
       ? '<div class="sol-suggestions">' + sugestoes.map(function(s){
           return '<button class="sol-suggestion" onclick="solChat.sendText(\''+s.replace(/'/g,"\\'")+'\')">'+s+'</button>';
@@ -1069,13 +1069,13 @@ window.solChat = (function() {
     return '<div class="sol-box">'+
       '<div class="sol-header">'+
         '<div class="sol-avatar">S</div>'+
-        '<div class="sol-title"><h4>SOL — sua assistente</h4><p>Posso listar sua fila, resumir aprovações, propor aprovar/rejeitar (com sua confirmação).</p></div>'+
+        '<div class="sol-title"><h4>SAN — sua assistente</h4><p>Posso listar sua fila, resumir aprovações, propor aprovar/rejeitar (com sua confirmação).</p></div>'+
         '<button class="sol-toggle" onclick="solChat.toggle()">Fechar</button>'+
       '</div>'+
       '<div class="sol-body">'+
         (msgsHtml ? '<div class="sol-messages" id="sol-msgs">'+msgsHtml+'</div>' : '')+
         '<div class="sol-input-row">'+
-          '<input id="sol-input" type="text" placeholder="Pergunte algo ou diga: SOL, aprove a NF 1234..." onkeydown="if(event.key===\'Enter\')solChat.send()" '+(state.busy?'disabled':'')+'>'+
+          '<input id="sol-input" type="text" placeholder="Pergunte algo ou diga: SAN, aprove a NF 1234..." onkeydown="if(event.key===\'Enter\')solChat.send()" '+(state.busy?'disabled':'')+'>'+
           '<button id="sol-mic" class="sol-mic-btn" onclick="solChat.gravar()" '+(state.busy?'disabled':'')+' title="Ditar por voz">🎤</button>'+
           '<button onclick="solChat.send()" '+(state.busy?'disabled':'')+'>'+(state.busy?'...':'Enviar')+'</button>'+
         '</div>'+
@@ -1122,9 +1122,9 @@ window.solChat = (function() {
       });
       var data = await resp.json().catch(function(){return{};});
       if (!resp.ok) {
-        state.history.push({ role: 'assistant', content: '❌ ' + (data.error || 'Falha ao chamar SOL.') + (data.detail ? '\n\n' + data.detail : '') });
+        state.history.push({ role: 'assistant', content: '❌ ' + (data.error || 'Falha ao chamar SAN.') + (data.detail ? '\n\n' + data.detail : '') });
       } else {
-        state.history.push({ role: 'assistant', content: data.resposta || '(SOL não respondeu)', actions: data.acoes_propostas || [] });
+        state.history.push({ role: 'assistant', content: data.resposta || '(SAN não respondeu)', actions: data.acoes_propostas || [] });
         // Se a SOL propos uma acao, abre o modal de confirmacao
         if (Array.isArray(data.acoes_propostas) && data.acoes_propostas.length > 0) {
           setTimeout(function(){ abrirModalAcao(data.acoes_propostas[0]); }, 350);
@@ -1147,7 +1147,7 @@ window.solChat = (function() {
     }
     try {
       var url = tipo === 'aprovacao' ? '/api/AprovarNota' : '/api/RejeitarNota';
-      var body = tipo === 'aprovacao' ? { id: id } : { id: id, motivo: motivo || 'Rejeitada via SOL' };
+      var body = tipo === 'aprovacao' ? { id: id } : { id: id, motivo: motivo || 'Rejeitada via SAN' };
       var r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(body) });
       var data = await r.json().catch(function(){return{};});
       if (r.ok) {
@@ -1195,7 +1195,7 @@ window.solChat = (function() {
     var conteudoHtml = md(msg.content);
     var LOGO_URL = window.location.origin + '/pronep-logo.png';
     // Monta documento HTML standalone — papel timbrado Pronep
-    var doc = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório SOL — '+dataCurta+'</title>'+
+    var doc = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Relatório SAN — '+dataCurta+'</title>'+
       '<style>'+
         '@page { margin: 0; size: A4; }'+
         '* { box-sizing: border-box; }'+
@@ -1256,7 +1256,7 @@ window.solChat = (function() {
           '<button onclick="window.print()">🖨️ Imprimir / Salvar PDF</button>'+
           '<button class="secondary" onclick="window.close()">Fechar</button>'+
         '</div>'+
-        '<div class="watermark">SOL</div>'+
+        '<div class="watermark">SAN</div>'+
         '<div class="page">'+
           /* Cabecalho com logo Pronep */
           '<div class="brand-header">'+
@@ -1265,7 +1265,7 @@ window.solChat = (function() {
           '</div>'+
           /* Titulo */
           '<div class="report-title">'+
-            '<div class="subtitle">Relatório SOL</div>'+
+            '<div class="subtitle">Relatório SAN</div>'+
             '<h1>Assistente IA · Análise de Notas Fiscais</h1>'+
           '</div>'+
           /* Bloco identificacao */
@@ -1283,7 +1283,7 @@ window.solChat = (function() {
           /* Rodape institucional */
           '<div class="brand-footer">'+
             '<div class="cities">Rio de Janeiro · São Paulo · Espírito Santo</div>'+
-            '<div>Gerado pela SOL — assistente IA do sistema de Aprovação de NF Pronep · <span class="url">www.pronep.com.br</span></div>'+
+            '<div>Gerado pela SAN — assistente IA do sistema de Aprovação de NF Pronep · <span class="url">www.pronep.com.br</span></div>'+
           '</div>'+
         '</div>'+
       '</body></html>';
@@ -1367,7 +1367,7 @@ window.solChat = (function() {
       btn.classList.remove('gravando');
       btn.textContent = '🎤';
       btn.title = 'Ditar por voz';
-      inp.placeholder = 'Pergunte algo ou diga: SOL, aprove a NF 1234...';
+      inp.placeholder = 'Pergunte algo ou diga: SAN, aprove a NF 1234...';
       // AUTO-ENVIO: se houve transcricao final, envia direto pra SOL
       // (a SOL ja exibe um modal de confirmacao pra acoes destrutivas)
       if (finalTranscript && finalTranscript.trim().length > 2) {
@@ -1406,7 +1406,7 @@ window.solChat = (function() {
     modal.id = 'sol-modal-overlay';
     modal.innerHTML =
       '<div class="sol-modal" onclick="event.stopPropagation()">'+
-        '<div class="sol-modal-header"><h3><span style="font-size:18px">'+headerIcon+'</span> SOL — Confirmação necessária</h3></div>'+
+        '<div class="sol-modal-header"><h3><span style="font-size:18px">'+headerIcon+'</span> SAN — Confirmação necessária</h3></div>'+
         '<div class="sol-modal-body">'+
           '<p class="sol-modal-pergunta">'+pergunta+'</p>'+
           '<div class="sol-modal-dados">'+
