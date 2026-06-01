@@ -666,6 +666,71 @@
 </div>
 <style>
   /* === SOL — Assistente IA === */
+  /* === SAN — Floating Action Button (FAB) === */
+  .san-fab {
+    position: fixed; bottom: 24px; right: 24px;
+    width: 60px; height: 60px;
+    background: linear-gradient(135deg, #1F4E79 0%, #27AAE1 100%);
+    color: #fff; border: 0; border-radius: 50%;
+    box-shadow: 0 6px 18px rgba(31,78,121,0.35);
+    cursor: pointer; z-index: 9998;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 700;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+  .san-fab:hover { transform: scale(1.08); box-shadow: 0 8px 22px rgba(31,78,121,0.45); }
+  .san-fab:active { transform: scale(0.96); }
+  .san-fab.hidden { display: none !important; }
+  .san-fab .fab-icon { font-size: 22px; line-height: 1; letter-spacing: 1px; }
+  .san-panel-overlay {
+    position: fixed; inset: 0; background: rgba(31,78,121,0.18);
+    z-index: 9998; opacity: 0; pointer-events: none;
+    transition: opacity 0.25s ease;
+  }
+  .san-panel-overlay.open { opacity: 1; pointer-events: auto; }
+  .san-panel {
+    position: fixed; top: 0; right: 0; bottom: 0;
+    width: 420px; max-width: 100vw;
+    background: linear-gradient(180deg, #1F4E79 0%, #27AAE1 100%);
+    color: #fff; z-index: 9999;
+    transform: translateX(100%); transition: transform 0.28s ease;
+    display: flex; flex-direction: column;
+    box-shadow: -8px 0 28px rgba(0,0,0,0.18);
+  }
+  .san-panel.open { transform: translateX(0); }
+  .san-panel-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 18px; border-bottom: 1px solid rgba(255,255,255,0.18);
+    flex-shrink: 0;
+  }
+  .san-panel-header .sol-avatar { width: 38px; height: 38px; font-size: 15px; }
+  .san-panel-header .sol-title h4 { font-size: 15px; margin:0; }
+  .san-panel-header .sol-title p { font-size: 11px; opacity: 0.85; margin:2px 0 0; }
+  .san-panel-close {
+    background: rgba(255,255,255,0.18); border: 0; color: #fff;
+    width: 32px; height: 32px; border-radius: 50%;
+    font-size: 18px; cursor: pointer; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .san-panel-close:hover { background: rgba(255,255,255,0.32); }
+  .san-panel-body {
+    flex: 1; overflow-y: auto;
+    padding: 14px 18px 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .san-panel-footer {
+    padding: 12px 18px 16px;
+    border-top: 1px solid rgba(255,255,255,0.18);
+    flex-shrink: 0;
+  }
+  .san-panel-body .sol-messages { max-height: none; margin-bottom: 0; flex: 1; }
+  .san-panel-body .sol-loading { color: #fff; opacity: 0.85; }
+  .san-panel-body .sol-suggestions { margin-top: 4px; }
+  @media (max-width: 720px) {
+    .san-panel { width: 100vw; }
+    .san-fab { bottom: 80px; right: 16px; }
+  }
+
   .sol-box {
     background: linear-gradient(135deg, #1F4E79 0%, #27AAE1 100%);
     border-radius: 12px;
@@ -1084,15 +1149,74 @@ window.solChat = (function() {
   }
 
   function refresh() {
-    var container = document.getElementById('sol-container');
-    if (!container) return;
-    var view = container.getAttribute('data-view') || 'fila-aprovacao';
-    container.innerHTML = state.open ? renderOpen(view) : renderCollapsed();
+    var panel = document.getElementById('san-panel');
+    var overlay = document.getElementById('san-panel-overlay');
+    var fab = document.getElementById('san-fab');
+    var inner = document.getElementById('san-panel-inner');
+    if (!panel || !inner) return;
+    var view = state.viewAtual || 'fila-aprovacao';
     if (state.open) {
-      setTimeout(function(){ var el = document.getElementById('sol-input'); if (el && !state.busy) el.focus(); }, 50);
+      panel.classList.add('open');
+      overlay && overlay.classList.add('open');
+      if (fab) fab.classList.add('hidden');
+      inner.innerHTML = renderPanel(view);
+      setTimeout(function(){ var el = document.getElementById('sol-input'); if (el && !state.busy) el.focus(); }, 60);
       var msgs = document.getElementById('sol-msgs');
       if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    } else {
+      panel.classList.remove('open');
+      overlay && overlay.classList.remove('open');
+      if (fab) fab.classList.remove('hidden');
     }
+  }
+
+  function renderPanel(viewAtual) {
+    var sugestoes = viewAtual === 'aprovadas'
+      ? ['Quanto liberei este mes?', 'Aprovadas hoje', 'Top 5 fornecedores aprovados']
+      : viewAtual === 'fila-aprovacao'
+        ? ['Lista minha fila por vencimento', 'NFs vencendo em D+5', 'Detecte anomalias na minha fila']
+        : viewAtual === 'lancamento'
+          ? ['Como preencho o campo Valor?', 'Como anexar o PDF?', 'O que e a chave de acesso?']
+          : ['Como navego no sistema?', 'Pra que serve esta tela?'];
+    var msgsHtml = state.history.map(function(m, idx){
+      if (m.role === 'user') {
+        return '<div class="sol-msg"><div class="sol-msg-user">Voce</div><div class="sol-msg-content">'+md(m.content)+'</div></div>';
+      }
+      var actions = (m.actions||[]).map(renderAcao).join('');
+      var ehRelatorio = false;
+      if (m.content && !m.content.startsWith('❌')) {
+        var c = m.content;
+        ehRelatorio = (c.indexOf('|') >= 0 && c.match(/\|.*\|/)) || c.length > 300 || ((c.match(/^[-*]\s+/gm) || []).length >= 3);
+      }
+      var exportBtn = ehRelatorio
+        ? '<div class="sol-msg-actions"><button class="sol-export-btn" onclick="solChat.exportarPDF('+idx+')">📄 Exportar PDF</button></div>'
+        : '';
+      return '<div class="sol-msg"><div class="sol-msg-sol">SAN</div><div class="sol-msg-content">'+md(m.content)+actions+exportBtn+'</div></div>';
+    }).join('');
+    var loading = state.busy ? '<div class="sol-loading">SAN esta pensando...</div>' : '';
+    var sugHtml = state.history.length === 0
+      ? '<div class="sol-suggestions">' + sugestoes.map(function(s){
+          return '<button class="sol-suggestion" onclick="solChat.sendText(\''+s.replace(/'/g,"\\'")+'\')">'+s+'</button>';
+        }).join('') + '</div>'
+      : '';
+    return ''+
+      '<div class="san-panel-header">'+
+        '<div class="sol-avatar">S</div>'+
+        '<div class="sol-title" style="flex:1"><h4>SAN — sua assistente</h4><p>Posso ajudar com sua fila, aprovadas, lancamentos e duvidas do sistema.</p></div>'+
+        '<button class="san-panel-close" onclick="solChat.toggle()" title="Fechar">✕</button>'+
+      '</div>'+
+      '<div class="san-panel-body">'+
+        '<div class="sol-messages" id="sol-msgs">'+(msgsHtml || '<div style="color:#647883;font-size:13px;text-align:center;padding:20px 8px">Comece uma conversa abaixo ✨</div>')+'</div>'+
+        loading +
+      '</div>'+
+      '<div class="san-panel-footer">'+
+        sugHtml +
+        '<div class="sol-input-row" style="margin-top:8px">'+
+          '<input id="sol-input" type="text" placeholder="Pergunte algo ou diga: SAN, aprove a NF 1234..." onkeydown="if(event.key===\'Enter\')solChat.send()" '+(state.busy?'disabled':'')+'>'+
+          '<button id="sol-mic" class="sol-mic-btn" onclick="solChat.gravar()" '+(state.busy?'disabled':'')+' title="Ditar por voz">🎤</button>'+
+          '<button onclick="solChat.send()" '+(state.busy?'disabled':'')+'>'+(state.busy?'...':'Enviar')+'</button>'+
+        '</div>'+
+      '</div>';
   }
 
   function toggle() { state.open = !state.open; refresh(); }
@@ -1112,8 +1236,7 @@ window.solChat = (function() {
     state.busy = true;
     refresh();
     try {
-      var view = document.getElementById('sol-container');
-      var viewVal = view ? view.getAttribute('data-view') : 'fila-aprovacao';
+      var viewVal = state.viewAtual || 'fila-aprovacao';
       var resp = await fetch('/api/SolChat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1173,10 +1296,35 @@ window.solChat = (function() {
   }
 
   function mount(viewAtual) {
-    var container = document.getElementById('sol-container');
-    if (!container) return;
-    container.setAttribute('data-view', viewAtual || 'fila-aprovacao');
-    container.innerHTML = state.open ? renderOpen(viewAtual) : renderCollapsed();
+    setView(viewAtual);
+  }
+
+  function setView(viewAtual) {
+    state.viewAtual = viewAtual || 'fila-aprovacao';
+    if (state.open) refresh();
+  }
+
+  function init() {
+    if (document.getElementById('san-fab')) return;
+    var fab = document.createElement('button');
+    fab.id = 'san-fab';
+    fab.className = 'san-fab';
+    fab.title = 'Abrir SAN';
+    fab.innerHTML = '<span class="fab-icon">SAN</span>';
+    fab.onclick = function() { toggle(); };
+    document.body.appendChild(fab);
+
+    var overlay = document.createElement('div');
+    overlay.id = 'san-panel-overlay';
+    overlay.className = 'san-panel-overlay';
+    overlay.onclick = function() { if (state.open) toggle(); };
+    document.body.appendChild(overlay);
+
+    var panel = document.createElement('aside');
+    panel.id = 'san-panel';
+    panel.className = 'san-panel';
+    panel.innerHTML = '<div id="san-panel-inner"></div>';
+    document.body.appendChild(panel);
   }
 
   function exportarPDF(idx) {
@@ -1448,7 +1596,7 @@ window.solChat = (function() {
     fecharModal();
   }
 
-  return { mount: mount, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar, abrirModalAcao: abrirModalAcao, fecharModal: fecharModal, confirmarAcaoModal: confirmarAcaoModal };
+  return { mount: mount, init: init, setView: setView, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar, abrirModalAcao: abrirModalAcao, fecharModal: fecharModal, confirmarAcaoModal: confirmarAcaoModal };
 })();
 
 
@@ -2350,6 +2498,11 @@ document.addEventListener('keydown', (e) => {
 
 function showView(id) {
   currentView = id;
+  // SAN: garante FAB+panel global iniciados e atualiza view atual
+  if (window.solChat) {
+    if (typeof solChat.init === 'function') solChat.init();
+    if (typeof solChat.setView === 'function') solChat.setView(id);
+  }
   const m = menuItems.find(m=>m.id===id) || {label:'Visão'};
   document.getElementById('crumb-view').textContent = m.label;
   // Em mobile, ao trocar de view, fecha o drawer automaticamente
@@ -3165,8 +3318,7 @@ const views = {
     if (!window._filtroFila) {
       window._filtroFila = { nf: '', fornecedor: 'TODOS', unidade: 'TODAS', diretoria: 'TODAS', solicitante: 'TODOS' };
     }
-    setTimeout(function(){ if (window.solChat) window.solChat.mount('fila-aprovacao'); }, 0);
-    return '<div id="sol-container"></div>' + renderFilaAprovacaoView();
+    return renderFilaAprovacaoView();
   },
 
   'minhas-nfs': () => {
@@ -3352,8 +3504,7 @@ const views = {
 
   rejeitadas: () => {
     const rj = notas.filter(n => n.status === 'rejeitada' || n.status === 'duplicada');
-    return `<div id="sol-container"></div>
-      <h2>Notas Rejeitadas</h2>
+    return `<h2>Notas Rejeitadas</h2>
       <div class="view-sub">NFs rejeitadas por gestor ou automaticamente pelo sistema. Quem lançou recebeu e-mail + Teams.</div>
       <!-- Versao desktop: tabela -->
       <div class="card data-table-desktop">
