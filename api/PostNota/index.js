@@ -275,7 +275,7 @@ async function resolveAprovador(client, siteId, listDirId, unidade, diretoria) {
 // IGNORA NFs com status 'Rejeitada' — afinal foram rejeitadas justamente porque tinham
 // problema, entao o fluxo natural eh o user corrigir e reenviar. Bloquear isso seria
 // um falso positivo.
-async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj, numero, serie) {
+async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj, numero, serie, chaveAcesso) {
   const resp = await client
     .api(`/sites/${siteId}/lists/${listNotasId}/items?expand=fields&$top=999`)
     .get();
