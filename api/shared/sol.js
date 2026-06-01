@@ -32,10 +32,9 @@
  */
 
 require('isomorphic-fetch');
-// Anthropic Claude (primary)
-const Anthropic = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk');
-// OpenAI (fallback)
-const OpenAI = require('openai');
+// SDKs sao carregados LAZY (dentro dos getters) pra que erro de require de
+// um nao crashe a Function inteira. Se @anthropic-ai/sdk nao tiver no
+// node_modules, getAnthropic() retorna null e cai no fallback OpenAI.
 
 const MODEL_HAIKU = process.env.ANTHROPIC_MODEL_HAIKU || 'claude-haiku-4-5-20251001';
 const MODEL_SONNET = process.env.ANTHROPIC_MODEL_SONNET || 'claude-sonnet-4-6';
@@ -46,21 +45,47 @@ const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 // CLIENTES (Anthropic primario, OpenAI fallback)
 // =============================================================================
 let _anthropic = null;
+let _anthropicLoadError = null;
 function getAnthropic() {
   if (_anthropic) return _anthropic;
+  if (_anthropicLoadError) return null; // ja tentou e falhou, nao tenta de novo
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return null;
-  _anthropic = new Anthropic({ apiKey: apiKey });
-  return _anthropic;
+  try {
+    const mod = require('@anthropic-ai/sdk');
+    const Anthropic = mod.default || mod.Anthropic || mod;
+    _anthropic = new Anthropic({ apiKey: apiKey });
+    return _anthropic;
+  } catch (e) {
+    _anthropicLoadError = e;
+    console.error('[SOL] Erro ao carregar @anthropic-ai/sdk:', e && e.message);
+    return null;
+  }
 }
 
 let _openai = null;
+let _openaiLoadError = null;
 function getOpenAI() {
   if (_openai) return _openai;
+  if (_openaiLoadError) return null;
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
-  _openai = new OpenAI({ apiKey: apiKey });
-  return _openai;
+  try {
+    const OpenAI = require('openai');
+    _openai = new OpenAI({ apiKey: apiKey });
+    return _openai;
+  } catch (e) {
+    _openaiLoadError = e;
+    console.error('[SOL] Erro ao carregar openai:', e && e.message);
+    return null;
+  }
+}
+
+function getLoadErrors() {
+  return {
+    anthropic: _anthropicLoadError ? { message: _anthropicLoadError.message, type: _anthropicLoadError.constructor && _anthropicLoadError.constructor.name } : null,
+    openai: _openaiLoadError ? { message: _openaiLoadError.message, type: _openaiLoadError.constructor && _openaiLoadError.constructor.name } : null
+  };
 }
 
 // =============================================================================
@@ -669,7 +694,8 @@ async function runSol(history, userMessage, user, opts) {
   // Fallback OpenAI
   const openai = getOpenAI();
   if (!openai) {
-    throw new Error('Nenhum provider IA disponivel: ANTHROPIC_API_KEY e OPENAI_API_KEY ambos vazios. anthropic_error=' + JSON.stringify(anthropicError));
+    const loadErrs = getLoadErrors();
+    throw new Error('Nenhum provider IA disponivel. anthropic_error=' + JSON.stringify(anthropicError) + ' load_errors=' + JSON.stringify(loadErrs));
   }
   const result = await runSolOpenAI(openai, history, userMessage, systemPrompt, ctx, maxIter);
   // Anexa o erro do Anthropic no response pra debug
@@ -817,18 +843,34 @@ async function runSolOpenAI(openai, history, userMessage, systemPrompt, ctx, max
       let result;
       if (!impl) {
         result = { erro: 'tool desconhecida: ' + fnName };
+
       } else {
-        try { result = await impl(args, ctx); }
-        catch (e) { result = { erro: 'falha ao executar ' + fnName + ': ' + (e.message || String(e)) }; }
+        try {
+          result = await impl(args, ctx);
+        } catch (e) {
+          result = { erro: 'falha ao executar ' + fnName + ': ' + (e.message || String(e)) };
+        }
       }
       toolCallsDebug.push({
         tool: fnName,
         args: args,
         resultSummary: result && result.erro ? { erro: result.erro } :
-                       (result && Array.isArray(result.notas) ? { totalNotas: result.notas.length } :
-                       (result && result.id ? { id: result.id, numero: result.numero, fornecedor: result.fornecedor } : { tipo: typeof result }))
+                       (result && Array.isArray(result.notas) ? { totalNotas: result.notas.length, primeiras3: result.notas.slice(0,3).map(n => ({ id: n.id, numero: n.numero })) } :
+                       (result && result.id ? { id: result.id, numero: result.numero, fornecedor: result.fornecedor } :
+                       { tipo: typeof result }))
       });
       if (result && result.confirmar_no_frontend) {
         acoesPropostas.push(result);
       }
-      messa
+      messages.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        content: JSON.stringify(result)
+      });
+    }
+  }
+
+  return { resposta: resposta, acoes_propostas: acoesPropostas, tokens: totalTokens, model: OPENAI_MODEL, tool_calls_debug: toolCallsDebug, provider: 'openai-fallback' };
+}
+
+module.exports = { runSol, DEFAULT_MODEL, getAnthropic, getOpenAI, getLoadErrors };
