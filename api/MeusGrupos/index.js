@@ -24,6 +24,8 @@ const { TokenCredentialAuthenticationProvider } =
 const GROUP_TO_ROLE = {
   '01d540d1-8596-42d0-9a20-de5c361c7c96': 'submitter',
   '480a1595-bdc3-492a-9ef2-317f148a237e': 'administrador',
+  // TODO: substituir pelo OID real do grupo PRONEP-NF-TI quando criado no Entra ID
+  'PLACEHOLDER-OID-TI-PRONEP-NF': 'ti',
   'c2a73d16-4659-4b3c-93a1-0c0fbfaaaa96': 'financeiro_nf',
   '2d9f5bcf-2ae0-494e-957b-a1c69016664d': 'gestor_suprimentos',
   '6b77405b-ba89-47ee-af21-58ec19bb3ff7': 'gestor_financeira',
