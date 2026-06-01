@@ -729,6 +729,16 @@
   .san-panel-body .sol-messages { max-height: none; margin-bottom: 0; }
   .san-panel-body .sol-loading { color: #fff; opacity: 0.85; }
   .san-panel-body .sol-suggestions { margin-top: 4px; }
+  .san-quick-action {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: linear-gradient(135deg, #1F4E79 0%, #27AAE1 100%);
+    color: #fff !important; text-decoration: none;
+    padding: 8px 14px; border-radius: 18px;
+    font-size: 12px; font-weight: 600;
+    transition: transform 0.15s, box-shadow 0.15s;
+    cursor: pointer;
+  }
+  .san-quick-action:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(31,78,121,0.3); }
   @media (max-width: 720px) {
     .san-panel { width: 100vw; }
     .san-fab { bottom: 80px; right: 16px; }
@@ -1194,7 +1204,17 @@ window.solChat = (function() {
       var exportBtn = ehRelatorio
         ? '<div class="sol-msg-actions"><button class="sol-export-btn" onclick="solChat.exportarPDF('+idx+')">📄 Exportar PDF</button></div>'
         : '';
-      return '<div class="sol-msg"><div class="sol-msg-sol">SAN</div><div class="sol-msg-content">'+md(m.content)+actions+exportBtn+'</div></div>';
+      var quickActionsHtml = '';
+      if (Array.isArray(m.quickActions) && m.quickActions.length > 0) {
+        quickActionsHtml = '<div class="sol-msg-actions" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">' +
+          m.quickActions.map(function(qa){
+            return '<a href="'+qa.url+'" target="_blank" rel="noopener" class="san-quick-action">'+
+              '<span style="font-size:15px">'+(qa.icon||'➜')+'</span>'+
+              '<span>'+qa.label+'</span></a>';
+          }).join('') +
+          '</div>';
+      }
+      return '<div class="sol-msg"><div class="sol-msg-sol">SAN</div><div class="sol-msg-content">'+md(m.content)+actions+quickActionsHtml+exportBtn+'</div></div>';
     }).join('');
     var loading = state.busy ? '<div class="sol-loading">SAN esta pensando...</div>' : '';
     var sugHtml = state.history.length === 0

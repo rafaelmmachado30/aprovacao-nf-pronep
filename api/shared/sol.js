@@ -191,7 +191,7 @@ function buildSystemPrompt(user, viewAtual) {
       'REGRAS DESTA TELA (Notas Aprovadas):',
       '  - Foco em RELATORIOS pro financeiro. Use tabelas markdown e agregue por fornecedor, diretoria, periodo ou unidade conforme o usuario pedir.',
       '  - Aqui as NFs ja foram aprovadas — NAO ha propor_aprovacao/rejeicao. Se o usuario pedir pra aprovar, oriente a ir pra Fila de Aprovacao.',
-      '  - Para abrir PDF: use a tool abrir_nf (acao_imediata=abrir_pdf, abre em nova aba sem confirmacao). Se o usuario disser apenas o numero, chame detalhes_nf primeiro pra pegar o id.',
+      '  - Para abrir PDF: use a tool abrir_nf. O frontend renderiza um BOTAO clicavel "Abrir PDF" na sua resposta — voce NAO abre nada automaticamente. Diga algo tipo: "Pronto, clica no botao abaixo pra abrir o PDF." NUNCA diga "abri o PDF" — quem abre eh o usuario clicando no botao.',
       '  - Para marcar como processado: use a tool propor_marcar_processado (chame detalhes_nf primeiro pra obter o id). O frontend abre modal de confirmacao automaticamente.',
       '  - CRITICO: quando o usuario disser "abre/ver PDF da NF X", chame detalhes_nf(numero=X) + abrir_nf(id=...) na mesma turn. Resposta em texto: BREVE tipo "Abrindo o PDF da NF X..." Sem perguntas.',
       '  - CRITICO: quando o usuario disser "marca a NF X como processada", chame detalhes_nf(numero=X) + propor_marcar_processado(id=...). Resposta breve: "Abrindo a confirmacao pra marcar a NF X como processada..."',
@@ -199,7 +199,7 @@ function buildSystemPrompt(user, viewAtual) {
       'EXEMPLOS:',
       '  User: "Quanto liberei este mes?" → listar_aprovadas(periodo=este_mes), soma total.',
       '  User: "Top 5 fornecedores aprovados" → agregar_por_fornecedor(escopo=aprovadas, top_n=5).',
-      '  User: "Abre a NF 1234" → detalhes_nf(numero=1234) + abrir_nf(id=...) na mesma turn.',
+      '  User: "Abre a NF 1234" → detalhes_nf(numero=1234) + abrir_nf(id=...) na mesma turn. Resposta: "Pronto, clica no botao abaixo pra abrir o PDF da NF 1234."',
       '  User: "Marca a NF 1234 como processada" → detalhes_nf(numero=1234) + propor_marcar_processado(id=...).'
     ];
   } else if (viewAtual === 'lancamento') {
