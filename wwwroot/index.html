@@ -1702,7 +1702,7 @@ const menuItems = [
         const escopo = escopoDoGestor(currentPersona.email);
         return pend.filter(n => escopo.some(e => e.unidade === n.unidade && e.diretoria === n.diretoria)).length;
       }
-      if (currentPersona.shortRole === 'Submitter') return pend.filter(n => n.lancadoPor === currentPersona.name).length;
+      if (currentPersona.shortRole === 'Submitter') return pend.filter(n => isMinhaNF(n)).length;
       return pend.length;
     }},
   { id: 'minhas-nfs',        label: 'Minhas NFs',                 icon: ICONS.minhas },
@@ -1838,6 +1838,18 @@ function loginCheckEmail() {
   setTimeout(() => {
     loginAs(u, email);
   }, 900);
+}
+
+// Helper: identifica se uma NF foi lancada pelo usuario logado.
+// Compatibilidade: aceita comparacao por email (formato real do backend)
+// ou por nome (legacy de mocks antigos).
+function isMinhaNF(n) {
+  if (!n || !currentPersona) return false;
+  const lp = String(n.lancadoPor || '').toLowerCase().trim();
+  if (!lp) return false;
+  const email = String(currentPersona.email || '').toLowerCase().trim();
+  const name = String(currentPersona.name || '').toLowerCase().trim();
+  return (email && lp === email) || (name && lp === name);
 }
 
 function loginAs(userData, emailLogin) {
@@ -3522,7 +3534,7 @@ const views = {
   },
 
   'minhas-nfs': () => {
-    const minhas = notas.filter(n => n.lancadoPor === currentPersona.name);
+    const minhas = notas.filter(n => isMinhaNF(n));
     return `
       <h2>Minhas Notas Fiscais</h2>
       <div class="view-sub">Todas as NFs lançadas por você, em qualquer status.</div>
@@ -3738,7 +3750,7 @@ const views = {
   },
 
   'rejeitadas-minhas': () => {
-    const rj = notas.filter(n => (n.status === 'rejeitada' || n.status === 'duplicada') && n.lancadoPor === currentPersona.name);
+    const rj = notas.filter(n => (n.status === 'rejeitada' || n.status === 'duplicada') && isMinhaNF(n));
     return `
       <h2>Minhas Notas Rejeitadas</h2>
       <div class="view-sub">NFs suas que precisam ser revisadas e reenviadas.</div>
@@ -4796,7 +4808,7 @@ function renderFilaAprovacaoView() {
       escopoLabel = `Seu escopo de aprovação: ${descreveEscopoGestor(escopo)}`;
     }
   } else if (currentPersona.shortRole === 'Submitter') {
-    base = base.filter(n => n.lancadoPor === currentPersona.name);
+    base = base.filter(n => isMinhaNF(n));
     escopoLabel = `Suas NFs pendentes de aprovação`;
   } else {
     escopoLabel = `Todas as NFs pendentes nas 3 unidades`;
