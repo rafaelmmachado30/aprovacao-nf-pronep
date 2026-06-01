@@ -11,6 +11,7 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
+const { getUserRoles } = require('../shared/userRoles');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -95,7 +96,15 @@ module.exports = async function (context, req) {
       return;
     }
     const userEmail = (user.email || '').toLowerCase();
-    const userRoles = (user.claims && user.claims.roles) || (user.source === 'easy-auth' ? readClientPrincipalRoles(req) : []);
+    // userRoles vem de 3 fontes (em ordem de preferencia):
+    //  1. claims.roles do JWT (Teams SSO ou claims customizados)
+    //  2. principal.userRoles do Easy Auth (SWA — geralmente vazio)
+    //  3. Graph API consultando /users/{user}/transitiveMemberOf (autoritativo)
+    // O Graph eh a fonte de verdade pra grupos AAD — Easy Auth nao popula isso por default.
+    let userRoles = (user.claims && user.claims.roles) || (user.source === 'easy-auth' ? readClientPrincipalRoles(req) : []);
+    if (!Array.isArray(userRoles) || userRoles.length === 0) {
+      userRoles = await getUserRoles(user);
+    }
     diag.userEmail = userEmail;
     diag.userRoles = userRoles;
 
