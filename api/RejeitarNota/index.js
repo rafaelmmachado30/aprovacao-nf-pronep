@@ -219,26 +219,52 @@ module.exports = async function (context, req) {
     const f = normalizeFields(item.fields || {}, invColMap);
     diag.item = { Title: f.Title, Status: f.Status, Unidade: f.Unidade, Diretoria: f.Diretoria, AprovadorAtual: f.AprovadorAtual };
 
-    // RBAC
-    const isAdmin = aprovadorEmail === 'rafael.machado@pronep.com.br';
-    const isAprovadorAtribuido = (f.AprovadorAtual || '').toLowerCase() === aprovadorEmail;
-    if (!isAdmin && !isAprovadorAtribuido) {
-      return errResp(context, 403, 'Voce nao eh o aprovador desta NF', { aprovadorAtual: f.AprovadorAtual, voce: aprovadorEmail });
+    // RBAC + detecta perfil
+    function readPrincipalRolesLocal(req) {
+      const h = req.headers && req.headers['x-ms-client-principal'];
+      if (!h) return [];
+      try {
+        const p = JSON.parse(Buffer.from(h, 'base64').toString('utf-8'));
+        return p.userRoles || [];
+      } catch (e) { return []; }
     }
-    if (f.Status === 'Aprovada')  return errResp(context, 409, 'NF ja foi aprovada, nao pode ser rejeitada');
+    const userRoles = (user.claims && user.claims.roles) || readPrincipalRolesLocal(req);
+    const isAdmin = aprovadorEmail === 'rafael.machado@pronep.com.br' || userRoles.includes('administrador');
+    const isFinanceiro = userRoles.includes('financeiro_nf');
+    const isAprovadorAtribuido = (f.AprovadorAtual || '').toLowerCase() === aprovadorEmail;
+
+    // ESTORNO: se NF ja esta Aprovada, SO admin ou financeiro pode rejeitar (estornar)
+    const ehEstorno = f.Status === 'Aprovada';
+    if (ehEstorno) {
+      if (!isAdmin && !isFinanceiro) {
+        return errResp(context, 403, 'NF ja aprovada — apenas Admin ou Financeiro pode estornar', { status: f.Status });
+      }
+    } else {
+      // Fluxo normal: rejeicao de NF pendente
+      if (!isAdmin && !isAprovadorAtribuido) {
+        return errResp(context, 403, 'Voce nao eh o aprovador desta NF', { aprovadorAtual: f.AprovadorAtual, voce: aprovadorEmail });
+      }
+    }
     if (f.Status === 'Rejeitada') return errResp(context, 409, 'NF ja foi rejeitada');
+    diag.ehEstorno = ehEstorno;
 
     diag.step = 'find_pdf';
+    // Se estorno (status era Aprovada): busca em "Notas Aprovadas" (sem subpastas, pasta plana legacy).
+    // Se rejeicao normal: busca em "Notas Fiscais/Pendentes/{Unidade}/Diretoria {Diretoria}".
     const folderPendente = `Notas Fiscais/Pendentes/${f.Unidade}/Diretoria ${f.Diretoria}`;
-    // Pasta plana (sem subpastas Unidade/Diretoria) como o Rafa pediu
+    const folderAprovada = `Notas Aprovadas`;
     const folderRejeitada = `Notas Fiscais/Rejeitadas`;
+    const folderOrigem = ehEstorno ? folderAprovada : folderPendente;
+    diag.folderOrigem = folderOrigem;
     let pdfTarget = null;
     try {
-      const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folderPendente}:/children`).get();
+      const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folderOrigem}:/children`).get();
       const files = (folderListResp.value || []).filter(x => x.file);
       const numero = String(f.NumeroNF || '');
-      pdfTarget = files.find(x => x.name && x.name.startsWith(numero + '_'));
-      if (!pdfTarget && files.length > 0) {
+      // Match: starts with numero+_ (padrao novo) ou contem numero (padrao legado em Aprovadas)
+      pdfTarget = files.find(x => x.name && (x.name.startsWith(numero + '_') || x.name.includes('_' + numero + '_')));
+      if (!pdfTarget && files.length > 0 && !ehEstorno) {
+        // Fallback APENAS pra fluxo normal (em estorno, sem match exato eh mais seguro nao deletar nada aleatorio)
         pdfTarget = files.sort((a,b) => (b.lastModifiedDateTime||'').localeCompare(a.lastModifiedDateTime||''))[0];
       }
     } catch (e) {
@@ -246,7 +272,8 @@ module.exports = async function (context, req) {
     }
 
     diag.step = 'watermark_and_move';
-    const motivoCompletoStr = observacao ? `${motivo} — ${observacao}` : motivo;
+    const motivoBase = observacao ? `${motivo} — ${observacao}` : motivo;
+    const motivoCompletoStr = ehEstorno ? `[ESTORNO PELO FINANCEIRO] ${motivoBase}` : motivoBase;
     let urlPDFRejeitado = '';
     if (pdfTarget) {
       // Baixa, aplica watermark REJEITADA, sobe pra Rejeitadas, deleta original
@@ -278,9 +305,14 @@ module.exports = async function (context, req) {
     }, colMap, colTypes);
     await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(patchPayload);
 
-    // Dispara notificacao pro submitter (quem lancou)
+    // Dispara notificacao pro submitter (quem lancou).
+    // Se for ESTORNO, notifica tambem o gestor que aprovou originalmente (AprovadorAtual da NF).
     diag.step = 'notify';
-    await notificar('rejeitada', [f.LancadoPor || aprovadorEmail], {
+    const destinatarios = [f.LancadoPor || aprovadorEmail];
+    if (ehEstorno && f.AprovadorAtual && (f.AprovadorAtual || '').toLowerCase() !== (f.LancadoPor || '').toLowerCase()) {
+      destinatarios.push(f.AprovadorAtual);
+    }
+    await notificar('rejeitada', destinatarios, {
       numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor,
       vencimento: f.DataVencimento, unidade: f.Unidade, diretoria: f.Diretoria,
       aprovador: aprovadorEmail, submitter: f.LancadoPor,
@@ -291,7 +323,7 @@ module.exports = async function (context, req) {
     auditRegistrar(user, 'rejeicao',
       { tipo: 'nf', id: itemId, numero: f.NumeroNF },
       'sucesso',
-      { fornecedor: f.CNPJFornecedor, valor: f.Valor, motivo: motivoCompletoStr, unidade: f.Unidade, diretoria: f.Diretoria }
+      { fornecedor: f.CNPJFornecedor, valor: f.Valor, motivo: motivoCompletoStr, unidade: f.Unidade, diretoria: f.Diretoria, posAprovacao: ehEstorno, gestorOriginal: ehEstorno ? f.AprovadorAtual : undefined }
     ).catch(function(){});
 
     context.res = {
