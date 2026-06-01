@@ -714,16 +714,19 @@
   }
   .san-panel-close:hover { background: rgba(255,255,255,0.32); }
   .san-panel-body {
-    flex: 1; overflow-y: auto;
+    flex: 1 1 0;        /* cresce E encolhe — preenche espaco entre header e footer */
+    min-height: 0;      /* CRITICO: permite shrink em flex (sem isso, cresce alem do parent) */
+    overflow-y: auto;   /* scroll vertical interno */
     padding: 14px 18px 12px;
-    display: flex; flex-direction: column; gap: 10px;
+    display: block;     /* nao usar flex aqui — deixa o conteudo fluir naturalmente */
   }
   .san-panel-footer {
     padding: 12px 18px 16px;
     border-top: 1px solid rgba(255,255,255,0.18);
-    flex-shrink: 0;
+    flex-shrink: 0;     /* footer sempre visivel */
+    background: rgba(0,0,0,0.08);
   }
-  .san-panel-body .sol-messages { max-height: none; margin-bottom: 0; flex: 1; }
+  .san-panel-body .sol-messages { max-height: none; margin-bottom: 0; }
   .san-panel-body .sol-loading { color: #fff; opacity: 0.85; }
   .san-panel-body .sol-suggestions { margin-top: 4px; }
   @media (max-width: 720px) {
@@ -1248,9 +1251,18 @@ window.solChat = (function() {
         state.history.push({ role: 'assistant', content: '❌ ' + (data.error || 'Falha ao chamar SAN.') + (data.detail ? '\n\n' + data.detail : '') });
       } else {
         state.history.push({ role: 'assistant', content: data.resposta || '(SAN não respondeu)', actions: data.acoes_propostas || [] });
-        // Se a SOL propos uma acao, abre o modal de confirmacao
+        // SAN propos acao: pode ser imediata (abrir PDF) ou com confirmacao (aprovacao/rejeicao/processado)
         if (Array.isArray(data.acoes_propostas) && data.acoes_propostas.length > 0) {
-          setTimeout(function(){ abrirModalAcao(data.acoes_propostas[0]); }, 350);
+          var ac = data.acoes_propostas[0];
+          if (ac.acao_imediata === 'abrir_pdf' && ac.id) {
+            // Abre o PDF direto em nova aba (acao nao-destrutiva)
+            setTimeout(function(){
+              window.open('/api/AbrirPdfDaNota?id=' + encodeURIComponent(ac.id), '_blank');
+            }, 200);
+          } else {
+            // Acao com confirmacao (aprovacao, rejeicao, processado): abre modal
+            setTimeout(function(){ abrirModalAcao(ac); }, 350);
+          }
         }
       }
     } catch (e) {
@@ -1269,12 +1281,20 @@ window.solChat = (function() {
       if (cb) cb.textContent = 'Processando...';
     }
     try {
-      var url = tipo === 'aprovacao' ? '/api/AprovarNota' : '/api/RejeitarNota';
-      var body = tipo === 'aprovacao' ? { id: id } : { id: id, motivo: motivo || 'Rejeitada via SAN' };
+      var url, body, okMsg;
+      if (tipo === 'aprovacao') {
+        url = '/api/AprovarNota'; body = { id: id }; okMsg = '✓ NF aprovada';
+      } else if (tipo === 'rejeicao') {
+        url = '/api/RejeitarNota'; body = { id: id, motivo: motivo || 'Rejeitada via SAN' }; okMsg = '✓ NF rejeitada';
+      } else if (tipo === 'processado') {
+        url = '/api/MarcarProcessado'; body = { id: id, processado: true }; okMsg = '✓ NF marcada como processada';
+      } else {
+        url = '/api/AprovarNota'; body = { id: id }; okMsg = '✓ Acao concluida';
+      }
       var r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, credentials: 'include', body: JSON.stringify(body) });
       var data = await r.json().catch(function(){return{};});
       if (r.ok) {
-        state.history.push({ role: 'assistant', content: (tipo==='aprovacao'?'✓ NF aprovada':'✓ NF rejeitada') + ' com sucesso. ID: ' + id });
+        state.history.push({ role: 'assistant', content: okMsg + ' com sucesso. ID: ' + id });
         try { if (typeof carregarNotasReais === 'function') await carregarNotasReais(); } catch (e2) {}
       } else {
         state.history.push({ role: 'assistant', content: '❌ Falha: ' + (data.error || ('HTTP '+r.status)) });

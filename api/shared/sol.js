@@ -102,8 +102,8 @@ const VIEW_SCOPES = {
   },
   'aprovadas': {
     titulo: 'Notas Aprovadas',
-    foco: 'RELATORIOS pro financeiro, agregacoes por fornecedor/periodo/diretoria, abrir NFs aprovadas e marcar processado. Aqui NAO HA aprovar/rejeitar — essas NFs ja passaram.',
-    tools: ['listar_aprovadas','detalhes_nf','agregar_por_fornecedor']
+    foco: 'RELATORIOS pro financeiro, agregacoes por fornecedor/periodo/diretoria, abrir PDFs de NFs aprovadas e propor marcar como processado. Aqui NAO HA aprovar/rejeitar — essas NFs ja passaram.',
+    tools: ['listar_aprovadas','detalhes_nf','agregar_por_fornecedor','abrir_nf','propor_marcar_processado']
   },
   'lancamento': {
     titulo: 'Lancamento de NF',
@@ -189,15 +189,18 @@ function buildSystemPrompt(user, viewAtual) {
     specific = [
       '',
       'REGRAS DESTA TELA (Notas Aprovadas):',
-      '  - Foco em RELATORIOS pro financeiro. Use tabelas markdown e agregue por fornecedor, diretoria, periodo, ou unidade conforme o usuario pedir.',
-      '  - Aqui as NFs ja foram aprovadas — NAO ha propor_aprovacao/rejeicao nesta tela. Se o usuario pedir pra aprovar, oriente a ir pra Fila de Aprovacao.',
-      '  - Quando o usuario pedir "abrir NF X" ou "ver PDF da NF X", explica que pode clicar no botao Ver da tabela (Fase D ainda nao tem tool pra isso).',
-      '  - Quando o usuario pedir "marcar NF X como processada", explica que pode marcar o checkbox Pago/Processado na tabela (Fase D ainda nao tem tool pra isso).',
+      '  - Foco em RELATORIOS pro financeiro. Use tabelas markdown e agregue por fornecedor, diretoria, periodo ou unidade conforme o usuario pedir.',
+      '  - Aqui as NFs ja foram aprovadas — NAO ha propor_aprovacao/rejeicao. Se o usuario pedir pra aprovar, oriente a ir pra Fila de Aprovacao.',
+      '  - Para abrir PDF: use a tool abrir_nf (acao_imediata=abrir_pdf, abre em nova aba sem confirmacao). Se o usuario disser apenas o numero, chame detalhes_nf primeiro pra pegar o id.',
+      '  - Para marcar como processado: use a tool propor_marcar_processado (chame detalhes_nf primeiro pra obter o id). O frontend abre modal de confirmacao automaticamente.',
+      '  - CRITICO: quando o usuario disser "abre/ver PDF da NF X", chame detalhes_nf(numero=X) + abrir_nf(id=...) na mesma turn. Resposta em texto: BREVE tipo "Abrindo o PDF da NF X..." Sem perguntas.',
+      '  - CRITICO: quando o usuario disser "marca a NF X como processada", chame detalhes_nf(numero=X) + propor_marcar_processado(id=...). Resposta breve: "Abrindo a confirmacao pra marcar a NF X como processada..."',
       '',
       'EXEMPLOS:',
-      '  User: "Quanto liberei este mes?" → listar_aprovadas(periodo=este_mes), soma total, responde.',
+      '  User: "Quanto liberei este mes?" → listar_aprovadas(periodo=este_mes), soma total.',
       '  User: "Top 5 fornecedores aprovados" → agregar_por_fornecedor(escopo=aprovadas, top_n=5).',
-      '  User: "Quantas NFs aprovei hoje?" → listar_aprovadas(periodo=hoje), count.'
+      '  User: "Abre a NF 1234" → detalhes_nf(numero=1234) + abrir_nf(id=...) na mesma turn.',
+      '  User: "Marca a NF 1234 como processada" → detalhes_nf(numero=1234) + propor_marcar_processado(id=...).'
     ];
   } else if (viewAtual === 'lancamento') {
     specific = [
@@ -332,6 +335,34 @@ const TOOLS = [
           motivo: { type: 'string', description: 'Motivo da rejeicao (obrigatorio)' }
         },
         required: ['id','motivo']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'abrir_nf',
+      description: 'Abre o PDF de uma NF aprovada em nova aba do navegador. Use quando o usuario disser "abrir NF X", "ver PDF da NF X", "me mostra o PDF da X". NAO precisa de confirmacao — eh acao nao-destrutiva (so visualiza).',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'spListItemId da NF (de listar_aprovadas/detalhes_nf)' },
+          numero: { type: 'string', description: 'NumeroNF — usar se o usuario disse o numero da nota e voce ainda nao tem o id' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propor_marcar_processado',
+      description: 'Propoe MARCAR uma NF aprovada como PROCESSADA (financeiro liberou pra integracao). NAO executa — retorna metadata pro frontend mostrar card de confirmacao. Use quando o usuario disser "marca a NF X como processada", "processei a NF X", "checa o pago da NF X". Sempre chame detalhes_nf antes pra obter id, fornecedor, valor.',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'spListItemId da NF (obrigatorio)' }
+        },
+        required: ['id']
       }
     }
   }
@@ -700,6 +731,37 @@ async function tool_propor_rejeicao(args, ctx) {
   };
 }
 
+async function tool_abrir_nf(args, ctx) {
+  // Resolve id se vier numero
+  let id = args.id;
+  if (!id && args.numero) {
+    const det = await tool_detalhes_nf({ numero: args.numero }, ctx);
+    if (det && det.erro) return det;
+    if (det && det.id) id = det.id;
+  }
+  if (!id) return { erro: 'precisa de id ou numero da NF' };
+  return {
+    acao_imediata: 'abrir_pdf',
+    id: id,
+    url: '/api/AbrirPdfDaNota?id=' + encodeURIComponent(id),
+    confirmar_no_frontend: false
+  };
+}
+
+async function tool_propor_marcar_processado(args, ctx) {
+  if (!args.id) return { erro: 'id obrigatorio' };
+  const det = await tool_detalhes_nf({ id: args.id }, ctx);
+  if (det && det.erro) return det;
+  return {
+    confirmar_no_frontend: true,
+    tipo: 'processado',
+    id: det.id,
+    numero: det.numero,
+    fornecedor: det.fornecedor,
+    valor: det.valor
+  };
+}
+
 const TOOL_IMPL = {
   listar_fila: tool_listar_fila,
   listar_aprovadas: tool_listar_aprovadas,
@@ -707,7 +769,9 @@ const TOOL_IMPL = {
   agregar_por_fornecedor: tool_agregar_por_fornecedor,
   detectar_anomalia: tool_detectar_anomalia,
   propor_aprovacao: tool_propor_aprovacao,
-  propor_rejeicao: tool_propor_rejeicao
+  propor_rejeicao: tool_propor_rejeicao,
+  abrir_nf: tool_abrir_nf,
+  propor_marcar_processado: tool_propor_marcar_processado
 };
 
 // =============================================================================
