@@ -2602,6 +2602,95 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.body.classList.contains('menu-open')) fecharMenuMobile();
 });
 
+async function carregarAuditLog() {
+  const f = window._filtroAudit || { acao: '', userEmail: '', periodo: '7d' };
+  const statusEl = document.getElementById('audit-status');
+  const tbody = document.getElementById('audit-tbody');
+  if (!tbody) return;
+  if (statusEl) statusEl.textContent = 'Carregando…';
+  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#647883">Buscando trilha…</td></tr>';
+
+  // Calcula data inicial baseado em periodo
+  const now = new Date();
+  let dataDe = null;
+  if (f.periodo === '1d')  dataDe = new Date(now.getTime() - 24*60*60*1000);
+  else if (f.periodo === '7d')  dataDe = new Date(now.getTime() - 7*24*60*60*1000);
+  else if (f.periodo === '30d') dataDe = new Date(now.getTime() - 30*24*60*60*1000);
+
+  const params = new URLSearchParams();
+  if (f.acao) params.set('acao', f.acao);
+  if (f.userEmail) params.set('userEmail', f.userEmail.trim().toLowerCase());
+  if (dataDe) params.set('dataDe', dataDe.toISOString());
+  params.set('limit', '200');
+
+  try {
+    const r = await fetch('/api/AuditLog?' + params.toString(), { credentials: 'include' });
+    if (!r.ok) {
+      const errBody = await r.json().catch(() => ({}));
+      const msg = r.status === 403 ? 'Acesso negado (só Admin).' : (errBody.error || ('HTTP ' + r.status));
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#C62828">❌ ' + msg + '</td></tr>';
+      if (statusEl) statusEl.textContent = '';
+      return;
+    }
+    const data = await r.json();
+    const events = data.events || [];
+    if (statusEl) statusEl.textContent = events.length + ' evento(s) encontrado(s).';
+    if (events.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#647883">Nenhum evento no período/filtro selecionado.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = events.map(renderAuditRow).join('');
+  } catch (e) {
+    if (statusEl) statusEl.textContent = '';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:#C62828">❌ Erro de rede: ' + (e.message || e) + '</td></tr>';
+  }
+}
+
+function renderAuditRow(ev) {
+  // Formata timestamp pra BRT
+  let qdo = ev.timestamp || '';
+  try {
+    const d = new Date(qdo);
+    qdo = d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  } catch (e) {}
+  const acaoLabel = {
+    lancamento: 'LANÇAMENTO', aprovacao: 'APROVAÇÃO', rejeicao: 'REJEIÇÃO',
+    processado: 'PROCESSADO', fornecedor_criar: 'NOVO FORNECEDOR',
+    fornecedor_editar: 'EDIÇÃO DE FORNECEDOR', config_update: 'CONFIG',
+    limpar_base: 'LIMPAR BASE'
+  }[ev.acao] || (ev.acao || '').toUpperCase();
+  const resultadoPill = {
+    sucesso:    '<span class="status-pill status-aprovada">OK</span>',
+    bloqueado:  '<span class="status-pill status-duplicada">BLOQUEADO</span>',
+    falha:      '<span class="status-pill status-rejeitada">FALHA</span>'
+  }[ev.resultado] || ev.resultado;
+  const objetoLabel = ev.objetoTipo === 'nf' && ev.objetoNumero
+    ? 'NF ' + ev.objetoNumero
+    : (ev.objetoTipo === 'fornecedor' && ev.objetoNumero ? 'Forn. ' + ev.objetoNumero : (ev.objetoId || '—'));
+  // Detalhes resumido
+  let det = ev.detalhes;
+  let detHtml = '<span style="color:#647883">—</span>';
+  if (det) {
+    if (typeof det === 'object') {
+      const partes = [];
+      if (det.valor) partes.push('R$ ' + Number(det.valor).toLocaleString('pt-BR', {minimumFractionDigits:2,maximumFractionDigits:2}));
+      if (det.fornecedor) partes.push('Forn: ' + String(det.fornecedor).slice(0,30));
+      if (det.motivo) partes.push('Motivo: ' + String(det.motivo).slice(0,40));
+      detHtml = partes.join(' · ') || '<span style="color:#647883">—</span>';
+    } else {
+      detHtml = String(det).slice(0,80);
+    }
+  }
+  return '<tr>'+
+    '<td style="font-size:12px;white-space:nowrap">' + qdo + '</td>'+
+    '<td style="font-size:12px">' + (ev.userEmail || '—') + '</td>'+
+    '<td style="font-size:11px;font-weight:600;color:#1F4E79">' + acaoLabel + '</td>'+
+    '<td style="font-size:12px">' + objetoLabel + '</td>'+
+    '<td>' + resultadoPill + '</td>'+
+    '<td style="font-size:11px;color:#37474F">' + detHtml + '</td>'+
+    '</tr>';
+}
+
 function showView(id) {
   currentView = id;
   // SAN: garante FAB+panel global iniciados e atualiza view atual.
@@ -3668,36 +3757,56 @@ const views = {
     return renderFornecedoresView();
   },
 
-  auditoria: () => `
-    <h2>Trilha de Auditoria</h2>
-    <div class="view-sub">Registro imutável de todas as ações no sistema. Retenção: 5 anos em Azure Log Analytics.</div>
-    <div class="filter-bar">
-      <span class="label">Tipo</span>
-      <select><option>Todas as ações</option><option>Lançamento</option><option>Aprovação</option><option>Rejeição</option><option>Cadastro</option><option>Login</option></select>
-      <span class="label">Usuário</span>
-      <input type="search" placeholder="Buscar usuário…">
-      <span class="label">Período</span>
-      <select><option>Últimas 24h</option><option>Últimos 7 dias</option><option>Últimos 30 dias</option></select>
-    </div>
-    <div class="card">
-      <table class="data">
-        <thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Objeto</th><th>IP</th><th>Resultado</th></tr></thead>
-        <tbody>
-          <tr><td>22/05 14:08:32</td><td>Rafaella Santos</td><td>APROVAÇÃO</td><td>NF-2026-0448</td><td>189.4.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
-          <tr><td>22/05 11:15:08</td><td>Carla Souza</td><td>LANÇAMENTO</td><td>NF-2026-0444</td><td>189.4.x.x</td><td><span class="status-pill status-duplicada">DUP. BARRADA</span></td></tr>
-          <tr><td>22/05 09:34:12</td><td>Carla Souza</td><td>LANÇAMENTO</td><td>NF-2026-0451</td><td>189.4.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
-          <tr><td>21/05 16:18:00</td><td>Tiago Lima</td><td>LANÇAMENTO</td><td>NF-2026-0449</td><td>200.18.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
-          <tr><td>21/05 14:09:11</td><td>Bruno Hioka</td><td>APROVAÇÃO</td><td>NF-2026-0447</td><td>200.18.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
-          <tr><td>21/05 11:02:55</td><td>Carla Souza</td><td>LANÇAMENTO</td><td>NF-2026-0450</td><td>189.4.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
-          <tr><td>20/05 17:32:40</td><td>Bruno Hioka</td><td>APROVAÇÃO</td><td>NF-2026-0447</td><td>200.18.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
-          <tr><td>20/05 09:00:01</td><td>Rafael Machado</td><td>LOGIN</td><td>SSO Entra ID</td><td>187.84.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
-          <tr><td>19/05 18:05:55</td><td>Rafaella Santos</td><td>APROVAÇÃO</td><td>NF-2026-0446</td><td>189.4.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
-          <tr><td>19/05 14:22:08</td><td>Marcelo Vianna</td><td>LANÇAMENTO</td><td>NF-2026-0446</td><td>177.32.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
-          <tr><td>12/05 09:33:55</td><td>Carla Souza</td><td>LANÇAMENTO</td><td>NF-2026-0445</td><td>189.4.x.x</td><td><span class="status-pill status-rejeitada">AUTO-REJ.</span></td></tr>
-        </tbody>
-      </table>
-    </div>
-  `,
+  auditoria: () => {
+    if (!window._filtroAudit) {
+      window._filtroAudit = { acao: '', userEmail: '', periodo: '7d' };
+    }
+    // Carrega dados na primeira renderizacao
+    setTimeout(function(){ carregarAuditLog(); }, 0);
+    return `
+      <h2>Trilha de Auditoria</h2>
+      <div class="view-sub">Registro imutável de todas as ações de escrita no sistema (lançamentos, aprovações, rejeições, processamentos, cadastros).</div>
+      <div class="filter-bar" style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">
+        <div>
+          <div class="label">Tipo de ação</div>
+          <select id="audit-acao" onchange="window._filtroAudit.acao=this.value;carregarAuditLog()">
+            <option value="">Todas</option>
+            <option value="lancamento">Lançamento</option>
+            <option value="aprovacao">Aprovação</option>
+            <option value="rejeicao">Rejeição</option>
+            <option value="processado">Processado</option>
+            <option value="fornecedor_criar">Cadastro de Fornecedor</option>
+            <option value="fornecedor_editar">Edição de Fornecedor</option>
+            <option value="config_update">Configuração</option>
+            <option value="limpar_base">Limpar Base</option>
+          </select>
+        </div>
+        <div>
+          <div class="label">Usuário (email)</div>
+          <input id="audit-user" type="search" placeholder="email@pronep.com.br" onchange="window._filtroAudit.userEmail=this.value;carregarAuditLog()">
+        </div>
+        <div>
+          <div class="label">Período</div>
+          <select id="audit-periodo" onchange="window._filtroAudit.periodo=this.value;carregarAuditLog()">
+            <option value="1d">Últimas 24h</option>
+            <option value="7d" selected>Últimos 7 dias</option>
+            <option value="30d">Últimos 30 dias</option>
+            <option value="all">Tudo</option>
+          </select>
+        </div>
+        <div>
+          <button class="btn" onclick="carregarAuditLog()" style="background:#1F4E79;color:#fff;padding:8px 16px;border:0;border-radius:6px;cursor:pointer">🔄 Atualizar</button>
+        </div>
+      </div>
+      <div class="card">
+        <div id="audit-status" style="padding:8px 4px;font-size:12px;color:#647883">Carregando…</div>
+        <table class="data" id="audit-table">
+          <thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Objeto</th><th>Resultado</th><th>Detalhes</th></tr></thead>
+          <tbody id="audit-tbody"><tr><td colspan="6" style="text-align:center;padding:24px;color:#647883">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+    `;
+  },
 
   'mapa-aprovadores': () => {
     // Calcular estatísticas
