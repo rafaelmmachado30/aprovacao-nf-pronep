@@ -71,7 +71,11 @@ module.exports = async function (context, req) {
       };
       const resp = await fetch('https://app.omie.com.br/api/v1/financas/contapagar/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'User-Agent': 'PronepNF/1.0 (Azure SWA Functions)'
+        },
         body: JSON.stringify(body)
       });
       const text = await resp.text();
