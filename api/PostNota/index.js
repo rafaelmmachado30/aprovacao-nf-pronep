@@ -40,6 +40,51 @@ const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
 const cache = { siteId: null, driveId: null, listNotasId: null, listDirId: null, colMap: null, colTypes: null, colMapCachedAt: 0 };
 
 // =============================================================================
+// EXTRACAO DA CHAVE DE ACESSO DA NF-e (44 digitos)
+// =============================================================================
+// Usado pra deteccao forte de duplicidade — chave de acesso eh o identificador
+// LEGAL unico de uma NF-e no Brasil (esquema da SEFAZ). Se duas NFs tem a mesma
+// chave, sao a MESMA NF.
+//
+// Estrategia: usar pdf-parse pra extrair texto, depois regex /\d{44}/ pra achar
+// uma sequencia continua de 44 digitos. Tambem aceita formatos com espacos/pontos
+// (NF-e impressa as vezes formata em blocos de 4 digitos separados).
+//
+// Retorna a chave (string de 44 digitos puros) ou null se nao encontrar.
+// Falha silenciosamente: NFS-e municipais NAO tem chave de 44 digitos —
+// dependem de duplicidade por hash + CNPJ+numero, que sao os outros mecanismos.
+async function extrairChaveAcesso(pdfBuffer) {
+  try {
+    if (!pdfBuffer || !Buffer.isBuffer(pdfBuffer)) return null;
+    let pdfParse;
+    try { pdfParse = require('pdf-parse'); }
+    catch (e) {
+      console.warn('[extrairChaveAcesso] pdf-parse nao instalado:', e.message);
+      return null;
+    }
+    const data = await pdfParse(pdfBuffer);
+    const texto = (data && data.text) || '';
+    if (!texto) return null;
+
+    // Normaliza: tira espacos, pontos e quebras de linha que podem partir a chave
+    // (NF-e impressa muitas vezes mostra "1234 5678 9012 ... ").
+    // Procura primeiro o padrao continuo (44 digitos seguidos).
+    let m = texto.match(/\b(\d{44})\b/);
+    if (m && m[1]) return m[1];
+
+    // Tentativa 2: chave fragmentada com espacos/pontos. Concatena dgts apos limpar.
+    const semSeparadores = texto.replace(/[\s.-]/g, '');
+    m = semSeparadores.match(/\d{44}/);
+    if (m && m[0]) return m[0];
+
+    return null;
+  } catch (e) {
+    console.warn('[extrairChaveAcesso] erro:', e && e.message);
+    return null;
+  }
+}
+
+// =============================================================================
 // PADRAO DE NOMENCLATURA DOS PDFs (Pronep)
 // =============================================================================
 // Pendentes: {DataVenc}_{NumNF}_{Fornec30}_{UF}_{Valor}.pdf
