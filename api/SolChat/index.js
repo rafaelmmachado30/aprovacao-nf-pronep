@@ -91,4 +91,13 @@ module.exports = async function (context, req) {
   } catch (err) {
     context.log && context.log.error && context.log.error('SolChat error:', err);
     context.res = {
-   
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+      body: {
+        error: 'Erro interno da SOL',
+        detail: (err && err.message) || String(err),
+        stack: (err && err.stack || '').split('\n').slice(0, 8)
+      }
+    };
+  }
+};
