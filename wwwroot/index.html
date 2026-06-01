@@ -1244,7 +1244,15 @@ window.solChat = (function() {
       '</div>';
   }
 
-  function toggle() { state.open = !state.open; refresh(); }
+  function toggle() {
+    state.open = !state.open;
+    // Lazy: hidrata historico na primeira vez que o user abre o chat
+    if (state.open && !state.historicoHidratado) {
+      state.historicoHidratado = true;
+      hidratarHistorico().catch(function(e){ console.warn('[SAN] hidratar:', e && e.message); });
+    }
+    refresh();
+  }
 
   async function send() {
     var inp = document.getElementById('sol-input');
@@ -1370,12 +1378,9 @@ window.solChat = (function() {
     panel.id = 'san-panel';
     panel.className = 'san-panel';
     document.body.appendChild(panel);
-
-    // Hidrata historico persistente do SP (se ainda nao foi carregado)
-    if (!state.historicoHidratado) {
-      state.historicoHidratado = true;
-      hidratarHistorico();
-    }
+    // NOTA: hidratarHistorico NAO eh chamado aqui no boot — apenas quando o
+    // usuario abre o chat pela primeira vez (via toggle). Evita fetch no boot
+    // que pode atrasar/quebrar o loading inicial pra usuarios novos.
   }
 
   async function hidratarHistorico() {
@@ -2274,16 +2279,29 @@ async function carregarDadosIniciais() {
   // Guard contra chamadas simultaneas
   if (window._carregamentoEmAndamento) return window._carregamentoEmAndamento;
   window._carregamentoEmAndamento = (async () => {
-    // Carrega fornecedores+diretorias PRIMEIRO (notas dependem do fornecedores pra mapping)
-    await Promise.all([carregarFornecedoresReais(), carregarDiretoriasReais(), carregarGestoresFinanceiroReais(), carregarConfigSistema(), carregarFeriadosBR()]);
-    // Depois carrega as notas (que mapeiam fornecedorIdx pelo array de fornecedores)
-    await carregarNotasReais();
-    // Re-renderiza qualquer view que dependa de fornecedores/diretorias
-    const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
-    if (viewsQueDependem.includes(currentView)) {
-      showView(currentView);
+    try {
+      // Carrega fornecedores+diretorias PRIMEIRO (notas dependem do fornecedores pra mapping)
+      await Promise.all([
+        carregarFornecedoresReais().catch(e => console.error('[carregarFornecedores]', e)),
+        carregarDiretoriasReais().catch(e => console.error('[carregarDiretorias]', e)),
+        carregarGestoresFinanceiroReais().catch(e => console.error('[carregarGestores]', e)),
+        carregarConfigSistema().catch(e => console.error('[carregarConfig]', e)),
+        carregarFeriadosBR().catch(e => console.error('[carregarFeriados]', e))
+      ]);
+      // Depois carrega as notas (que mapeiam fornecedorIdx pelo array de fornecedores)
+      try { await carregarNotasReais(); } catch (e) { console.error('[carregarNotas]', e); }
+      // Re-renderiza qualquer view que dependa de fornecedores/diretorias
+      const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
+      if (viewsQueDependem.includes(currentView)) {
+        try { showView(currentView); } catch (e) { console.error('[showView no boot]', e); }
+      }
+    } catch (e) {
+      console.error('[carregarDadosIniciais] erro geral:', e);
+    } finally {
+      // CRITICO: SEMPRE esconde o loading, mesmo se algo der errado.
+      // Antes, se qualquer await throwasse, o usuario ficava preso na tela "Carregando sistema...".
+      esconderLoadingInicial();
     }
-    esconderLoadingInicial();
   })();
   return window._carregamentoEmAndamento;
 }
@@ -2586,10 +2604,15 @@ document.addEventListener('keydown', (e) => {
 
 function showView(id) {
   currentView = id;
-  // SAN: garante FAB+panel global iniciados e atualiza view atual
-  if (window.solChat) {
-    if (typeof solChat.init === 'function') solChat.init();
-    if (typeof solChat.setView === 'function') solChat.setView(id);
+  // SAN: garante FAB+panel global iniciados e atualiza view atual.
+  // Blindado: erro aqui NAO pode derrubar o boot do sistema.
+  try {
+    if (window.solChat) {
+      if (typeof solChat.init === 'function') solChat.init();
+      if (typeof solChat.setView === 'function') solChat.setView(id);
+    }
+  } catch (e) {
+    console.error('[showView solChat init]', e);
   }
   const m = menuItems.find(m=>m.id===id) || {label:'Visão'};
   document.getElementById('crumb-view').textContent = m.label;
