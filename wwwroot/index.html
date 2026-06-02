@@ -5151,7 +5151,7 @@ function renderAprovadasTable() {
                   <button class="icon-btn" onclick="openApprovedPdf('${n.id}')" title="Ver PDF">Ver</button>
                   ${(currentPersona && (currentPersona.roleKey === 'admin' || currentPersona.roleKey === 'financeiro')) ? `
                     ${!n.integradoOmie ? `<button class="icon-btn" onclick="integrarOmie('${n.spId || n.id}','${(n.numero||'').replace(/'/g,"\\'")}','${((fornecedorOf(n)||{}).razao||'').replace(/'/g,"\\'").slice(0,30)}','${n.unidade||''}')" style="margin-left:4px;background:#E3F2FD;color:#1976D2;border-color:#BBDEFB" title="Integrar com Omie ${n.unidade||''}">🔗 Omie</button>` : ''}
-                    <button class="icon-btn" onclick="rejeitarAprovada('${n.id}','${(n.numero||'').replace(/'/g,"\\'")}','${((fornecedorOf(n)||{}).razao||'').replace(/'/g,"\\'").slice(0,30)}',${Number(n.valor||0)})" style="margin-left:4px;background:#FFEBEE;color:#C62828;border-color:#FFCDD2" title="Estornar (rejeitar pos-aprovacao)">Rejeitar</button>
+                    ${!n.integradoOmie ? `<button class="icon-btn" onclick="rejeitarAprovada('${n.spId || n.id}','${(n.numero||'').replace(/'/g,"\\'")}','${((fornecedorOf(n)||{}).razao||'').replace(/'/g,"\\'").slice(0,30)}',${Number(n.valor||0)})" style="margin-left:4px;background:#FFEBEE;color:#C62828;border-color:#FFCDD2" title="Estornar (rejeitar pos-aprovacao)">Rejeitar</button>` : ''}
                   ` : ''}
                 </td>
               </tr>
