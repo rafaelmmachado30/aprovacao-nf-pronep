@@ -285,9 +285,9 @@ async function anexarPDF(opts, creds) {
   if (!pdfBase64) throw new Error('pdfBuffer vazio');
   if (!opts.codigoLancamento) throw new Error('codigoLancamento obrigatorio');
 
-  // cMd5: hash MD5 do arquivo (em hex). Obrigatorio pelo Omie pra verificar integridade.
-  const pdfBin = Buffer.isBuffer(opts.pdfBuffer) ? opts.pdfBuffer : Buffer.from(pdfBase64, 'base64');
-  const cMd5 = crypto.createHash('md5').update(pdfBin).digest('hex');
+  // cMd5: hash MD5 sobre a STRING base64 (Omie calcula sobre o que recebe via JSON,
+  // nao sobre o binario decoded). Eh hex lowercase.
+  const cMd5 = crypto.createHash('md5').update(pdfBase64).digest('hex');
 
   const param = {
     cCodIntAnexo: String(opts.codIntegracao || ('PRONEP-' + Date.now())).slice(0, 100),
