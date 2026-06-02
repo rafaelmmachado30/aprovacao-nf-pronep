@@ -24,6 +24,7 @@
 
 require('isomorphic-fetch');
 const crypto = require('crypto');
+const zlib = require('zlib');
 
 const OMIE_BASE = 'https://app.omie.com.br/api/v1';
 
@@ -275,25 +276,110 @@ async function buscarContaPagar(opts, creds) {
   return { found: false, diag: diag };
 }
 
+
+/**
+ * Calcula CRC-32 (IEEE 802.3 / standard ZIP).
+ */
+function crc32(buf) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) {
+    crc = crc ^ buf[i];
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (0xEDB88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+/**
+ * Cria um arquivo ZIP minimo (formato PKZip standard) contendo um unico arquivo.
+ * Retorna Buffer pronto pra usar.
+ */
+function criarZipSimples(filename, fileBuffer) {
+  const filenameBuf = Buffer.from(filename, 'utf-8');
+  const fnLen = filenameBuf.length;
+  const compressed = zlib.deflateRawSync(fileBuffer);
+  const crc = crc32(fileBuffer);
+  const uncompSize = fileBuffer.length;
+  const compSize = compressed.length;
+
+  // Local File Header (30 bytes + filename)
+  const lfh = Buffer.alloc(30);
+  lfh.writeUInt32LE(0x04034b50, 0);     // signature
+  lfh.writeUInt16LE(20, 4);             // version needed (2.0)
+  lfh.writeUInt16LE(0, 6);              // flags
+  lfh.writeUInt16LE(8, 8);              // compression method: DEFLATE
+  lfh.writeUInt16LE(0, 10);             // mod time
+  lfh.writeUInt16LE(0x21, 12);          // mod date (qualquer)
+  lfh.writeUInt32LE(crc, 14);           // crc32
+  lfh.writeUInt32LE(compSize, 18);      // compressed size
+  lfh.writeUInt32LE(uncompSize, 22);    // uncompressed size
+  lfh.writeUInt16LE(fnLen, 26);         // filename length
+  lfh.writeUInt16LE(0, 28);             // extra length
+
+  // Central Directory File Header (46 bytes + filename)
+  const cdh = Buffer.alloc(46);
+  cdh.writeUInt32LE(0x02014b50, 0);     // signature
+  cdh.writeUInt16LE(20, 4);             // version made by
+  cdh.writeUInt16LE(20, 6);             // version needed
+  cdh.writeUInt16LE(0, 8);              // flags
+  cdh.writeUInt16LE(8, 10);             // method
+  cdh.writeUInt16LE(0, 12);             // mod time
+  cdh.writeUInt16LE(0x21, 14);          // mod date
+  cdh.writeUInt32LE(crc, 16);
+  cdh.writeUInt32LE(compSize, 20);
+  cdh.writeUInt32LE(uncompSize, 24);
+  cdh.writeUInt16LE(fnLen, 28);         // filename len
+  cdh.writeUInt16LE(0, 30);             // extra
+  cdh.writeUInt16LE(0, 32);             // comment
+  cdh.writeUInt16LE(0, 34);             // disk num
+  cdh.writeUInt16LE(0, 36);             // internal attrs
+  cdh.writeUInt32LE(0, 38);             // external attrs
+  cdh.writeUInt32LE(0, 42);             // offset of LFH
+
+  // End of Central Directory (22 bytes)
+  const centralDirSize = cdh.length + fnLen;
+  const centralDirOffset = lfh.length + fnLen + compSize;
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);    // signature
+  eocd.writeUInt16LE(0, 4);             // disk
+  eocd.writeUInt16LE(0, 6);             // disk with cd
+  eocd.writeUInt16LE(1, 8);             // entries on this disk
+  eocd.writeUInt16LE(1, 10);            // total entries
+  eocd.writeUInt32LE(centralDirSize, 12);
+  eocd.writeUInt32LE(centralDirOffset, 16);
+  eocd.writeUInt16LE(0, 20);            // comment len
+
+  return Buffer.concat([
+    lfh, filenameBuf, compressed,
+    cdh, filenameBuf,
+    eocd
+  ]);
+}
+
 /**
  * Anexa PDF a uma conta a pagar do Omie via IncluirAnexo.
  */
 async function anexarPDF(opts, creds) {
-  const pdfBase64 = Buffer.isBuffer(opts.pdfBuffer)
-    ? opts.pdfBuffer.toString('base64')
-    : String(opts.pdfBuffer || '');
-  if (!pdfBase64) throw new Error('pdfBuffer vazio');
   if (!opts.codigoLancamento) throw new Error('codigoLancamento obrigatorio');
+  if (!opts.pdfBuffer) throw new Error('pdfBuffer vazio');
+  const pdfBin = Buffer.isBuffer(opts.pdfBuffer) ? opts.pdfBuffer : Buffer.from(String(opts.pdfBuffer), 'base64');
+  if (pdfBin.length === 0) throw new Error('pdfBuffer vazio');
 
-  // cMd5: hash MD5 sobre a STRING base64 (Omie calcula sobre o que recebe via JSON,
-  // nao sobre o binario decoded). Eh hex lowercase.
+  // Omie EXIGE que cArquivo seja um ZIP base64 contendo o arquivo, nao o PDF direto.
+  // Status code 6 da resposta: 'arquivo X nao foi encontrado no arquivo zip encaminhado'.
+  const fileName = String(opts.nomeArquivo || 'NF.pdf').slice(0, 100);
+  const zipBuf = criarZipSimples(fileName, pdfBin);
+  const pdfBase64 = zipBuf.toString('base64');
+
+  // cMd5: hash MD5 sobre a STRING base64 do ZIP (Omie calcula sobre o que recebe via JSON).
   const cMd5 = crypto.createHash('md5').update(pdfBase64).digest('hex');
 
   const param = {
     cCodIntAnexo: String(opts.codIntegracao || ('PRONEP-' + Date.now())).slice(0, 100),
     cTabela: 'conta-pagar',
     nId: Number(opts.codigoLancamento),
-    cNomeArquivo: String(opts.nomeArquivo || 'NF.pdf').slice(0, 100),
+    cNomeArquivo: fileName,
     cTipoArquivo: 'pdf',
     cMd5: cMd5,
     cArquivo: pdfBase64
