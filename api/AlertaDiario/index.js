@@ -324,7 +324,7 @@ function buildEmailDiario(tipo, gestorEmail, notas, insight) {
 
   const insightBlock = insight ? `
     <div style="background:#E1F5FE;border-left:3px solid #27AAE1;padding:12px 16px;margin:18px 0;border-radius:4px">
-      <div style="font-size:11px;color:#0277BD;font-weight:600;margin-bottom:4px;letter-spacing:0.5px;text-transform:uppercase">SOL — insight do dia</div>
+      <div style="font-size:11px;color:#0277BD;font-weight:600;margin-bottom:4px;letter-spacing:0.5px;text-transform:uppercase">SAN — insight do dia</div>
       <div style="font-size:13px;color:#1F4E79;line-height:1.55">${escapeHtml(insight)}</div>
     </div>
   ` : '';
@@ -402,7 +402,7 @@ function buildEmailDiario(tipo, gestorEmail, notas, insight) {
         </p>
       </td></tr>
       <tr><td style="background:#F4F8FB;color:#647883;padding:14px 26px;font-size:11px;text-align:center;border-top:1px solid #DCE3E9">
-        SOL — assistente IA · Pronep Life Care · automatizado, não responda
+        SAN — assistente IA · Pronep Life Care · automatizado, não responda
       </td></tr>
     </table>
   </td></tr></table></body></html>`;
