@@ -286,7 +286,6 @@ async function anexarPDF(opts, creds) {
 
   const param = {
     cCodIntAnexo: String(opts.codIntegracao || ('PRONEP-' + Date.now())).slice(0, 100),
-    nIdAnexo: 0,
     cTabela: 'conta-pagar',
     nId: Number(opts.codigoLancamento),
     cNomeArquivo: String(opts.nomeArquivo || 'NF.pdf').slice(0, 100),
