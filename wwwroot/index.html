@@ -670,17 +670,22 @@
   /* === FAB SAN: balao de fala arrastavel === */
   .san-fab {
     position: fixed; bottom: 100px; right: 24px;
-    width: 64px; height: 56px;
+    width: 64px; height: 64px;
     background: linear-gradient(135deg, #1F4E79 0%, #27AAE1 100%);
     color: #fff; border: 0;
     /* balao de fala: borda muito arredondada + setinha no canto inferior direito */
     border-radius: 28px 28px 28px 6px;
     box-shadow: 0 6px 18px rgba(31,78,121,0.35);
     cursor: pointer; z-index: 9998;
-    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 4px; padding: 6px 0;
     transition: transform 0.15s, box-shadow 0.2s, opacity 0.2s;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
+  }
+  .san-fab .fab-label {
+    font-size: 13px; font-weight: 700; letter-spacing: 0.8px;
+    line-height: 1; margin-bottom: 1px;
   }
   /* setinha do balao apontando pra baixo-direita */
   .san-fab::after {
@@ -766,7 +771,7 @@
   .san-quick-action:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(31,78,121,0.3); }
   @media (max-width: 720px) {
     .san-panel { width: 100vw; }
-    .san-fab { bottom: 80px; right: 16px; }
+    .san-fab { bottom: 80px; right: 16px; width: 60px; height: 60px; }
   }
 
   .sol-box {
@@ -1387,7 +1392,7 @@ window.solChat = (function() {
     fab.id = 'san-fab';
     fab.className = 'san-fab';
     fab.title = 'Abrir SAN';
-    fab.innerHTML = '<div class="fab-dots"><span></span><span></span><span></span></div>';
+    fab.innerHTML = '<span class="fab-label">SAN</span><div class="fab-dots"><span></span><span></span><span></span></div>';
     fab.title = 'SAN — clique pra abrir · arraste pra mover';
 
     // === Drag-to-move ===
