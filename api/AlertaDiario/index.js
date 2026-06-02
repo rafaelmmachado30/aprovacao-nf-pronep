@@ -410,6 +410,68 @@ function buildEmailDiario(tipo, gestorEmail, notas, insight) {
   return { assunto, corpo };
 }
 
+// =============================================================================
+// Email consolidado pro admin (resumo executivo de todas as fileiras)
+// =============================================================================
+function buildEmailAdminConsolidado(tipo, grupos, statsGlobais) {
+  const isManha = tipo === 'manha';
+  const isSemanal = tipo === 'semanal';
+  const horario = isManha ? 'matinal' : (isSemanal ? 'semanal' : 'vespertino');
+  const corHeader = isSemanal ? '#5E35B1' : '#1F4E79';
+
+  const assunto = '[Admin] Resumo ' + horario + ' \u2014 ' + statsGlobais.totalNFs + ' NFs pendentes (R$ ' + statsGlobais.totalValorFmt + ')';
+
+  const linhas = Object.entries(grupos)
+    .filter(function(e) { return e[1].length > 0; })
+    .map(function(e) {
+      const email = e[0]; const notas = e[1];
+      const totalValor = notas.reduce(function(s, n) { return s + Number(n.Valor || 0); }, 0);
+      const vencidas = notas.filter(function(n) { return diasAteVencer(n.DataVencimento) < 0; }).length;
+      const vencendoD5 = notas.filter(function(n) { const d = diasAteVencer(n.DataVencimento); return d >= 0 && d <= 5; }).length;
+      const valorFmt = totalValor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+      return '<tr>' +
+        '<td style="padding:8px 12px;border-bottom:1px solid #E0E6EC;font-size:13px">' + email + '</td>' +
+        '<td style="padding:8px 12px;border-bottom:1px solid #E0E6EC;text-align:center;font-size:13px;font-weight:600">' + notas.length + '</td>' +
+        '<td style="padding:8px 12px;border-bottom:1px solid #E0E6EC;text-align:right;font-size:13px">' + valorFmt + '</td>' +
+        '<td style="padding:8px 12px;border-bottom:1px solid #E0E6EC;text-align:center;font-size:13px;' + (vencendoD5 > 0 ? 'color:#E65100;font-weight:600' : 'color:#647883') + '">' + (vencendoD5 || '\u2014') + '</td>' +
+        '<td style="padding:8px 12px;border-bottom:1px solid #E0E6EC;text-align:center;font-size:13px;' + (vencidas > 0 ? 'color:#C62828;font-weight:600' : 'color:#647883') + '">' + (vencidas || '\u2014') + '</td>' +
+        '</tr>';
+    }).join('');
+
+  const corpo = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body style="margin:0;padding:0;background:#F4F8FB;font-family:Arial,sans-serif">' +
+    '<table width="100%" cellpadding="0" cellspacing="0" style="background:#F4F8FB;padding:20px 0">' +
+    '<tr><td align="center"><table width="640" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden">' +
+    '<tr><td style="background:' + corHeader + ';color:#fff;padding:22px 26px">' +
+    '<div style="font-size:11px;letter-spacing:1px;text-transform:uppercase;opacity:0.85">Aprova\u00e7\u00e3o de NF \u00b7 Pronep Life Care</div>' +
+    '<div style="font-size:22px;font-weight:600;margin-top:4px">Resumo ' + horario + ' \u2014 vis\u00e3o admin</div>' +
+    '<div style="font-size:13px;opacity:0.85;margin-top:6px">Consolidado de todas as fileiras de aprova\u00e7\u00e3o</div>' +
+    '</td></tr>' +
+    '<tr><td style="padding:24px 26px">' +
+    '<table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px"><tr>' +
+    '<td style="background:#F4F8FB;padding:14px;border-radius:6px;text-align:center;width:33%"><div style="font-size:24px;font-weight:700;color:#1F4E79">' + statsGlobais.totalAprovadores + '</div><div style="font-size:11px;color:#647883;text-transform:uppercase">Aprovadores</div></td>' +
+    '<td width="8"></td>' +
+    '<td style="background:#F4F8FB;padding:14px;border-radius:6px;text-align:center;width:33%"><div style="font-size:24px;font-weight:700;color:#1F4E79">' + statsGlobais.totalNFs + '</div><div style="font-size:11px;color:#647883;text-transform:uppercase">NFs pendentes</div></td>' +
+    '<td width="8"></td>' +
+    '<td style="background:#F4F8FB;padding:14px;border-radius:6px;text-align:center;width:33%"><div style="font-size:24px;font-weight:700;color:#1F4E79">R$ ' + statsGlobais.totalValorFmt + '</div><div style="font-size:11px;color:#647883;text-transform:uppercase">Total</div></td>' +
+    '</tr></table>' +
+    '<h3 style="margin:0 0 12px;color:#1F4E79;font-size:15px;font-weight:600">Distribui\u00e7\u00e3o por aprovador</h3>' +
+    '<table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E0E6EC;border-radius:6px;overflow:hidden">' +
+    '<thead><tr style="background:#F4F8FB">' +
+    '<th style="padding:10px 12px;text-align:left;font-size:11px;color:#647883;text-transform:uppercase;font-weight:600">Aprovador</th>' +
+    '<th style="padding:10px 12px;text-align:center;font-size:11px;color:#647883;text-transform:uppercase;font-weight:600">NFs</th>' +
+    '<th style="padding:10px 12px;text-align:right;font-size:11px;color:#647883;text-transform:uppercase;font-weight:600">Total</th>' +
+    '<th style="padding:10px 12px;text-align:center;font-size:11px;color:#647883;text-transform:uppercase;font-weight:600">Vence D+5</th>' +
+    '<th style="padding:10px 12px;text-align:center;font-size:11px;color:#647883;text-transform:uppercase;font-weight:600">Vencidas</th>' +
+    '</tr></thead><tbody>' + linhas + '</tbody></table>' +
+    '</td></tr>' +
+    '<tr><td style="background:#F4F8FB;color:#647883;padding:14px 26px;font-size:11px;text-align:center;border-top:1px solid #DCE3E9">' +
+    'SAN \u2014 assistente IA \u00b7 Pronep Life Care \u00b7 resumo executivo automatizado' +
+    '</td></tr>' +
+    '</table></td></tr></table></body></html>';
+
+  return { assunto: assunto, corpo: corpo };
+}
+
 async function enviarEmailViaGraph(graphClient, fromAddress, paraEmail, assunto, corpo) {
   const payload = {
     message: {
