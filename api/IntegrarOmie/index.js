@@ -232,16 +232,18 @@ module.exports = async function (context, req) {
     }
     diag.pdfBusca.totalArquivos = arquivosCandidatos.length;
 
-    // Acha o arquivo pelo NumeroNF — suporta padroes: {numero}_*, *_{numero}_*, *_0{numero}_*
-    const numLimpo = numero.replace(/^0+/, '') || '0';
-    const numPadded = numLimpo.padStart(6, '0');
+    // Acha o arquivo pelo NumeroNF — normaliza alvo E nomes pra comparar
+    // (normalizaNumeroNF: remove tudo nao alfanumerico e zeros a esquerda)
+    const { normalizaNumeroNF } = require('../shared/omie');
+    const numAlvoFmt = normalizaNumeroNF(numero);
+    diag.pdfBusca.numAlvoFmt = numAlvoFmt;
     const pdfMatch = arquivosCandidatos.find(function (x) {
       if (!x.name) return false;
-      const n = x.name;
-      return n.startsWith(numLimpo + '_')
-        || n.includes('_' + numLimpo + '_')
-        || n.includes('_' + numPadded + '_')
-        || n.startsWith(numPadded + '_');
+      // Extrai tokens do nome (separa por _ - espaco) e normaliza cada um
+      const tokens = x.name.replace(/\.pdf$/i, '').split(/[_\-\s]+/);
+      return tokens.some(function (t) {
+        return normalizaNumeroNF(t) === numAlvoFmt;
+      });
     });
     if (!pdfMatch) {
       diag.pdfBusca.nomesEncontrados = arquivosCandidatos.slice(0, 5).map(function (x) { return x.name; });
