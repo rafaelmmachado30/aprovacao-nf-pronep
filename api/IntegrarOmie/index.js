@@ -140,7 +140,7 @@ module.exports = async function (context, req) {
     diag.step = 'fetch_item';
     const item = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items/' + itemId + '?expand=fields').get();
     const f = normalizeFields(item.fields || {}, cache.invColMap);
-    diag.nf = { numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor, unidade: f.Unidade, status: f.Status, dataVencimento: f.DataVencimento };
+    diag.nf = { numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor, unidade: f.Unidade, status: f.Status, dataVencimento: f.DataVencimento, aprovadoEm: f.AprovadoEm };
 
     if (f.Status !== 'Aprovada') {
       context.res = { status: 400, body: { error: 'NF nao esta aprovada (status atual: ' + f.Status + ')', diag } };
@@ -183,56 +183,99 @@ module.exports = async function (context, req) {
       return;
     }
 
-    diag.step = 'baixar_pdf';
-    // Pega URL do PDF aprovado. Pode estar em UrlPDFAprovado (hyperlink) — extrai o URL
-    let urlPDF = '';
-    if (f.UrlPDFAprovado) {
-      urlPDF = typeof f.UrlPDFAprovado === 'object' ? (f.UrlPDFAprovado.Url || '') : String(f.UrlPDFAprovado);
+    diag.step = 'achar_pdf';
+    // Procura PDF aprovado na estrutura "Notas Fiscais/Notas Aprovadas/{Unidade}/{AAAA-MM-DD}/"
+    // Usa AprovadoEm pra pular direto pra pasta da data. Se nao tiver, itera subpastas.
+    const aprovadoEm = f.AprovadoEm || '';
+    const dataAprovada = aprovadoEm ? String(aprovadoEm).substring(0, 10) : '';
+    const numero = String(f.NumeroNF || '');
+    const unidade = String(f.Unidade || '');
+    diag.pdfBusca = { aprovadoEm, dataAprovada, numero, unidade };
+
+    let arquivosCandidatos = [];
+    const folderRapido = 'Notas Fiscais/Notas Aprovadas/' + unidade + '/' + dataAprovada;
+    const folderUnidade = 'Notas Fiscais/Notas Aprovadas/' + unidade;
+    try {
+      if (dataAprovada) {
+        // Caminho rapido: direto na pasta da data
+        const resp = await client.api('/sites/' + siteId + '/drive/root:/' + folderRapido + ':/children').get();
+        arquivosCandidatos = (resp.value || []).filter(function (x) { return x.file; });
+        diag.pdfBusca.folderUsado = folderRapido;
+      } else {
+        // Sem data: itera subpastas da unidade
+        const sub = await client.api('/sites/' + siteId + '/drive/root:/' + folderUnidade + ':/children').get();
+        for (const sf of (sub.value || []).filter(function (x) { return x.folder; })) {
+          try {
+            const filesResp = await client.api('/sites/' + siteId + '/drive/items/' + sf.id + '/children').get();
+            for (const ff of (filesResp.value || [])) { if (ff.file) arquivosCandidatos.push(ff); }
+          } catch (e) {}
+        }
+        diag.pdfBusca.folderUsado = folderUnidade + ' (iterado subpastas)';
+      }
+    } catch (e) {
+      // Pasta da data nao existe — fallback iterando subpastas
+      diag.pdfBusca.erroPastaData = e.message;
+      if (dataAprovada) {
+        try {
+          const sub = await client.api('/sites/' + siteId + '/drive/root:/' + folderUnidade + ':/children').get();
+          for (const sf of (sub.value || []).filter(function (x) { return x.folder; })) {
+            try {
+              const filesResp = await client.api('/sites/' + siteId + '/drive/items/' + sf.id + '/children').get();
+              for (const ff of (filesResp.value || [])) { if (ff.file) arquivosCandidatos.push(ff); }
+            } catch (e2) {}
+          }
+          diag.pdfBusca.folderUsado = folderUnidade + ' (fallback iterado)';
+        } catch (e2) {
+          diag.pdfBusca.erroFallback = e2.message;
+        }
+      }
     }
-    if (!urlPDF) {
-      // Fallback: tenta encontrar o PDF na pasta Notas Aprovadas pelo numero
-      diag.step = 'find_pdf_fallback';
-      const folder = 'Notas Aprovadas';
-      try {
-        const list = await client.api('/sites/' + siteId + '/drive/root:/' + folder + ':/children').get();
-        const numero = String(f.NumeroNF || '');
-        const pdf = (list.value || []).find(x => x.file && x.name && (x.name.includes('_' + numero + '_') || x.name.startsWith(numero + '_')));
-        if (pdf) urlPDF = pdf['@microsoft.graph.downloadUrl'] || pdf.webUrl || '';
-      } catch (e) { diag.fallbackErr = e.message; }
-    }
-    if (!urlPDF) {
-      context.res = { status: 400, body: { error: 'PDF aprovado nao encontrado (UrlPDFAprovado vazio e fallback falhou)', diag } };
+    diag.pdfBusca.totalArquivos = arquivosCandidatos.length;
+
+    // Acha o arquivo pelo NumeroNF — suporta padroes: {numero}_*, *_{numero}_*, *_0{numero}_*
+    const numLimpo = numero.replace(/^0+/, '') || '0';
+    const numPadded = numLimpo.padStart(6, '0');
+    const pdfMatch = arquivosCandidatos.find(function (x) {
+      if (!x.name) return false;
+      const n = x.name;
+      return n.startsWith(numLimpo + '_')
+        || n.includes('_' + numLimpo + '_')
+        || n.includes('_' + numPadded + '_')
+        || n.startsWith(numPadded + '_');
+    });
+    if (!pdfMatch) {
+      diag.pdfBusca.nomesEncontrados = arquivosCandidatos.slice(0, 5).map(function (x) { return x.name; });
+      context.res = { status: 404, body: { error: 'PDF aprovado nao encontrado na pasta', diag } };
       return;
     }
+    diag.pdfBusca.pdfMatch = { id: pdfMatch.id, name: pdfMatch.name };
 
     diag.step = 'download_pdf';
-    // Se a URL eh um link do SharePoint webUrl, precisa de download direto.
-    // Tentamos primeiro chamar Graph pra pegar o downloadUrl do arquivo:
     let pdfBuffer = null;
-    try {
-      // Se a URL ja eh um @microsoft.graph.downloadUrl, baixa direto (sem auth)
-      const dlResp = await fetch(urlPDF);
-      if (dlResp.ok) {
-        pdfBuffer = Buffer.from(await dlResp.arrayBuffer());
-      }
-    } catch (e) { diag.downloadErr = e.message; }
-    if (!pdfBuffer || pdfBuffer.length === 0) {
-      // Tenta resolver o arquivo via Graph (procura por nome na pasta Aprovadas)
+    const downloadUrl = pdfMatch['@microsoft.graph.downloadUrl'];
+    if (downloadUrl) {
       try {
-        const list = await client.api('/sites/' + siteId + '/drive/root:/Notas Aprovadas:/children').get();
-        const numero = String(f.NumeroNF || '');
-        const pdf = (list.value || []).find(x => x.file && x.name && (x.name.includes('_' + numero + '_') || x.name.startsWith(numero + '_')));
-        if (pdf) {
-          const downloadUrl = pdf['@microsoft.graph.downloadUrl'];
-          if (downloadUrl) {
-            const dlResp = await fetch(downloadUrl);
-            if (dlResp.ok) pdfBuffer = Buffer.from(await dlResp.arrayBuffer());
-          }
+        const dlResp = await fetch(downloadUrl);
+        if (dlResp.ok) {
+          pdfBuffer = Buffer.from(await dlResp.arrayBuffer());
+        } else {
+          diag.downloadStatus = dlResp.status;
         }
+      } catch (e) {
+        diag.downloadErr = e.message;
+      }
+    }
+    if (!pdfBuffer || pdfBuffer.length === 0) {
+      // Fallback: baixa via Graph API direto
+      try {
+        const ab = await client.api('/sites/' + siteId + '/drive/items/' + pdfMatch.id + '/content').getStream
+          ? await client.api('/sites/' + siteId + '/drive/items/' + pdfMatch.id + '/content').get()
+          : null;
+        if (ab) pdfBuffer = Buffer.from(ab);
       } catch (e) { diag.fallbackDownloadErr = e.message; }
     }
     if (!pdfBuffer || pdfBuffer.length === 0) {
-      context.res = { status: 400, body: { error: 'Nao foi possivel baixar o PDF aprovado pra anexar no Omie', diag } };
+      context.res = { status: 500, body: { error: 'PDF localizado mas nao foi possivel baixar', diag } };
       return;
     }
     diag.pdfSize = pdfBuffer.length;
