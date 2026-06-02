@@ -108,23 +108,41 @@ function normalizaNumeroNF(num) {
 
 /**
  * Busca cliente/fornecedor no Omie por CNPJ.
- * Usa ConsultarCliente — retorna o cadastro completo se existir.
+ *
+ * ConsultarCliente NAO aceita CNPJ — so codigo_cliente_omie ou _integracao.
+ * Pra buscar por CNPJ, usamos ListarClientes com clientesFiltro.cnpj_cpf.
  */
 async function buscarCliente(cnpj, creds) {
   const cnpjLimpo = normalizaDoc(cnpj);
   try {
-    const resp = await callOmie('/geral/clientes/', 'ConsultarCliente', { cnpj_cpf: cnpjLimpo }, creds);
-    if (resp && resp.codigo_cliente_omie) {
-      return {
-        found: true,
-        codigo_cliente_omie: resp.codigo_cliente_omie,
-        razao: resp.razao_social || resp.nome_fantasia || ''
-      };
+    const resp = await callOmie(
+      '/geral/clientes/',
+      'ListarClientes',
+      {
+        pagina: 1,
+        registros_por_pagina: 5,
+        apenas_importado_api: 'N',
+        clientesFiltro: { cnpj_cpf: cnpjLimpo }
+      },
+      creds
+    );
+    const lista = (resp && (resp.clientes_cadastro || resp.clientes_cadastro_resumido)) || [];
+    if (lista.length === 0) {
+      return { found: false, error: 'Nenhum cliente com CNPJ ' + cnpjLimpo };
     }
+    // Pega o primeiro que bate exatamente
+    const exato = lista.find(function (c) {
+      return normalizaDoc(c.cnpj_cpf) === cnpjLimpo;
+    }) || lista[0];
+    return {
+      found: true,
+      codigo_cliente_omie: exato.codigo_cliente_omie,
+      razao: exato.razao_social || exato.nome_fantasia || '',
+      totalEncontrados: lista.length
+    };
   } catch (e) {
     return { found: false, error: e.message };
   }
-  return { found: false };
 }
 
 /**
@@ -283,6 +301,7 @@ async function anexarPDF(opts, creds) {
     : String(opts.pdfBuffer || '');
   if (!pdfBase64) throw new Error('pdfBuffer vazio');
   if (!opts.codigoLancamento) throw new Error('codigoLancamento obrigatorio');
+
 
   const param = {
     cCodIntAnexo: String(opts.codIntegracao || ('PRONEP-' + Date.now())).slice(0, 100),
