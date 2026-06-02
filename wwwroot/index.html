@@ -667,21 +667,46 @@
 <style>
   /* === SOL — Assistente IA === */
   /* === SAN — Floating Action Button (FAB) === */
+  /* === FAB SAN: balao de fala arrastavel === */
   .san-fab {
-    position: fixed; bottom: 24px; right: 24px;
-    height: 56px; padding: 0 18px 0 14px;
+    position: fixed; bottom: 100px; right: 24px;
+    width: 64px; height: 56px;
     background: linear-gradient(135deg, #1F4E79 0%, #27AAE1 100%);
-    color: #fff; border: 0; border-radius: 28px;
+    color: #fff; border: 0;
+    /* balao de fala: borda muito arredondada + setinha no canto inferior direito */
+    border-radius: 28px 28px 28px 6px;
     box-shadow: 0 6px 18px rgba(31,78,121,0.35);
     cursor: pointer; z-index: 9998;
-    display: inline-flex; align-items: center; gap: 8px;
-    transition: transform 0.2s, box-shadow 0.2s;
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    transition: transform 0.15s, box-shadow 0.2s, opacity 0.2s;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* setinha do balao apontando pra baixo-direita */
+  .san-fab::after {
+    content: ''; position: absolute; bottom: -1px; right: 2px;
+    width: 0; height: 0; border-style: solid; border-width: 0 0 12px 12px;
+    border-color: transparent transparent #27AAE1 transparent;
+    transform: rotate(0deg);
   }
   .san-fab:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(31,78,121,0.45); }
-  .san-fab:active { transform: translateY(0); }
+  .san-fab:active { transform: translateY(0); cursor: grabbing; }
+  .san-fab.dragging { cursor: grabbing; opacity: 0.92; transition: none; }
+  .san-fab.minimized { opacity: 0.55; transform: scale(0.78); }
+  .san-fab.minimized:hover { opacity: 1; transform: scale(1); }
   .san-fab.hidden { display: none !important; }
-  .san-fab .fab-icon { width: 26px; height: 26px; flex-shrink: 0; }
-  .san-fab .fab-label { font-size: 14px; font-weight: 700; letter-spacing: 0.6px; }
+  /* 3 pontinhos animados */
+  .san-fab .fab-dots { display: inline-flex; gap: 4px; }
+  .san-fab .fab-dots span {
+    width: 6px; height: 6px; border-radius: 50%; background: #fff;
+    animation: sanDotPulse 1.4s infinite ease-in-out;
+  }
+  .san-fab .fab-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .san-fab .fab-dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes sanDotPulse {
+    0%, 60%, 100% { opacity: 0.35; transform: translateY(0); }
+    30%           { opacity: 1;    transform: translateY(-2px); }
+  }
   .san-panel-overlay {
     position: fixed; inset: 0; background: rgba(31,78,121,0.18);
     z-index: 9998; opacity: 0; pointer-events: none;
@@ -1122,7 +1147,7 @@ window.solChat = (function() {
     var sugestoes = viewAtual === 'aprovadas'
       ? ['Quanto liberei este mês?', 'Aprovadas hoje', 'Top 5 fornecedores aprovados']
       : ['Lista minha fila por vencimento', 'NFs vencendo em D+5', 'Detecte anomalias na minha fila'];
-    var msgsHtml = state.history.map(function(m, idx){
+    var msgsHtml = state.history.slice().reverse().map(function(m, idx){
       if (m.role === 'user') {
         return '<div class="sol-msg"><div class="sol-msg-user">Você</div><div class="sol-msg-content">'+md(m.content)+'</div></div>';
       }
@@ -1193,7 +1218,7 @@ window.solChat = (function() {
         : viewAtual === 'lancamento'
           ? ['Como preencho o campo Valor?', 'Como anexar o PDF?', 'O que e a chave de acesso?']
           : ['Como navego no sistema?', 'Pra que serve esta tela?'];
-    var msgsHtml = state.history.map(function(m, idx){
+    var msgsHtml = state.history.slice().reverse().map(function(m, idx){
       if (m.role === 'user') {
         return '<div class="sol-msg"><div class="sol-msg-user">Voce</div><div class="sol-msg-content">'+md(m.content)+'</div></div>';
       }
@@ -1246,6 +1271,7 @@ window.solChat = (function() {
   }
 
   function toggle() {
+    try { var fab = document.getElementById('san-fab'); if (fab) fab.classList.remove('minimized'); } catch(e){}
     state.open = !state.open;
     // Lazy: hidrata historico na primeira vez que o user abre o chat
     if (state.open && !state.historicoHidratado) {
@@ -1361,12 +1387,82 @@ window.solChat = (function() {
     fab.id = 'san-fab';
     fab.className = 'san-fab';
     fab.title = 'Abrir SAN';
-    fab.innerHTML = ''+
-      '<svg class="fab-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">'+
-        '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>'+
-      '</svg>'+
-      '<span class="fab-label">SAN</span>';
-    fab.onclick = function() { toggle(); };
+    fab.innerHTML = '<div class="fab-dots"><span></span><span></span><span></span></div>';
+    fab.title = 'SAN — clique pra abrir · arraste pra mover';
+
+    // === Drag-to-move ===
+    var dragState = { active: false, moved: false, startX: 0, startY: 0, origRight: 0, origBottom: 0 };
+    function onPointerDown(e) {
+      var p = e.touches ? e.touches[0] : e;
+      dragState.active = true;
+      dragState.moved = false;
+      dragState.startX = p.clientX;
+      dragState.startY = p.clientY;
+      var r = fab.getBoundingClientRect();
+      dragState.origRight = window.innerWidth - r.right;
+      dragState.origBottom = window.innerHeight - r.bottom;
+      fab.classList.remove('minimized');
+    }
+    function onPointerMove(e) {
+      if (!dragState.active) return;
+      var p = e.touches ? e.touches[0] : e;
+      var dx = p.clientX - dragState.startX;
+      var dy = p.clientY - dragState.startY;
+      if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+        dragState.moved = true;
+        fab.classList.add('dragging');
+        var newRight = Math.max(8, dragState.origRight - dx);
+        var newBottom = Math.max(8, dragState.origBottom - dy);
+        // Limite: nao deixa sair da tela
+        newRight = Math.min(window.innerWidth - 64, newRight);
+        newBottom = Math.min(window.innerHeight - 60, newBottom);
+        fab.style.right = newRight + 'px';
+        fab.style.bottom = newBottom + 'px';
+        fab.style.left = 'auto'; fab.style.top = 'auto';
+        // Salva posicao
+        try { localStorage.setItem('sanFabPos', JSON.stringify({ right: newRight, bottom: newBottom })); } catch(e){}
+      }
+    }
+    function onPointerUp() {
+      if (!dragState.active) return;
+      dragState.active = false;
+      fab.classList.remove('dragging');
+      // Auto-minimiza apos drag pra ficar mais discreto
+      setTimeout(function(){ if (!state.open) fab.classList.add('minimized'); }, 1500);
+    }
+    fab.addEventListener('mousedown', onPointerDown);
+    fab.addEventListener('touchstart', onPointerDown, { passive: true });
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('touchmove', onPointerMove, { passive: true });
+    window.addEventListener('mouseup', onPointerUp);
+    window.addEventListener('touchend', onPointerUp);
+
+    // Restaurar posicao salva
+    try {
+      var saved = localStorage.getItem('sanFabPos');
+      if (saved) {
+        var pos = JSON.parse(saved);
+        fab.style.right = pos.right + 'px';
+        fab.style.bottom = pos.bottom + 'px';
+      }
+    } catch(e){}
+
+    // Auto-minimiza se ficar parado por 6s sem hover
+    var minTimer;
+    function scheduleMin() {
+      clearTimeout(minTimer);
+      minTimer = setTimeout(function(){ if (!state.open) fab.classList.add('minimized'); }, 6000);
+    }
+    fab.addEventListener('mouseenter', function(){ fab.classList.remove('minimized'); clearTimeout(minTimer); });
+    fab.addEventListener('mouseleave', scheduleMin);
+    scheduleMin();
+
+    // Click abre o chat (somente se nao foi drag)
+    fab.onclick = function(ev) {
+      if (dragState.moved) { dragState.moved = false; return; }
+      fab.classList.remove('minimized');
+      toggle();
+    };
     document.body.appendChild(fab);
 
     var overlay = document.createElement('div');
