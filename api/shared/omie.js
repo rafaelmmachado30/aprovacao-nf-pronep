@@ -107,35 +107,75 @@ function normalizaNumeroNF(num) {
 }
 
 /**
+ * Busca cliente/fornecedor no Omie por CNPJ.
+ * Usa ConsultarCliente — retorna o cadastro completo se existir.
+ */
+async function buscarCliente(cnpj, creds) {
+  const cnpjLimpo = normalizaDoc(cnpj);
+  try {
+    const resp = await callOmie('/geral/clientes/', 'ConsultarCliente', { cnpj_cpf: cnpjLimpo }, creds);
+    if (resp && resp.codigo_cliente_omie) {
+      return {
+        found: true,
+        codigo_cliente_omie: resp.codigo_cliente_omie,
+        razao: resp.razao_social || resp.nome_fantasia || ''
+      };
+    }
+  } catch (e) {
+    return { found: false, error: e.message };
+  }
+  return { found: false };
+}
+
+/**
  * Busca uma conta a pagar no Omie por CNPJ do fornecedor + numero da NF.
  *
- * Retorna { found: true, conta: {...} } ou { found: false, candidatos: N, tentativas: [...] }.
+ * Estrategia em 2 passos pra evitar paginar 4954+ registros:
+ *  1. ConsultarCliente por CNPJ -> codigo_cliente_omie
+ *  2. ListarContasPagar com clientesFiltro.codigo_cliente_omie
+ *     (filtro real do Omie, reduz pra ~poucas contas do fornecedor)
+ *  3. Match pelo numero NF (numero_documento OU numero_documento_fiscal)
  *
- * Estrategia: pagina pelos contas a pagar do fornecedor e filtra por numero NF.
- * Omie tem o campo "numero_documento" (com parcela tipo "12345/1") e a
- * "nota_fiscal" (so o numero da NF). Tentamos match em ambos.
+ * Se o filtro clientesFiltro falhar, cai pro fallback que pagina TUDO.
  */
 async function buscarContaPagar(opts, creds) {
   const cnpjAlvo = normalizaDoc(opts.cnpj);
   const numAlvo = normalizaNumeroNF(opts.numero);
   const valorAlvo = Number(opts.valor || 0);
-  const diag = { cnpjAlvo, numAlvo, valorAlvo, paginas: 0, totalLidos: 0, candidatos: [] };
+  const diag = {
+    cnpjAlvo, numAlvo, valorAlvo,
+    paginas: 0, totalLidos: 0,
+    candidatos: [], todosNumerosDoCliente: []
+  };
 
-  // ListarContasPagar paginado. Filtra por CNPJ no servidor se possivel.
-  // Tentamos primeiro com filtro especifico de CNPJ.
-  for (let pagina = 1; pagina <= 20; pagina++) {
+  // PASSO 1: achar codigo_cliente_omie via CNPJ
+  const cli = await buscarCliente(cnpjAlvo, creds);
+  diag.clienteOmie = cli;
+  if (!cli.found) {
+    diag.erroNoListar = 'Fornecedor com CNPJ ' + cnpjAlvo + ' nao cadastrado no Omie';
+    return { found: false, diag: diag };
+  }
+  const codCliente = cli.codigo_cliente_omie;
+
+  // PASSO 2: ListarContasPagar filtrando pelo codigo_cliente_omie
+  for (let pagina = 1; pagina <= 30; pagina++) {
     diag.paginas++;
     const param = {
       pagina: pagina,
       registros_por_pagina: 50,
       apenas_importado_api: 'N',
-      filtrar_por_cnpj: cnpjAlvo  // se Omie nao reconhece, ignora silenciosamente
+      clientesFiltro: { codigo_cliente_omie: codCliente }
     };
     let resp;
     try {
       resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
     } catch (e) {
       diag.erroNoListar = e.message;
+      // Fallback: tenta sem filtro de cliente (pagina mais)
+      if (pagina === 1) {
+        diag.tentouFallbackSemFiltro = true;
+        return await buscarContaSemFiltro(cnpjAlvo, numAlvo, creds, diag);
+      }
       break;
     }
     const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
@@ -143,15 +183,19 @@ async function buscarContaPagar(opts, creds) {
     if (items.length === 0) break;
 
     for (const it of items) {
-      const itDoc = normalizaDoc(it.cnpj_cpf_fornecedor || it.cnpj_cpf || '');
       const itNum = normalizaNumeroNF(it.numero_documento || '');
       const itNotaFiscal = normalizaNumeroNF(it.numero_documento_fiscal || it.nota_fiscal || '');
       const itValor = Number(it.valor_documento || 0);
+      // Guarda todos os numeros vistos pra debug se nao bater
+      diag.todosNumerosDoCliente.push({
+        numero_documento: it.numero_documento,
+        nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
+        valor: itValor,
+        codigo: it.codigo_lancamento_omie
+      });
 
-      // Match: doc bate E (numero bate em numero_documento OU nota_fiscal)
-      const docOk = itDoc && itDoc === cnpjAlvo;
       const numOk = (itNum && itNum === numAlvo) || (itNotaFiscal && itNotaFiscal === numAlvo);
-      if (docOk && numOk) {
+      if (numOk) {
         diag.candidatos.push({
           codigo_lancamento_omie: it.codigo_lancamento_omie,
           codigo_lancamento_integracao: it.codigo_lancamento_integracao,
@@ -163,17 +207,66 @@ async function buscarContaPagar(opts, creds) {
       }
     }
 
-    // Se ja achou algum candidato exato, retorna
     if (diag.candidatos.length > 0) {
-      const escolhido = diag.candidatos[0];
-      return { found: true, conta: escolhido, diag: diag };
+      return { found: true, conta: diag.candidatos[0], diag: diag };
     }
 
-    // Paginacao
     const totalPags = (resp && resp.total_de_paginas) || pagina;
     if (pagina >= totalPags) break;
   }
 
+  return { found: false, diag: diag };
+}
+
+/**
+ * Fallback: pagina TUDO sem filtro de cliente e tenta match por CNPJ+numero.
+ * Usado se o clientesFiltro nao for aceito pelo Omie (improvavel).
+ */
+async function buscarContaSemFiltro(cnpjAlvo, numAlvo, creds, diagPai) {
+  const diag = diagPai || { paginas: 0, totalLidos: 0, candidatos: [] };
+  diag.modoFallback = true;
+  for (let pagina = 1; pagina <= 100; pagina++) {
+    diag.paginas++;
+    const param = {
+      pagina: pagina,
+      registros_por_pagina: 50,
+      apenas_importado_api: 'N'
+    };
+    let resp;
+    try {
+      resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
+    } catch (e) {
+      diag.erroNoFallback = e.message;
+      break;
+    }
+    const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
+    diag.totalLidos += items.length;
+    if (items.length === 0) break;
+
+    for (const it of items) {
+      const itDoc = normalizaDoc(it.cnpj_cpf_fornecedor || it.cnpj_cpf || '');
+      const itNum = normalizaNumeroNF(it.numero_documento || '');
+      const itNotaFiscal = normalizaNumeroNF(it.numero_documento_fiscal || it.nota_fiscal || '');
+
+      const docOk = itDoc && itDoc === cnpjAlvo;
+      const numOk = (itNum && itNum === numAlvo) || (itNotaFiscal && itNotaFiscal === numAlvo);
+      if (docOk && numOk) {
+        diag.candidatos.push({
+          codigo_lancamento_omie: it.codigo_lancamento_omie,
+          numero_documento: it.numero_documento,
+          nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
+          valor: Number(it.valor_documento || 0),
+          status: it.status_titulo
+        });
+      }
+    }
+
+    if (diag.candidatos.length > 0) {
+      return { found: true, conta: diag.candidatos[0], diag: diag };
+    }
+    const totalPags = (resp && resp.total_de_paginas) || pagina;
+    if (pagina >= totalPags) break;
+  }
   return { found: false, diag: diag };
 }
 
@@ -207,6 +300,7 @@ async function anexarPDF(opts, creds) {
 
 module.exports = {
   getCredentials,
+  buscarCliente,
   buscarContaPagar,
   anexarPDF,
   normalizaDoc,
