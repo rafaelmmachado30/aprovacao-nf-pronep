@@ -30,7 +30,7 @@ const OMIE_BASE = 'https://app.omie.com.br/api/v1';
 const JANELA_DIAS_ANTES = 60;
 const JANELA_DIAS_DEPOIS = 120;
 // Limite de paginas pra evitar timeout SWA (30s)
-const MAX_PAGINAS = 15;
+const MAX_PAGINAS = 30;
 
 function getCredentials(unidade) {
   const u = String(unidade || '').toUpperCase();
@@ -151,10 +151,15 @@ async function buscarCliente(cnpj, creds) {
 /**
  * Busca uma conta a pagar no Omie.
  *
- * @param opts.cnpj — CNPJ do fornecedor (com ou sem mascara)
+ * Estrategia em 2 passos:
+ *  1. buscarCliente(cnpj) -> codigo_cliente_omie
+ *  2. ListarContasPagar filtrado por janela de data, match por
+ *     codigo_cliente_fornecedor + numero NF
+ *
+ * @param opts.cnpj — CNPJ do fornecedor
  * @param opts.numero — Numero da NF
  * @param opts.valor — Valor da NF (informativo, nao usado pra match)
- * @param opts.dataVencimento — Date | string ISO | DD/MM/AAAA (define janela de busca)
+ * @param opts.dataVencimento — Date | string ISO | DD/MM/AAAA
  */
 async function buscarContaPagar(opts, creds) {
   const cnpjAlvo = normalizaDoc(opts.cnpj);
@@ -163,8 +168,17 @@ async function buscarContaPagar(opts, creds) {
   const diag = {
     cnpjAlvo, numAlvo, valorAlvo,
     paginas: 0, totalLidos: 0,
-    candidatos: [], primeirosDocs: []
+    candidatos: [], primeirosDocs: [], primeiroDocCompleto: null
   };
+
+  // PASSO 1: resolver codigo_cliente_omie via CNPJ
+  const cli = await buscarCliente(cnpjAlvo, creds);
+  diag.clienteOmie = cli;
+  if (!cli.found) {
+    diag.erroNoListar = 'Fornecedor com CNPJ ' + cnpjAlvo + ' nao cadastrado no Omie';
+    return { found: false, diag: diag };
+  }
+  const codClienteAlvo = Number(cli.codigo_cliente_omie);
 
   // Calcula janela de data ao redor do vencimento
   let dtRef = null;
@@ -216,21 +230,26 @@ async function buscarContaPagar(opts, creds) {
     if (pagina === 1) {
       diag.primeirosDocs = items.slice(0, 3).map(function (it) {
         return {
-          cnpj: it.cnpj_cpf_fornecedor || it.cnpj_cpf,
+          codigo_cliente_fornecedor: it.codigo_cliente_fornecedor,
+          codigo_lancamento_omie: it.codigo_lancamento_omie,
           numero_documento: it.numero_documento,
           nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
           valor: it.valor_documento
         };
       });
+      // 1a conta completa pra debug
+      if (items[0]) {
+        diag.primeiroDocCompleto = Object.keys(items[0]);
+      }
     }
 
     for (const it of items) {
-      const itDoc = normalizaDoc(it.cnpj_cpf_fornecedor || it.cnpj_cpf || '');
+      const itCodCli = Number(it.codigo_cliente_fornecedor || 0);
       const itNum = normalizaNumeroNF(it.numero_documento || '');
       const itNotaFiscal = normalizaNumeroNF(it.numero_documento_fiscal || it.nota_fiscal || '');
       const itValor = Number(it.valor_documento || 0);
 
-      const docOk = itDoc && itDoc === cnpjAlvo;
+      const docOk = itCodCli && itCodCli === codClienteAlvo;
       const numOk = (itNum && itNum === numAlvo) || (itNotaFiscal && itNotaFiscal === numAlvo);
       if (docOk && numOk) {
         diag.candidatos.push({
