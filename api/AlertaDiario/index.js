@@ -510,6 +510,39 @@ module.exports = async function (context, req) {
       }
     }
 
+    // ===== Email consolidado pro admin (todas as fileiras) =====
+    const adminEmails = (process.env.ALERTA_ADMIN_EMAILS || 'rafael.machado@pronep.com.br')
+      .split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    if (adminEmails.length > 0) {
+      const gruposComNotas = Object.fromEntries(
+        Object.entries(grupos).filter(function(e) { return e[1].length > 0; })
+      );
+      const totalNFsGlobal = Object.values(gruposComNotas).reduce(function(s, ns) { return s + ns.length; }, 0);
+      if (totalNFsGlobal > 0) {
+        const totalValorGlobal = Object.values(gruposComNotas).reduce(function(s, ns) {
+          return s + ns.reduce(function(ss, n) { return ss + Number(n.Valor || 0); }, 0);
+        }, 0);
+        const statsGlobais = {
+          totalAprovadores: Object.keys(gruposComNotas).length,
+          totalNFs: totalNFsGlobal,
+          totalValor: totalValorGlobal,
+          totalValorFmt: totalValorGlobal.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        };
+        const { assunto: assAdmin, corpo: corpAdmin } = buildEmailAdminConsolidado(tipo, gruposComNotas, statsGlobais);
+        for (const adm of adminEmails) {
+          try {
+            await enviarEmailViaGraph(client, fromAddress, adm, assAdmin, corpAdmin);
+            stats.emailAdminEnviado = stats.emailAdminEnviado || [];
+            stats.emailAdminEnviado.push(adm);
+          } catch (e) {
+            stats.erros.push({ adminEmail: adm, erro: e.message });
+          }
+        }
+      } else {
+        stats.emailAdminSkipped = 'Sem NFs pendentes';
+      }
+    }
+
     stats.finalizadoEm = new Date().toISOString();
     stats.duracaoMs = Date.now() - new Date(stats.iniciadoEm).getTime();
     context.log && context.log('AlertaDiario concluido:', JSON.stringify(stats));
