@@ -386,6 +386,17 @@ async function anexarPDF(opts, creds) {
   };
 
   const resp = await callOmie('/geral/anexo/', 'IncluirAnexo', param, creds);
+  // Validacao do status retornado:
+  //  '0' = sucesso explicito
+  //  '6' = sucesso com warning ('arquivo X nao encontrado no zip' — msg
+  //         confusa do Omie, mas anexo eh CRIADO mesmo assim, owner=Integracao)
+  // Qualquer outro codigo eh falha real e deve lancar erro
+  const status = resp && resp.cCodStatus;
+  if (status && status !== '0' && status !== '6') {
+    const err = new Error('Omie rejeitou anexo: ' + (resp.cDesStatus || 'cCodStatus=' + status));
+    err.omieFault = resp;
+    throw err;
+  }
   return resp;
 }
 
