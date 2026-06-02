@@ -14,6 +14,7 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
+const { getUserRoles } = require('../shared/userRoles');
 const { notificar } = require('../shared/notificar');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { ClientSecretCredential } = require('@azure/identity');
@@ -219,7 +220,8 @@ module.exports = async function (context, req) {
     const f = normalizeFields(item.fields || {}, invColMap);
     diag.item = { Title: f.Title, Status: f.Status, Unidade: f.Unidade, Diretoria: f.Diretoria, AprovadorAtual: f.AprovadorAtual };
 
-    // RBAC + detecta perfil
+    // RBAC: 3 fontes de roles (claims JWT + principal Easy Auth + Graph AAD groups).
+    // SEMPRE mescla com Graph porque SWA principal nao popula grupos AAD.
     function readPrincipalRolesLocal(req) {
       const h = req.headers && req.headers['x-ms-client-principal'];
       if (!h) return [];
@@ -228,7 +230,12 @@ module.exports = async function (context, req) {
         return p.userRoles || [];
       } catch (e) { return []; }
     }
-    const userRoles = (user.claims && user.claims.roles) || readPrincipalRolesLocal(req);
+    const claimsRoles = (user.claims && user.claims.roles) || [];
+    const principalRolesRaw = readPrincipalRolesLocal(req);
+    const usefulPrincipalRoles = principalRolesRaw.filter(r => r !== 'authenticated' && r !== 'anonymous');
+    const graphRoles = await getUserRoles(user);
+    const userRoles = Array.from(new Set([...claimsRoles, ...usefulPrincipalRoles, ...graphRoles]));
+    diag.userRoles = userRoles;
     const isAdmin = aprovadorEmail === 'rafael.machado@pronep.com.br' || userRoles.includes('administrador');
     const isFinanceiro = userRoles.includes('financeiro_nf');
     const isAprovadorAtribuido = (f.AprovadorAtual || '').toLowerCase() === aprovadorEmail;
