@@ -140,7 +140,7 @@ module.exports = async function (context, req) {
     diag.step = 'fetch_item';
     const item = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items/' + itemId + '?expand=fields').get();
     const f = normalizeFields(item.fields || {}, cache.invColMap);
-    diag.nf = { numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor, unidade: f.Unidade, status: f.Status };
+    diag.nf = { numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor, unidade: f.Unidade, status: f.Status, dataVencimento: f.DataVencimento };
 
     if (f.Status !== 'Aprovada') {
       context.res = { status: 400, body: { error: 'NF nao esta aprovada (status atual: ' + f.Status + ')', diag } };
@@ -159,7 +159,8 @@ module.exports = async function (context, req) {
     const busca = await buscarContaPagar({
       cnpj: f.CNPJFornecedor,
       numero: f.NumeroNF,
-      valor: f.Valor
+      valor: f.Valor,
+      dataVencimento: f.DataVencimento
     }, creds);
     diag.buscaOmie = busca.diag;
 

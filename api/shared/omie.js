@@ -3,27 +3,35 @@
  *
  * Doc: https://developer.omie.com.br/
  * Endpoints usados:
- *   POST https://app.omie.com.br/api/v1/financas/contapagar/   (call=ListarContasPagar)
- *   POST https://app.omie.com.br/api/v1/geral/anexo/           (call=IncluirAnexo)
+ *   POST https://app.omie.com.br/api/v1/financas/contapagar/   (ListarContasPagar)
+ *   POST https://app.omie.com.br/api/v1/geral/clientes/        (ListarClientes)
+ *   POST https://app.omie.com.br/api/v1/geral/anexo/           (IncluirAnexo)
  *
  * Auth: cada empresa Omie (SP/RJ/ES da Pronep) tem seu proprio par app_key+app_secret.
+ *
  * App Settings:
  *   OMIE_APP_KEY_SP / OMIE_APP_SECRET_SP
  *   OMIE_APP_KEY_RJ / OMIE_APP_SECRET_RJ
  *   OMIE_APP_KEY_ES / OMIE_APP_SECRET_ES
  *
- * Rate limit Omie: ~60 req/min por app_key (varia). Helpers nao fazem throttle —
- * caller eh responsavel se chamar em batch.
+ * Rate limit Omie: ~60 req/min por app_key.
+ *
+ * IMPORTANTE: o lcpListarRequest do ListarContasPagar NAO aceita filtro de cliente
+ * (clientesFiltro, codigo_cliente_fornecedor, filtrar_por_cnpj, etc — todos rejeitados).
+ * Solucao: filtramos por janela de data de vencimento (filtrar_por_data_de e
+ * filtrar_por_data_ate) ao redor da data de vencimento da NF.
  */
 
 require('isomorphic-fetch');
 
 const OMIE_BASE = 'https://app.omie.com.br/api/v1';
 
-/**
- * Retorna { appKey, appSecret, empresa } pra unidade dada.
- * Lanca erro se a unidade nao tiver credenciais configuradas.
- */
+// Janela em dias antes/depois do vencimento da NF
+const JANELA_DIAS_ANTES = 60;
+const JANELA_DIAS_DEPOIS = 120;
+// Limite de paginas pra evitar timeout SWA (30s)
+const MAX_PAGINAS = 15;
+
 function getCredentials(unidade) {
   const u = String(unidade || '').toUpperCase();
   let appKey, appSecret, empresa;
@@ -43,15 +51,11 @@ function getCredentials(unidade) {
     throw new Error('Unidade nao suportada pra Omie: ' + unidade);
   }
   if (!appKey || !appSecret) {
-    throw new Error('Credenciais Omie nao configuradas pra unidade ' + u + ' (OMIE_APP_KEY_' + u + ' / OMIE_APP_SECRET_' + u + ')');
+    throw new Error('Credenciais Omie nao configuradas pra unidade ' + u);
   }
   return { appKey, appSecret, empresa };
 }
 
-/**
- * Helper REST: monta payload no formato Omie e chama endpoint.
- * Retorna o body parsed (ja JSON).
- */
 async function callOmie(endpoint, call, paramObj, creds) {
   const url = OMIE_BASE + endpoint;
   const body = {
@@ -75,7 +79,6 @@ async function callOmie(endpoint, call, paramObj, creds) {
   catch (e) {
     throw new Error('Omie retornou resposta nao-JSON (status ' + resp.status + '): ' + text.slice(0, 200));
   }
-  // Omie retorna erros com campo "faultstring" mesmo com HTTP 200 as vezes
   if (data && data.faultstring) {
     const err = new Error('Omie erro: ' + data.faultstring + ' (' + (data.faultcode || 'sem codigo') + ')');
     err.omieFault = data;
@@ -90,16 +93,10 @@ async function callOmie(endpoint, call, paramObj, creds) {
   return data;
 }
 
-/**
- * Normaliza CNPJ/CPF removendo tudo que nao for digito.
- */
 function normalizaDoc(doc) {
   return String(doc || '').replace(/\D/g, '');
 }
 
-/**
- * Normaliza numero da NF removendo zeros a esquerda e nao-alfanumericos.
- */
 function normalizaNumeroNF(num) {
   const limpo = String(num || '').replace(/[^A-Za-z0-9]/g, '');
   if (/^\d+$/.test(limpo)) return limpo.replace(/^0+/, '') || '0';
@@ -107,10 +104,17 @@ function normalizaNumeroNF(num) {
 }
 
 /**
- * Busca cliente/fornecedor no Omie por CNPJ.
- *
- * ConsultarCliente NAO aceita CNPJ — so codigo_cliente_omie ou _integracao.
- * Pra buscar por CNPJ, usamos ListarClientes com clientesFiltro.cnpj_cpf.
+ * Formata Date em DD/MM/AAAA (formato que o Omie usa).
+ */
+function fmtDataOmie(d) {
+  const dia = String(d.getDate()).padStart(2, '0');
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const ano = d.getFullYear();
+  return dia + '/' + mes + '/' + ano;
+}
+
+/**
+ * Busca cliente por CNPJ usando ListarClientes (ConsultarCliente NAO aceita CNPJ).
  */
 async function buscarCliente(cnpj, creds) {
   const cnpjLimpo = normalizaDoc(cnpj);
@@ -130,7 +134,6 @@ async function buscarCliente(cnpj, creds) {
     if (lista.length === 0) {
       return { found: false, error: 'Nenhum cliente com CNPJ ' + cnpjLimpo };
     }
-    // Pega o primeiro que bate exatamente
     const exato = lista.find(function (c) {
       return normalizaDoc(c.cnpj_cpf) === cnpjLimpo;
     }) || lista[0];
@@ -146,15 +149,12 @@ async function buscarCliente(cnpj, creds) {
 }
 
 /**
- * Busca uma conta a pagar no Omie por CNPJ do fornecedor + numero da NF.
+ * Busca uma conta a pagar no Omie.
  *
- * Estrategia em 2 passos pra evitar paginar 4954+ registros:
- *  1. ConsultarCliente por CNPJ -> codigo_cliente_omie
- *  2. ListarContasPagar com clientesFiltro.codigo_cliente_omie
- *     (filtro real do Omie, reduz pra ~poucas contas do fornecedor)
- *  3. Match pelo numero NF (numero_documento OU numero_documento_fiscal)
- *
- * Se o filtro clientesFiltro falhar, cai pro fallback que pagina TUDO.
+ * @param opts.cnpj — CNPJ do fornecedor (com ou sem mascara)
+ * @param opts.numero — Numero da NF
+ * @param opts.valor — Valor da NF (informativo, nao usado pra match)
+ * @param opts.dataVencimento — Date | string ISO | DD/MM/AAAA (define janela de busca)
  */
 async function buscarContaPagar(opts, creds) {
   const cnpjAlvo = normalizaDoc(opts.cnpj);
@@ -163,57 +163,76 @@ async function buscarContaPagar(opts, creds) {
   const diag = {
     cnpjAlvo, numAlvo, valorAlvo,
     paginas: 0, totalLidos: 0,
-    candidatos: [], todosNumerosDoCliente: []
+    candidatos: [], primeirosDocs: []
   };
 
-  // PASSO 1: achar codigo_cliente_omie via CNPJ
-  const cli = await buscarCliente(cnpjAlvo, creds);
-  diag.clienteOmie = cli;
-  if (!cli.found) {
-    diag.erroNoListar = 'Fornecedor com CNPJ ' + cnpjAlvo + ' nao cadastrado no Omie';
-    return { found: false, diag: diag };
+  // Calcula janela de data ao redor do vencimento
+  let dtRef = null;
+  if (opts.dataVencimento) {
+    const v = opts.dataVencimento;
+    if (v instanceof Date) dtRef = v;
+    else if (typeof v === 'string') {
+      // Tenta ISO primeiro, depois DD/MM/AAAA
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) dtRef = d;
+      else {
+        const m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+        if (m) dtRef = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+      }
+    }
   }
-  const codCliente = cli.codigo_cliente_omie;
+  if (!dtRef || isNaN(dtRef.getTime())) {
+    // Fallback: usa hoje como referencia
+    dtRef = new Date();
+    diag.dataReferenciaSource = 'fallback_hoje';
+  } else {
+    diag.dataReferenciaSource = 'dataVencimento_do_SP';
+  }
+  const dtDe = new Date(dtRef.getTime() - JANELA_DIAS_ANTES * 86400 * 1000);
+  const dtAte = new Date(dtRef.getTime() + JANELA_DIAS_DEPOIS * 86400 * 1000);
+  diag.janela = { de: fmtDataOmie(dtDe), ate: fmtDataOmie(dtAte), dias: JANELA_DIAS_ANTES + JANELA_DIAS_DEPOIS };
 
-  // PASSO 2: ListarContasPagar filtrando pelo codigo_cliente_omie
-  for (let pagina = 1; pagina <= 30; pagina++) {
+  for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
     diag.paginas++;
     const param = {
       pagina: pagina,
       registros_por_pagina: 50,
       apenas_importado_api: 'N',
-      clientesFiltro: { codigo_cliente_omie: codCliente }
+      filtrar_por_data_de: fmtDataOmie(dtDe),
+      filtrar_por_data_ate: fmtDataOmie(dtAte)
     };
     let resp;
     try {
       resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
     } catch (e) {
       diag.erroNoListar = e.message;
-      // Fallback: tenta sem filtro de cliente (pagina mais)
-      if (pagina === 1) {
-        diag.tentouFallbackSemFiltro = true;
-        return await buscarContaSemFiltro(cnpjAlvo, numAlvo, creds, diag);
-      }
       break;
     }
     const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
     diag.totalLidos += items.length;
     if (items.length === 0) break;
 
+    // Guarda alguns documentos pra debug
+    if (pagina === 1) {
+      diag.primeirosDocs = items.slice(0, 3).map(function (it) {
+        return {
+          cnpj: it.cnpj_cpf_fornecedor || it.cnpj_cpf,
+          numero_documento: it.numero_documento,
+          nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
+          valor: it.valor_documento
+        };
+      });
+    }
+
     for (const it of items) {
+      const itDoc = normalizaDoc(it.cnpj_cpf_fornecedor || it.cnpj_cpf || '');
       const itNum = normalizaNumeroNF(it.numero_documento || '');
       const itNotaFiscal = normalizaNumeroNF(it.numero_documento_fiscal || it.nota_fiscal || '');
       const itValor = Number(it.valor_documento || 0);
-      // Guarda todos os numeros vistos pra debug se nao bater
-      diag.todosNumerosDoCliente.push({
-        numero_documento: it.numero_documento,
-        nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
-        valor: itValor,
-        codigo: it.codigo_lancamento_omie
-      });
 
+      const docOk = itDoc && itDoc === cnpjAlvo;
       const numOk = (itNum && itNum === numAlvo) || (itNotaFiscal && itNotaFiscal === numAlvo);
-      if (numOk) {
+      if (docOk && numOk) {
         diag.candidatos.push({
           codigo_lancamento_omie: it.codigo_lancamento_omie,
           codigo_lancamento_integracao: it.codigo_lancamento_integracao,
@@ -237,63 +256,7 @@ async function buscarContaPagar(opts, creds) {
 }
 
 /**
- * Fallback: pagina TUDO sem filtro de cliente e tenta match por CNPJ+numero.
- * Usado se o clientesFiltro nao for aceito pelo Omie (improvavel).
- */
-async function buscarContaSemFiltro(cnpjAlvo, numAlvo, creds, diagPai) {
-  const diag = diagPai || { paginas: 0, totalLidos: 0, candidatos: [] };
-  diag.modoFallback = true;
-  for (let pagina = 1; pagina <= 100; pagina++) {
-    diag.paginas++;
-    const param = {
-      pagina: pagina,
-      registros_por_pagina: 50,
-      apenas_importado_api: 'N'
-    };
-    let resp;
-    try {
-      resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
-    } catch (e) {
-      diag.erroNoFallback = e.message;
-      break;
-    }
-    const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
-    diag.totalLidos += items.length;
-    if (items.length === 0) break;
-
-    for (const it of items) {
-      const itDoc = normalizaDoc(it.cnpj_cpf_fornecedor || it.cnpj_cpf || '');
-      const itNum = normalizaNumeroNF(it.numero_documento || '');
-      const itNotaFiscal = normalizaNumeroNF(it.numero_documento_fiscal || it.nota_fiscal || '');
-
-      const docOk = itDoc && itDoc === cnpjAlvo;
-      const numOk = (itNum && itNum === numAlvo) || (itNotaFiscal && itNotaFiscal === numAlvo);
-      if (docOk && numOk) {
-        diag.candidatos.push({
-          codigo_lancamento_omie: it.codigo_lancamento_omie,
-          numero_documento: it.numero_documento,
-          nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
-          valor: Number(it.valor_documento || 0),
-          status: it.status_titulo
-        });
-      }
-    }
-
-    if (diag.candidatos.length > 0) {
-      return { found: true, conta: diag.candidatos[0], diag: diag };
-    }
-    const totalPags = (resp && resp.total_de_paginas) || pagina;
-    if (pagina >= totalPags) break;
-  }
-  return { found: false, diag: diag };
-}
-
-/**
- * Anexa PDF a uma conta a pagar do Omie.
- * @param opts.codigoLancamento — codigo_lancamento_omie da conta
- * @param opts.nomeArquivo — ex: "NF-12345_FORNECEDOR.pdf"
- * @param opts.pdfBuffer — Buffer com bytes do PDF
- * @param opts.codIntegracao — chave de idempotencia (ex: "PRONEP-NF-{itemId}")
+ * Anexa PDF a uma conta a pagar do Omie via IncluirAnexo.
  */
 async function anexarPDF(opts, creds) {
   const pdfBase64 = Buffer.isBuffer(opts.pdfBuffer)
@@ -302,10 +265,9 @@ async function anexarPDF(opts, creds) {
   if (!pdfBase64) throw new Error('pdfBuffer vazio');
   if (!opts.codigoLancamento) throw new Error('codigoLancamento obrigatorio');
 
-
   const param = {
     cCodIntAnexo: String(opts.codIntegracao || ('PRONEP-' + Date.now())).slice(0, 100),
-    nIdAnexo: 0,  // 0 = novo (Omie cria id)
+    nIdAnexo: 0,
     cTabela: 'conta-pagar',
     nId: Number(opts.codigoLancamento),
     cNomeArquivo: String(opts.nomeArquivo || 'NF.pdf').slice(0, 100),
@@ -323,5 +285,6 @@ module.exports = {
   buscarContaPagar,
   anexarPDF,
   normalizaDoc,
-  normalizaNumeroNF
+  normalizaNumeroNF,
+  fmtDataOmie
 };
