@@ -31,7 +31,7 @@ const OMIE_BASE = 'https://app.omie.com.br/api/v1';
 const JANELA_DIAS_ANTES = 30;
 const JANELA_DIAS_DEPOIS = 60;
 // Limite de paginas pra evitar timeout SWA (30s)
-const MAX_PAGINAS = 30;
+const MAX_PAGINAS = 50;
 
 function getCredentials(unidade) {
   const u = String(unidade || '').toUpperCase();
@@ -214,9 +214,7 @@ async function buscarContaPagar(opts, creds) {
       registros_por_pagina: 50,
       apenas_importado_api: 'N',
       filtrar_por_data_de: fmtDataOmie(dtDe),
-      filtrar_por_data_ate: fmtDataOmie(dtAte),
-      // Decrescente: contas mais recentes primeiro (NF integrada agora geralmente eh nova no Omie)
-      ordenar_decrescente: 'S'
+      filtrar_por_data_ate: fmtDataOmie(dtAte)
     };
     let resp;
     try {
