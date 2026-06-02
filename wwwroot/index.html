@@ -4913,7 +4913,7 @@ function renderFilaAprovacaoView() {
             const trStyle = venceForaPrazo ? 'background:var(--vermelho-bg)' : '';
             return `
             <tr style="${trStyle}">
-              <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero}/${n.serie}</span></td>
+              <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero || ''}${n.serie ? '/' + n.serie : ''}</span></td>
               <td>${fornecedorOf(n).razao}<br><span class="small muted mono">${formatarCNPJ(fornecedorOf(n).cnpj)}</span></td>
               <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
               <td>${n.diretoria}</td>
@@ -6079,7 +6079,7 @@ function openNFDetail(id) {
     <span class="close-x" onclick="closeModal()">×</span>
     <h3>${n.id} · ${f.razao}</h3>
     <table class="data" style="margin-bottom:14px">
-      <tr><th>Número/Série</th><td>${n.numero} / ${n.serie}</td></tr>
+      <tr><th>${n.serie ? 'Número/Série' : 'Número'}</th><td>${n.numero || ''}${n.serie ? ' / ' + n.serie : ''}</td></tr>
       <tr><th>CNPJ</th><td class="mono">${f.cnpj}</td></tr>
       <tr><th>Unidade · Diretoria</th><td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span> · ${n.diretoria}</td></tr>
       <tr><th>Vencimento</th><td>${fmtDate(n.vencimento)}</td></tr>
