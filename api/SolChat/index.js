@@ -19,6 +19,7 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
+const { getUserRoles } = require('../shared/userRoles');
 const { runSol } = require('../shared/sol');
 const { salvar: salvarHistorico } = require('../shared/solHistorico');
 
@@ -58,7 +59,12 @@ module.exports = async function (context, req) {
 
     const history = Array.isArray(body.history) ? body.history.slice(-20) : []; // ultima 20 msgs
     const viewAtual = String(body.view || 'fila-aprovacao');
-    const isAdmin = detectAdminFromHeaders(req, user);
+    // Detecta admin/financeiro via grupos AAD (Graph) + fallbacks legacy
+    const adminFromHeader = detectAdminFromHeaders(req, user);
+    let graphRoles = [];
+    try { graphRoles = await getUserRoles(user); } catch (e) {}
+    const isAdmin = adminFromHeader || graphRoles.includes('administrador');
+    const isFinanceiro = graphRoles.includes('financeiro_nf');
 
     if (!process.env.OPENAI_API_KEY) {
       context.res = { status: 500, body: { error: 'OPENAI_API_KEY nao configurada no Azure SWA' } };
@@ -71,6 +77,7 @@ module.exports = async function (context, req) {
     const result = await runSol(history, message, user, {
       viewAtual: viewAtual,
       isAdmin: isAdmin,
+      isFinanceiro: isFinanceiro,
       maxIter: 8
     });
 

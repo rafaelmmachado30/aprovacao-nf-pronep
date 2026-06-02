@@ -440,8 +440,9 @@ function normalizeItem(item, invColMap) {
 }
 
 // Aplica RBAC: gestor ve onde AprovadorAtual = email; admin/financeiro ve tudo
-function filtraRBAC(notas, user, isAdmin) {
-  if (isAdmin) return notas;
+function filtraRBAC(notas, user, isAdmin, isFinanceiro) {
+  // Admin e Financeiro veem TUDO (relatorios pra equipe inteira)
+  if (isAdmin || isFinanceiro) return notas;
   const email = (user.email || '').toLowerCase();
   return notas.filter(n => {
     const apv = String(n.AprovadorAtual || '').toLowerCase();
@@ -459,7 +460,7 @@ async function tool_listar_fila(args, ctx) {
   // Filtra: status Lancada (pendente) ou EmAprovacao
   notas = notas.filter(n => ['Lancada','EmAprovacao','Pendente'].includes(String(n.Status || '')));
   // Filtra RBAC (admin/financeiro veem tudo, resto so o seu)
-  notas = filtraRBAC(notas, ctx.user, ctx.isAdmin);
+  notas = filtraRBAC(notas, ctx.user, ctx.isAdmin, ctx.isFinanceiro);
   if (args.unidade && args.unidade !== 'TODAS') {
     notas = notas.filter(n => String(n.Unidade || '') === args.unidade);
   }
@@ -519,7 +520,7 @@ async function tool_listar_aprovadas(args, ctx) {
     });
   }
   // RBAC: usuario so ve oque aprovou ou esta no escopo dele
-  notas = filtraRBAC(notas, ctx.user, ctx.isAdmin);
+  notas = filtraRBAC(notas, ctx.user, ctx.isAdmin, ctx.isFinanceiro);
   if (args.unidade && args.unidade !== 'TODAS') {
     notas = notas.filter(n => String(n.Unidade || '') === args.unidade);
   }
@@ -811,10 +812,11 @@ async function runSol(history, userMessage, user, opts) {
   const maxIter = opts.maxIter || 8;
   const viewAtual = opts.viewAtual || 'fila-aprovacao';
   const isAdmin = !!opts.isAdmin;
+  const isFinanceiro = !!opts.isFinanceiro;
 
   const client = await getGraphClient();
   const { siteId, listNotasId, invColMap } = await resolveSiteAndLists(client);
-  const ctx = { user, isAdmin, gr: { client, siteId, listNotasId, invColMap } };
+  const ctx = { user, isAdmin, isFinanceiro, gr: { client, siteId, listNotasId, invColMap } };
   const systemPrompt = buildSystemPrompt(user, viewAtual);
 
   // Tenta Anthropic primeiro
