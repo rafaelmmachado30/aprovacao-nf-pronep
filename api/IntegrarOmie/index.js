@@ -305,6 +305,11 @@ module.exports = async function (context, req) {
     if (colMap['IntegradoOmieEm']) patch[colMap['IntegradoOmieEm']] = new Date().toISOString();
     if (colMap['IntegradoOmieRef']) patch[colMap['IntegradoOmieRef']] = String(codigoLancamento);
     if (colMap['IntegradoOmieEmpresa']) patch[colMap['IntegradoOmieEmpresa']] = creds.empresa;
+    // Tambem marca como Processado (integracao com Omie = fim do fluxo financeiro)
+    if (colMap['Processado']) patch[colMap['Processado']] = true;
+    if (colMap['ProcessadoPor']) patch[colMap['ProcessadoPor']] = user.email || '';
+    if (colMap['ProcessadoEm']) patch[colMap['ProcessadoEm']] = new Date().toISOString();
+    diag.spPatch = patch;
     await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items/' + itemId + '/fields').patch(patch);
 
     diag.step = 'audit';
@@ -317,7 +322,9 @@ module.exports = async function (context, req) {
         nomeArquivo: nomeArq,
         pdfSize: pdfBuffer.length,
         fornecedor: f.CNPJFornecedor,
-        valor: f.Valor
+        valor: f.Valor,
+        anexoResp: anexoResp,
+        codIntegracao: 'PRONEP-NF-' + itemId
       }
     ).catch(function(){});
 

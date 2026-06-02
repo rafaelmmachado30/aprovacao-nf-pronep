@@ -30,6 +30,7 @@
 require('isomorphic-fetch');
 const { notificar } = require('../shared/notificar');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
+const { getUser } = require('../shared/auth');
 const crypto = require('crypto');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
@@ -347,16 +348,23 @@ module.exports = async function (context, req) {
     diag.hash = hash;
 
     diag.step = 'principal';
-    const principal = readClientPrincipal(req);
-    const submitterEmail = (principal && principal.userDetails) || 'desconhecido@pronep.com.br';
-    diag.submitter = submitterEmail;
-    // Constroi objeto user pra audit log (formato esperado: { oid, email, name })
-    const submitterOid = (principal && principal.userId) ||
-      (principal && principal.claims && (
-        (principal.claims.find && principal.claims.find(c => c.typ === 'http://schemas.microsoft.com/identity/claims/objectidentifier'))
-        || (principal.claims.find && principal.claims.find(c => c.typ === 'oid'))
-      ) || { val: '' }).val || '';
-    const user = { oid: submitterOid, email: submitterEmail, name: submitterEmail };
+    // getUser trata BOTH Easy Auth (cookie SWA) E Teams SSO (Bearer JWT).
+    // Se for Teams Personal Tab, o cookie SWA nao vem mas o JWT vem.
+    const usr = await getUser(req);
+    if (!usr || !usr.email) {
+      // Fallback final pra Easy Auth raw (legacy)
+      const principal = readClientPrincipal(req);
+      const fallbackEmail = (principal && principal.userDetails) || 'desconhecido@pronep.com.br';
+      diag.submitter = fallbackEmail;
+      diag.submitterSource = principal ? 'easy_auth_raw' : 'desconhecido';
+      var user = { oid: '', email: fallbackEmail, name: fallbackEmail };
+      var submitterEmail = fallbackEmail;
+    } else {
+      diag.submitter = usr.email;
+      diag.submitterSource = usr.source || 'shared_auth';
+      var user = { oid: usr.oid || '', email: usr.email, name: usr.name || usr.email };
+      var submitterEmail = usr.email;
+    }
 
     diag.step = 'graph';
     const client = await getGraphClient();
