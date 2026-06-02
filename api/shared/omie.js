@@ -23,6 +23,7 @@
  */
 
 require('isomorphic-fetch');
+const crypto = require('crypto');
 
 const OMIE_BASE = 'https://app.omie.com.br/api/v1';
 
@@ -284,12 +285,17 @@ async function anexarPDF(opts, creds) {
   if (!pdfBase64) throw new Error('pdfBuffer vazio');
   if (!opts.codigoLancamento) throw new Error('codigoLancamento obrigatorio');
 
+  // cMd5: hash MD5 do arquivo (em hex). Obrigatorio pelo Omie pra verificar integridade.
+  const pdfBin = Buffer.isBuffer(opts.pdfBuffer) ? opts.pdfBuffer : Buffer.from(pdfBase64, 'base64');
+  const cMd5 = crypto.createHash('md5').update(pdfBin).digest('hex');
+
   const param = {
     cCodIntAnexo: String(opts.codIntegracao || ('PRONEP-' + Date.now())).slice(0, 100),
     cTabela: 'conta-pagar',
     nId: Number(opts.codigoLancamento),
     cNomeArquivo: String(opts.nomeArquivo || 'NF.pdf').slice(0, 100),
     cTipoArquivo: 'pdf',
+    cMd5: cMd5,
     cArquivo: pdfBase64
   };
 
