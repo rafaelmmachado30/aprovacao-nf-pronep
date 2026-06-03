@@ -470,11 +470,21 @@ module.exports = async function (context, req) {
       UrlPDF:          uploadResp.webUrl || '',  // formatByType detecta Hyperlink no SP e formata { Url, Description }
       UrlPDFAprovado:  null                       // preenchido na aprovacao
     };
-    // Adiciona campos opcionais APENAS se as colunas existirem no SP
-    // (assim nao quebra antes do admin criar as colunas)
-    if (colMap && colMap['Serie']) rawFields.Serie = serie || '';
-    if (colMap && colMap['Observacao']) rawFields.Observacao = observacao || '';
-    diag.colunasOpcionais = { temSerie: !!(colMap && colMap['Serie']), temObservacao: !!(colMap && colMap['Observacao']) };
+    // Adiciona campos opcionais APENAS se as colunas existirem no SP.
+    // Busca case-insensitive (admin pode ter criado 'serie' ou 'Serie' etc).
+    function findColCI(name) {
+      if (!colMap) return null;
+      const lc = String(name).toLowerCase();
+      for (const k of Object.keys(colMap)) {
+        if (k.toLowerCase() === lc) return k;  // retorna displayName real do SP
+      }
+      return null;
+    }
+    const colSerieReal = findColCI('Serie');
+    const colObsReal = findColCI('Observacao');
+    if (colSerieReal) rawFields[colSerieReal] = serie || '';
+    if (colObsReal) rawFields[colObsReal] = observacao || '';
+    diag.colunasOpcionais = { colSerie: colSerieReal, colObservacao: colObsReal };
 
     const itemFieldsRaw = buildFieldsObject(colMap, rawFields);
     // Aplica formatacao por tipo (com log detalhado pra debug)
