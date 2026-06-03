@@ -3701,8 +3701,13 @@ const views = {
             <option>Serviços</option>
             <option>Materiais</option>
             <option>Locação</option>
-            <option>Reembolso</option>
             <option>Medicamentos</option>
+            <option>Reembolso</option>
+            <option>Pensão</option>
+            <option>Benefício</option>
+            <option>Férias</option>
+            <option>Décimo Terceiro</option>
+            <option>Rescisão</option>
             <option>Outros</option>
           </select>
         </div>
@@ -4194,7 +4199,7 @@ function abrirModalFornecedor(idx) {
       <div class="form-row">
         <label>Categoria *</label>
         <select id="frn-categoria" onchange="onCategoriaFornecedorChange()">
-          ${['Serviços','Materiais','Locação','Reembolso','Medicamentos','Outros'].map(c => `<option${x.categoria===c?' selected':''}>${c}</option>`).join('')}
+          ${['Serviços','Materiais','Locação','Medicamentos','Reembolso','Pensão','Benefício','Férias','Décimo Terceiro','Rescisão','Outros'].map(c => `<option${x.categoria===c?' selected':''}>${c}</option>`).join('')}
         </select>
       </div>
       <div class="form-row" id="frn-descricao-outros-row" style="grid-column:1/-1;display:${x.categoria==='Outros'?'':'none'}">
@@ -4202,7 +4207,7 @@ function abrirModalFornecedor(idx) {
         <input id="frn-descricao-outros" value="${x.descricaoOutros || ''}" placeholder="DESCREVA A ATIVIDADE OU O SERVIÇO"
                style="text-transform:uppercase" oninput="this.value = this.value.toUpperCase()" maxlength="200">
         <div class="small muted" style="margin-top:4px;color:#C62828">
-          Atenção: categoria "Outros" só permite Pessoa Física (CPF). Pra cadastrar empresa (CNPJ), use uma das outras categorias.
+          Atenção: categorias <b>Outros, Reembolso, Pensão, Benefício, Férias, Décimo Terceiro e Rescisão</b> são exclusivas pra Pessoa Física (CPF). Pra cadastrar empresa (CNPJ), use Serviços, Materiais, Locação ou Medicamentos.
         </div>
       </div>
       <div class="form-row">
@@ -4251,9 +4256,13 @@ function abrirModalFornecedor(idx) {
 // Quando Categoria muda no modal de Fornecedor:
 //  - Mostra/esconde campo Descricao quando Outros
 //  - Forca TipoDocumento=CPF (PF) e desabilita opcao CNPJ quando Outros
+// Categorias que forçam CPF (folha de PF): reembolso, pensao, beneficio, ferias, 13o, rescisao, outros
+var CATEGORIAS_PF_ONLY = ['Outros','Reembolso','Pensão','Benefício','Férias','Décimo Terceiro','Rescisão'];
+
 function onCategoriaFornecedorChange() {
   const cat = (document.getElementById('frn-categoria') || {}).value || '';
-  const ehOutros = cat === 'Outros';
+  const ehPFOnly = CATEGORIAS_PF_ONLY.indexOf(cat) !== -1;
+  const ehOutros = cat === 'Outros';  // mantido pra mostrar campo Descricao
   const descRow = document.getElementById('frn-descricao-outros-row');
   if (descRow) descRow.style.display = ehOutros ? '' : 'none';
 
@@ -4262,8 +4271,8 @@ function onCategoriaFornecedorChange() {
   const optCNPJ = selectTipo.querySelector('option[value="CNPJ"]');
   const optCPF  = selectTipo.querySelector('option[value="CPF"]');
 
-  if (ehOutros) {
-    // Categoria Outros: forca CPF + desabilita CNPJ
+  if (ehPFOnly) {
+    // Categoria de folha PF: forca CPF + desabilita CNPJ
     selectTipo.value = 'CPF';
     if (optCNPJ) optCNPJ.disabled = true;
     if (optCPF)  optCPF.disabled = false;
