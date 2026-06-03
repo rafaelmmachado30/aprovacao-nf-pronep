@@ -321,7 +321,7 @@ module.exports = async function (context, req) {
     const {
       fornecedorCNPJ, fornecedorRazao, numero, serie, valor, vencimento,
       unidade, diretoria, negociadoCom, descricao, observacao,
-      fileBase64, fileName
+      fileBase64, fileName, solicitanteEmail
     } = body;
 
     // Validacao
@@ -348,23 +348,43 @@ module.exports = async function (context, req) {
     diag.hash = hash;
 
     diag.step = 'principal';
-    // getUser trata BOTH Easy Auth (cookie SWA) E Teams SSO (Bearer JWT).
-    // Se for Teams Personal Tab, o cookie SWA nao vem mas o JWT vem.
+    // Resolve solicitante em CASCATA pra evitar 'desconhecido':
+    //   1. getUser(req)               — Easy Auth ou Teams SSO (oficial)
+    //   2. principal.userDetails      — Easy Auth raw (cookie SWA)
+    //   3. body.solicitanteEmail      — front envia como hint (sessão JS)
+    //   4. 'desconhecido@pronep.com.br' (ULTIMO RECURSO)
     const usr = await getUser(req);
-    if (!usr || !usr.email) {
-      // Fallback final pra Easy Auth raw (legacy)
-      const principal = readClientPrincipal(req);
-      const fallbackEmail = (principal && principal.userDetails) || 'desconhecido@pronep.com.br';
-      diag.submitter = fallbackEmail;
-      diag.submitterSource = principal ? 'easy_auth_raw' : 'desconhecido';
-      var user = { oid: '', email: fallbackEmail, name: fallbackEmail };
-      var submitterEmail = fallbackEmail;
+    const principal = readClientPrincipal(req);
+    const principalEmail = (principal && principal.userDetails) || '';
+    const validEmail = function(e) {
+      return typeof e === 'string' && e.length > 5 && e.includes('@') && !e.startsWith('desconhecido');
+    };
+    var submitterEmail, submitterSource, user;
+    if (usr && validEmail(usr.email)) {
+      submitterEmail = usr.email;
+      submitterSource = 'shared_auth_' + (usr.source || 'unknown');
+      user = { oid: usr.oid || '', email: usr.email, name: usr.name || usr.email };
+    } else if (validEmail(principalEmail)) {
+      submitterEmail = principalEmail.toLowerCase();
+      submitterSource = 'easy_auth_raw';
+      user = { oid: (principal && principal.userId) || '', email: submitterEmail, name: principalEmail };
+    } else if (validEmail(solicitanteEmail)) {
+      submitterEmail = String(solicitanteEmail).toLowerCase();
+      submitterSource = 'body_hint';
+      user = { oid: '', email: submitterEmail, name: submitterEmail };
     } else {
-      diag.submitter = usr.email;
-      diag.submitterSource = usr.source || 'shared_auth';
-      var user = { oid: usr.oid || '', email: usr.email, name: usr.name || usr.email };
-      var submitterEmail = usr.email;
+      submitterEmail = 'desconhecido@pronep.com.br';
+      submitterSource = 'desconhecido';
+      user = { oid: '', email: submitterEmail, name: submitterEmail };
     }
+    diag.submitter = submitterEmail;
+    diag.submitterSource = submitterSource;
+    diag.submitterDebug = {
+      getUserOk: !!(usr && usr.email),
+      principalEmailOk: !!validEmail(principalEmail),
+      bodyEmailOk: !!validEmail(solicitanteEmail),
+      authError: req._authError || null
+    };
 
     diag.step = 'graph';
     const client = await getGraphClient();
@@ -433,6 +453,7 @@ module.exports = async function (context, req) {
     const rawFields = {
       Title:           title,
       NumeroNF:        numero || '',
+      Serie:           serie || '',
       CNPJFornecedor:  fornecedorCNPJ,
       Observacao:      observacao || '',
       Descricao:       descricao || '',

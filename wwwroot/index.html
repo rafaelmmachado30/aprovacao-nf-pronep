@@ -2341,7 +2341,7 @@ async function carregarNotasReais() {
         id: 'ID-' + n.id,
         spId: n.id,
         numero: String(n.NumeroNF || ''),
-        serie: '',
+        serie: String(n.Serie || ''),
         fornecedorIdx: fornIdx >= 0 ? fornIdx : null,
         fornecedorCnpj: cnpj,
         fornecedorRazao: razaoLookup,
@@ -6137,6 +6137,7 @@ async function submitNF() {
       negociadoCom:    negociouComEmail || null,
       descricao:       descricao,
       observacao:      (document.getElementById('frm-observacao') || {}).value || '',
+      solicitanteEmail: (currentUser && currentUser.email) || '',
       fileBase64:      dataURL,
       fileName:        file.name
     };
