@@ -4337,8 +4337,12 @@ function atualizaCampoDocumento() {
       btnBuscar.style.opacity = '';
     }
   }
-  // Limpa o campo se trocou o tipo
-  input.value = '';
+  // So limpa o campo se o valor atual for INCOMPATIVEL com o novo tipo
+  // (evita apagar CPF valido quando user muda Categoria que apenas re-chama esta funcao)
+  const digitosAtuais = (input.value || '').replace(/\D/g, '').length;
+  const tipoEsperaCPF = (tipo === 'CPF');
+  const valorJaCompativel = (tipoEsperaCPF && digitosAtuais <= 11) || (!tipoEsperaCPF && digitosAtuais === 14);
+  if (!valorJaCompativel) input.value = '';
   const msg = document.getElementById('frn-cnpj-msg');
   if (msg) msg.textContent = '';
 }
@@ -5572,7 +5576,33 @@ function onFornChange() {
   const f = fornecedores[parseInt(idx)];
   if (!f) return;
   document.getElementById('frm-categoria').value = f.categoria || '';
-  // Mostra/esconde campo descricao baseado em Categoria='Outros'
+
+  // Detecta se fornecedor eh Pessoa Fisica (CPF)
+  const docLimpo = String(f.documento || f.cnpj || '').replace(/\D/g,'');
+  const ehCPF = (String(f.tipoDocumento || '').toUpperCase() === 'CPF') || docLimpo.length === 11;
+
+  // CATEGORIA: quando CPF, libera dropdown editavel (colaborador pode receber
+  // reembolso/ferias/13o/etc — categoria varia por lancamento). Senao, usa cadastro.
+  const catInput = document.getElementById('frm-categoria');
+  const catSelectFreeEl = document.getElementById('frm-categoria-select');
+  if (ehCPF && catInput && catSelectFreeEl) {
+    catInput.style.display = 'none';
+    catSelectFreeEl.style.display = '';
+    catSelectFreeEl.value = '';  // forca o user a escolher conscientemente
+    catSelectFreeEl.onchange = function() {
+      const cat = (catSelectFreeEl.value || '').toLowerCase();
+      const isOutros = cat === 'outros';
+      const dRow = document.getElementById('frm-descricao-row');
+      if (dRow) dRow.style.display = isOutros ? '' : 'none';
+      if (!isOutros) { const di = document.getElementById('frm-descricao'); if (di) di.value = ''; }
+    };
+  } else if (catInput && catSelectFreeEl) {
+    // Modo padrao (PJ): input readonly com categoria do cadastro
+    catInput.style.display = '';
+    catSelectFreeEl.style.display = 'none';
+  }
+
+  // Mostra/esconde campo descricao baseado em Categoria='Outros' (vale pra ambos modos)
   const ehOutros = (f.categoria || '').toLowerCase() === 'outros';
   const descRow = document.getElementById('frm-descricao-row');
   if (descRow) descRow.style.display = ehOutros ? '' : 'none';
@@ -5580,9 +5610,8 @@ function onFornChange() {
     const di = document.getElementById('frm-descricao');
     if (di) di.value = '';
   }
-  // Mostra/esconde campo Observacao baseado em tipo do fornecedor = CPF (PF)
-  const docLimpo = String(f.documento || f.cnpj || '').replace(/\D/g,'');
-  const ehCPF = (String(f.tipoDocumento || '').toUpperCase() === 'CPF') || docLimpo.length === 11;
+
+  // Mostra/esconde campo Observacao quando CPF
   const obsRow = document.getElementById('frm-observacao-row');
   if (obsRow) obsRow.style.display = ehCPF ? '' : 'none';
   if (!ehCPF) {
