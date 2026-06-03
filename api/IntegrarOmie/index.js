@@ -26,7 +26,7 @@ require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
-const { getCredentials, buscarContaPagar, anexarPDF } = require('../shared/omie');
+const { getCredentials, buscarContaPagar, buscarContaPagarPF, anexarPDF } = require('../shared/omie');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -156,12 +156,23 @@ module.exports = async function (context, req) {
     diag.empresa = creds.empresa;
 
     diag.step = 'buscar_conta';
-    const busca = await buscarContaPagar({
-      cnpj: f.CNPJFornecedor,
-      numero: f.NumeroNF,
-      valor: f.Valor,
-      dataVencimento: f.DataVencimento
-    }, creds);
+    // Detecta se eh PF (CPF 11 digitos) ou PJ (CNPJ 14 digitos)
+    const docDigitos = String(f.CNPJFornecedor || '').replace(/\D/g, '');
+    const ehPF = docDigitos.length === 11;
+    diag.modoBusca = ehPF ? 'PF (CPF) — match por valor+data' : 'PJ (CNPJ) — match por numero NF';
+
+    const busca = ehPF
+      ? await buscarContaPagarPF({
+          cnpj: f.CNPJFornecedor,
+          valor: f.Valor,
+          dataVencimento: f.DataVencimento
+        }, creds)
+      : await buscarContaPagar({
+          cnpj: f.CNPJFornecedor,
+          numero: f.NumeroNF,
+          valor: f.Valor,
+          dataVencimento: f.DataVencimento
+        }, creds);
     diag.buscaOmie = busca.diag;
 
     if (!busca.found) {
@@ -289,7 +300,14 @@ module.exports = async function (context, req) {
     }
 
     diag.step = 'anexar_omie';
-    const nomeArq = 'NF-' + f.NumeroNF + '_PRONEP.pdf';
+    // Nome do anexo: pra PF usa observacao (mais descritivo), pra PJ usa numero NF
+    let nomeArq;
+    if (ehPF && f.Observacao) {
+      const slug = String(f.Observacao).slice(0, 50).replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      nomeArq = 'PF-' + (docDigitos.slice(-6) || 'XXX') + '_' + (slug || 'reembolso') + '.pdf';
+    } else {
+      nomeArq = 'NF-' + f.NumeroNF + '_PRONEP.pdf';
+    }
     const codigoLancamento = busca.conta.codigo_lancamento_omie;
     const anexoResp = await anexarPDF({
       codigoLancamento: codigoLancamento,

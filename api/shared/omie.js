@@ -358,6 +358,142 @@ function criarZipSimples(filename, fileBuffer) {
 }
 
 /**
+ * Busca conta a pagar pra PF (CPF) — match por valor + janela de data.
+ *
+ * Diferente da buscarContaPagar (PJ), nao tenta match por numero NF
+ * (reembolso/ferias/13o/etc raramente tem NF formal).
+ *
+ * Estrategia:
+ *  1. buscarCliente(cpf) -> codigo_cliente_omie
+ *  2. ListarContasPagar filtrado por data
+ *  3. Match: codigo_cliente_fornecedor === codCliente
+ *           + valor exato (toleranci de 1 centavo)
+ *           + dentro da janela
+ *  4. Se varios candidatos: escolhe o mais proximo do vencimento
+ */
+async function buscarContaPagarPF(opts, creds) {
+  const cpfAlvo = normalizaDoc(opts.cnpj);  // pode ser CPF ou CNPJ, normalizaDoc trata
+  const valorAlvo = Number(opts.valor || 0);
+  const diag = {
+    cpfAlvo, valorAlvo,
+    paginas: 0, totalLidos: 0,
+    candidatos: [], todasContasDoCliente: []
+  };
+
+  // PASSO 1: resolver codigo_cliente_omie via CPF
+  const cli = await buscarCliente(cpfAlvo, creds);
+  diag.clienteOmie = cli;
+  if (!cli.found) {
+    diag.erroNoListar = 'Colaborador com CPF ' + cpfAlvo + ' nao cadastrado no Omie';
+    return { found: false, diag: diag };
+  }
+  const codClienteAlvo = Number(cli.codigo_cliente_omie);
+
+  // Calcula janela de data ao redor do vencimento
+  let dtRef = null;
+  if (opts.dataVencimento) {
+    const v = opts.dataVencimento;
+    if (v instanceof Date) dtRef = v;
+    else if (typeof v === 'string') {
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) dtRef = d;
+      else {
+        const m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+        if (m) dtRef = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+      }
+    }
+  }
+  if (!dtRef || isNaN(dtRef.getTime())) {
+    dtRef = new Date();
+    diag.dataReferenciaSource = 'fallback_hoje';
+  } else {
+    diag.dataReferenciaSource = 'dataVencimento_do_SP';
+  }
+  const dtDe = new Date(dtRef.getTime() - JANELA_DIAS_ANTES * 86400 * 1000);
+  const dtAte = new Date(dtRef.getTime() + JANELA_DIAS_DEPOIS * 86400 * 1000);
+  diag.janela = { de: fmtDataOmie(dtDe), ate: fmtDataOmie(dtAte), dias: JANELA_DIAS_ANTES + JANELA_DIAS_DEPOIS };
+
+  // PASSO 2: listar contas a pagar no periodo
+  for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
+    diag.paginas++;
+    const param = {
+      pagina: pagina,
+      registros_por_pagina: 50,
+      apenas_importado_api: 'N',
+      filtrar_por_data_de: fmtDataOmie(dtDe),
+      filtrar_por_data_ate: fmtDataOmie(dtAte)
+    };
+    let resp;
+    try {
+      resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
+    } catch (e) {
+      diag.erroNoListar = e.message;
+      break;
+    }
+    const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
+    diag.totalLidos += items.length;
+    if (items.length === 0) break;
+
+    for (const it of items) {
+      const itCodCli = Number(it.codigo_cliente_fornecedor || 0);
+      const itValor = Number(it.valor_documento || 0);
+      const itVenc = it.data_vencimento || '';
+      if (itCodCli && itCodCli === codClienteAlvo) {
+        diag.todasContasDoCliente.push({
+          codigo_lancamento_omie: it.codigo_lancamento_omie,
+          numero_documento: it.numero_documento,
+          nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
+          valor: itValor,
+          data_vencimento: itVenc,
+          status: it.status_titulo
+        });
+        // Match por valor (tolerancia 1 centavo pra arredondamento)
+        if (Math.abs(itValor - valorAlvo) < 0.01) {
+          diag.candidatos.push({
+            codigo_lancamento_omie: it.codigo_lancamento_omie,
+            numero_documento: it.numero_documento,
+            nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
+            valor: itValor,
+            data_vencimento: itVenc,
+            status: it.status_titulo
+          });
+        }
+      }
+    }
+
+    const totalPags = (resp && resp.total_de_paginas) || pagina;
+    if (pagina >= totalPags) break;
+  }
+
+  if (diag.candidatos.length === 0) {
+    diag.erroNoListar = diag.todasContasDoCliente.length > 0
+      ? ('Colaborador tem ' + diag.todasContasDoCliente.length + ' contas no periodo mas nenhuma com valor R$ ' + valorAlvo.toFixed(2))
+      : 'Colaborador nao tem contas a pagar no periodo';
+    return { found: false, diag: diag };
+  }
+
+  // Se varios candidatos com mesmo valor: escolhe o mais proximo do vencimento
+  let escolhido = diag.candidatos[0];
+  if (diag.candidatos.length > 1 && dtRef) {
+    const dtRefMs = dtRef.getTime();
+    let menorDiff = Infinity;
+    for (const c of diag.candidatos) {
+      const m = String(c.data_vencimento || '').match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (!m) continue;
+      const ms = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])).getTime();
+      const diff = Math.abs(ms - dtRefMs);
+      if (diff < menorDiff) { menorDiff = diff; escolhido = c; }
+    }
+    diag.escolhidoCriterio = 'mais_proximo_do_vencimento';
+  } else {
+    diag.escolhidoCriterio = 'unico_candidato_com_valor';
+  }
+  diag.totalCandidatos = diag.candidatos.length;
+
+  return { found: true, conta: escolhido, diag: diag };
+}
+
+/**
  * Anexa PDF a uma conta a pagar do Omie via IncluirAnexo.
  */
 async function anexarPDF(opts, creds) {
@@ -404,6 +540,7 @@ module.exports = {
   getCredentials,
   buscarCliente,
   buscarContaPagar,
+  buscarContaPagarPF,
   anexarPDF,
   normalizaDoc,
   normalizaNumeroNF,
