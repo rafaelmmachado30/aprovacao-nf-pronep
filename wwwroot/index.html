@@ -3720,7 +3720,7 @@ const views = {
         </div>
         <div class="form-row" id="frm-observacao-row" style="display:none;grid-column:1/-1">
           <label>Observação * <span class="small muted" style="font-weight:400">(obrigatório quando fornecedor é Pessoa Física — descreva o motivo: ex. "Reembolso uber visita ABC" / "Férias março/2026")</span></label>
-          <textarea id="frm-observacao" placeholder="Descreva o motivo do lançamento — referência mensal, período, finalidade etc" maxlength="500" rows="3" style="width:100%;padding:8px;border:1px solid var(--cinza-300);border-radius:6px;font-family:inherit;font-size:14px;resize:vertical"></textarea>
+          <textarea id="frm-observacao" placeholder="Descreva o motivo do lançamento — referência mensal, período, finalidade etc" maxlength="500" rows="3" style="width:100%;padding:10px 12px;border:2px solid #B0B7BD;background:#fff;border-radius:6px;font-family:inherit;font-size:14px;color:#2C3E50;resize:vertical;box-shadow:inset 0 1px 2px rgba(0,0,0,0.04)" onfocus="this.style.borderColor='#1F4E79'" onblur="this.style.borderColor='#B0B7BD'"></textarea>
         </div>
 
         <div class="form-row" id="frm-unidade-row">
@@ -5581,27 +5581,6 @@ function onFornChange() {
   const docLimpo = String(f.documento || f.cnpj || '').replace(/\D/g,'');
   const ehCPF = (String(f.tipoDocumento || '').toUpperCase() === 'CPF') || docLimpo.length === 11;
 
-  // CATEGORIA: quando CPF, libera dropdown editavel (colaborador pode receber
-  // reembolso/ferias/13o/etc — categoria varia por lancamento). Senao, usa cadastro.
-  const catInput = document.getElementById('frm-categoria');
-  const catSelectFreeEl = document.getElementById('frm-categoria-select');
-  if (ehCPF && catInput && catSelectFreeEl) {
-    catInput.style.display = 'none';
-    catSelectFreeEl.style.display = '';
-    catSelectFreeEl.value = '';  // forca o user a escolher conscientemente
-    catSelectFreeEl.onchange = function() {
-      const cat = (catSelectFreeEl.value || '').toLowerCase();
-      const isOutros = cat === 'outros';
-      const dRow = document.getElementById('frm-descricao-row');
-      if (dRow) dRow.style.display = isOutros ? '' : 'none';
-      if (!isOutros) { const di = document.getElementById('frm-descricao'); if (di) di.value = ''; }
-    };
-  } else if (catInput && catSelectFreeEl) {
-    // Modo padrao (PJ): input readonly com categoria do cadastro
-    catInput.style.display = '';
-    catSelectFreeEl.style.display = 'none';
-  }
-
   // Mostra/esconde campo descricao baseado em Categoria='Outros' (vale pra ambos modos)
   const ehOutros = (f.categoria || '').toLowerCase() === 'outros';
   const descRow = document.getElementById('frm-descricao-row');
@@ -5639,8 +5618,10 @@ function onFornChange() {
 }
 
 function configurarCategoriaDiretoria(f) {
-  // Quando o fornecedor atende mais de uma Diretoria, troca os inputs readonly
-  // por SELECTs editaveis. O default na opcao "selecione" forca o user a escolher.
+  // Categoria/Diretoria viram SELECTs editaveis em 2 situacoes:
+  //   - f.atendeMultiDiretoria (fornecedor que atende varias diretorias)
+  //   - fornecedor eh Pessoa Fisica/CPF (colaborador pode lancar
+  //     reembolso/ferias/13o/etc — categoria varia por lancamento)
   const catInput  = document.getElementById('frm-categoria');
   const catSelect = document.getElementById('frm-categoria-select');
   const dirInput  = document.getElementById('frm-diretoria');
@@ -5648,6 +5629,8 @@ function configurarCategoriaDiretoria(f) {
   if (!catInput || !catSelect || !dirInput || !dirSelect) return;
 
   const multi = !!f.atendeMultiDiretoria;
+  const docLimpo = String(f.documento || f.cnpj || '').replace(/\D/g,'');
+  const ehCPF = (String(f.tipoDocumento || '').toUpperCase() === 'CPF') || docLimpo.length === 11;
 
   // Popula o select de diretoria com a lista global (1x — idempotente)
   if (dirSelect.options.length <= 1 && typeof diretorias !== 'undefined' && Array.isArray(diretorias)) {
@@ -5658,16 +5641,11 @@ function configurarCategoriaDiretoria(f) {
     }
   }
 
-  if (multi) {
-    // Esconde inputs readonly e mostra selects
+  // CATEGORIA: select editavel se multi OU se CPF
+  if (multi || ehCPF) {
     catInput.style.display = 'none';
-    dirInput.style.display = 'none';
     catSelect.style.display = '';
-    dirSelect.style.display = '';
-    // Reseta — força o user a escolher conscientemente
     catSelect.value = '';
-    dirSelect.value = '';
-    // Triggera revalidacao da Descricao quando o user mudar pra Outros
     catSelect.onchange = function() {
       const ehOutros = (catSelect.value || '').toLowerCase() === 'outros';
       const descRow = document.getElementById('frm-descricao-row');
@@ -5675,10 +5653,17 @@ function configurarCategoriaDiretoria(f) {
       if (!ehOutros) { const di = document.getElementById('frm-descricao'); if (di) di.value = ''; }
     };
   } else {
-    // Volta pro modo padrao
     catInput.style.display = '';
-    dirInput.style.display = '';
     catSelect.style.display = 'none';
+  }
+
+  // DIRETORIA: select editavel APENAS se multi (CPF mantem diretoria do cadastro)
+  if (multi) {
+    dirInput.style.display = 'none';
+    dirSelect.style.display = '';
+    dirSelect.value = '';
+  } else {
+    dirInput.style.display = '';
     dirSelect.style.display = 'none';
   }
 }
