@@ -6137,7 +6137,7 @@ async function submitNF() {
       negociadoCom:    negociouComEmail || null,
       descricao:       descricao,
       observacao:      (document.getElementById('frm-observacao') || {}).value || '',
-      solicitanteEmail: (currentUser && currentUser.email) || '',
+      solicitanteEmail: (window.currentPersona && currentPersona.email) || (window.currentUser && currentUser.email) || '',
       fileBase64:      dataURL,
       fileName:        file.name
     };
