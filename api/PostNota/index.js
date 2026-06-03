@@ -453,9 +453,7 @@ module.exports = async function (context, req) {
     const rawFields = {
       Title:           title,
       NumeroNF:        numero || '',
-      Serie:           serie || '',
       CNPJFornecedor:  fornecedorCNPJ,
-      Observacao:      observacao || '',
       Descricao:       descricao || '',
       Valor:           valor,                       // <-- NUMERO (nao string)
       DataVencimento:  isoVenc,
@@ -472,6 +470,12 @@ module.exports = async function (context, req) {
       UrlPDF:          uploadResp.webUrl || '',  // formatByType detecta Hyperlink no SP e formata { Url, Description }
       UrlPDFAprovado:  null                       // preenchido na aprovacao
     };
+    // Adiciona campos opcionais APENAS se as colunas existirem no SP
+    // (assim nao quebra antes do admin criar as colunas)
+    if (colMap && colMap['Serie']) rawFields.Serie = serie || '';
+    if (colMap && colMap['Observacao']) rawFields.Observacao = observacao || '';
+    diag.colunasOpcionais = { temSerie: !!(colMap && colMap['Serie']), temObservacao: !!(colMap && colMap['Observacao']) };
+
     const itemFieldsRaw = buildFieldsObject(colMap, rawFields);
     // Aplica formatacao por tipo (com log detalhado pra debug)
     const itemFields = {};
