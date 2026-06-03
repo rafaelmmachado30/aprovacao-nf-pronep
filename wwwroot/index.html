@@ -2345,6 +2345,7 @@ async function carregarNotasReais() {
         fornecedorIdx: fornIdx >= 0 ? fornIdx : null,
         fornecedorCnpj: cnpj,
         fornecedorRazao: razaoLookup,
+        observacao: n.Observacao || '',
         valor: Number(n.Valor || 0),
         valorLiquido: Number(n.Valor || 0),
         vencimento: (n.DataVencimento || '').substring(0,10),
@@ -3717,6 +3718,10 @@ const views = {
                  style="text-transform:uppercase"
                  oninput="this.value = this.value.toUpperCase()">
         </div>
+        <div class="form-row" id="frm-observacao-row" style="display:none;grid-column:1/-1">
+          <label>Observação * <span class="small muted" style="font-weight:400">(obrigatório quando fornecedor é Pessoa Física — descreva o motivo: ex. "Reembolso uber visita ABC" / "Férias março/2026")</span></label>
+          <textarea id="frm-observacao" placeholder="Descreva o motivo do lançamento — referência mensal, período, finalidade etc" maxlength="500" rows="3" style="width:100%;padding:8px;border:1px solid var(--cinza-300);border-radius:6px;font-family:inherit;font-size:14px;resize:vertical"></textarea>
+        </div>
 
         <div class="form-row" id="frm-unidade-row">
           <label>Unidade *</label>
@@ -4829,6 +4834,7 @@ function buildNFCard(n, contexto) {
   const bodyHtml = `
     <div class="nf-card-body">
       <div class="nf-card-fornecedor">${forn.razao || n.fornecedorRazao || '—'}</div>
+      ${n.observacao ? `<div style="font-size:12px;color:#6D4C00;background:#FFF9E5;padding:6px 10px;border-left:3px solid #F2C94C;border-radius:4px;margin-top:6px"><b>Obs:</b> ${String(n.observacao).slice(0,140).replace(/</g,'&lt;')}${String(n.observacao).length > 140 ? '...' : ''}</div>` : ''}
       <div class="nf-card-meta">${metaHtml}</div>
       ${vencHtml}
     </div>
@@ -5574,6 +5580,15 @@ function onFornChange() {
     const di = document.getElementById('frm-descricao');
     if (di) di.value = '';
   }
+  // Mostra/esconde campo Observacao baseado em tipo do fornecedor = CPF (PF)
+  const docLimpo = String(f.documento || f.cnpj || '').replace(/\D/g,'');
+  const ehCPF = (String(f.tipoDocumento || '').toUpperCase() === 'CPF') || docLimpo.length === 11;
+  const obsRow = document.getElementById('frm-observacao-row');
+  if (obsRow) obsRow.style.display = ehCPF ? '' : 'none';
+  if (!ehCPF) {
+    const obs = document.getElementById('frm-observacao');
+    if (obs) obs.value = '';
+  }
   document.getElementById('frm-diretoria').value = f.diretoria || '';
   console.log('[selecionarFornecedor] fornecedor:', f.razao, 'atendeTodas:', f.atendeTodas, 'multiDir:', f.atendeMultiDiretoria);
 
@@ -5987,6 +6002,19 @@ async function submitNF() {
     }
   }
 
+  // Validacao: Observacao obrigatoria quando fornecedor eh PF (CPF)
+  const _obsRow = document.getElementById('frm-observacao-row');
+  const _obsVisivel = _obsRow && _obsRow.style.display !== 'none';
+  if (_obsVisivel) {
+    const _obs = ((document.getElementById('frm-observacao') || {}).value || '').trim();
+    if (_obs.length < 5) {
+      toast('Para fornecedor Pessoa Física, preencha o campo Observação (mínimo 5 caracteres) descrevendo o motivo do lançamento.', 'error');
+      const oi = document.getElementById('frm-observacao');
+      if (oi) oi.focus();
+      return;
+    }
+  }
+
   const msgs = document.getElementById('form-msgs');
   const btn = document.getElementById('btn-enviar-nf');
   msgs.innerHTML = '';
@@ -6094,6 +6122,7 @@ async function submitNF() {
       categoria:       categoriaFinal,
       negociadoCom:    negociouComEmail || null,
       descricao:       descricao,
+      observacao:      (document.getElementById('frm-observacao') || {}).value || '',
       fileBase64:      dataURL,
       fileName:        file.name
     };
@@ -6205,6 +6234,7 @@ function openNFDetail(id) {
       <tr><th>Valor</th><td><b>${fmtBRL(n.valor)}</b></td></tr>
       <tr><th>Status</th><td>${statusPill(n.status, n)}</td></tr>
       <tr><th>Lançado por</th><td>${n.lancadoPor} em ${n.lancadoEm}</td></tr>
+      ${n.observacao ? `<tr><th style="vertical-align:top">Observação</th><td style="background:#FFF9E5;padding:10px 12px;border-left:3px solid #F2C94C;border-radius:4px"><b style="color:var(--azul-escuro)">${String(n.observacao).replace(/</g,'&lt;').replace(/\n/g,'<br>')}</b></td></tr>` : ''}
       <tr><th>Hash SHA-256</th><td class="mono small">${n.hash}</td></tr>
     </table>
     <div style="background:var(--azul-soft);border:1px solid var(--cinza-borda);border-radius:8px;padding:24px;text-align:center;margin:14px 0">

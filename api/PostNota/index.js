@@ -320,7 +320,7 @@ module.exports = async function (context, req) {
     const body = req.body || {};
     const {
       fornecedorCNPJ, fornecedorRazao, numero, serie, valor, vencimento,
-      unidade, diretoria, negociadoCom, descricao,
+      unidade, diretoria, negociadoCom, descricao, observacao,
       fileBase64, fileName
     } = body;
 
@@ -434,6 +434,7 @@ module.exports = async function (context, req) {
       Title:           title,
       NumeroNF:        numero || '',
       CNPJFornecedor:  fornecedorCNPJ,
+      Observacao:      observacao || '',
       Descricao:       descricao || '',
       Valor:           valor,                       // <-- NUMERO (nao string)
       DataVencimento:  isoVenc,
