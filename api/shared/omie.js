@@ -29,8 +29,8 @@ const zlib = require('zlib');
 const OMIE_BASE = 'https://app.omie.com.br/api/v1';
 
 // Janela em dias antes/depois do vencimento da NF
-const JANELA_DIAS_ANTES = 30;
-const JANELA_DIAS_DEPOIS = 60;
+const JANELA_DIAS_ANTES = 60;
+const JANELA_DIAS_DEPOIS = 90;
 // Limite de paginas pra evitar timeout SWA (30s)
 const MAX_PAGINAS = 50;
 
@@ -220,6 +220,15 @@ async function buscarContaPagar(opts, creds) {
     let resp;
     try {
       resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
+      // Log meta da resposta pra debug (so na 1a pagina)
+      if (pagina === 1) {
+        diag.respostaPag1 = {
+          total_de_paginas: resp && resp.total_de_paginas,
+          total_de_registros: resp && resp.total_de_registros,
+          registros_retornados: ((resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || []).length,
+          chaves_top_level: resp ? Object.keys(resp).slice(0, 10) : []
+        };
+      }
     } catch (e) {
       diag.erroNoListar = e.message;
       break;
@@ -426,6 +435,15 @@ async function buscarContaPagarPF(opts, creds) {
     let resp;
     try {
       resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
+      // Log meta da resposta pra debug (so na 1a pagina)
+      if (pagina === 1) {
+        diag.respostaPag1 = {
+          total_de_paginas: resp && resp.total_de_paginas,
+          total_de_registros: resp && resp.total_de_registros,
+          registros_retornados: ((resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || []).length,
+          chaves_top_level: resp ? Object.keys(resp).slice(0, 10) : []
+        };
+      }
     } catch (e) {
       diag.erroNoListar = e.message;
       break;
