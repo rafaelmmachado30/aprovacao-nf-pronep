@@ -172,6 +172,54 @@ module.exports = async function (context, req) {
       return (b.LancadoEm || '').localeCompare(a.LancadoEm || '');
     });
 
+    // === ENRICHMENT: adiciona FornecedorRazao/FornecedorFantasia em cada nota ===
+    // Lookup pela lista PRONEP-NF-Fornecedores (cache em memoria) — evita o front
+    // depender de fornecedorIdx que pode bater errado se a lista local estiver defasada.
+    diag.step = 'enrich_fornecedores';
+    try {
+      const fornListResp = await client.api(`/sites/${siteId}/lists`).filter(`displayName eq 'PRONEP-NF-Fornecedores'`).get();
+      if (fornListResp.value && fornListResp.value.length) {
+        const fornListId = fornListResp.value[0].id;
+        // Carrega colunas + items uma vez
+        const colResp = await client.api(`/sites/${siteId}/lists/${fornListId}/columns`).get();
+        const fornInvMap = {};
+        for (const c of (colResp.value || [])) { if (c.displayName && c.name) fornInvMap[c.name] = c.displayName; }
+        const allForn = [];
+        let urlF = `/sites/${siteId}/lists/${fornListId}/items?expand=fields&$top=500`;
+        let fpages = 0;
+        while (urlF && fpages < 30) {
+          const r = await client.api(urlF).get();
+          allForn.push(...(r.value || []));
+          fpages++;
+          urlF = r['@odata.nextLink'] ? r['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0','') : null;
+        }
+        // Indexa por CNPJ normalizado (so digitos)
+        const byDoc = {};
+        for (const it of allForn) {
+          const f = {}; for (const [k, v] of Object.entries(it.fields || {})) { const d = fornInvMap[k]; if (d) f[d] = v; }
+          const doc = String(f.Documento || f.CNPJ || f.field_2 || '').replace(/\D/g, '');
+          if (doc && !byDoc[doc]) {
+            byDoc[doc] = {
+              razao: f.Title || f.Razao || f.RazaoSocial || '',
+              fantasia: f.NomeFantasia || f.field_3 || ''
+            };
+          }
+        }
+        diag.fornecedoresIndexados = Object.keys(byDoc).length;
+        // Popular cada nota
+        for (const n of notasFiltradas) {
+          const doc = String(n.CNPJFornecedor || '').replace(/\D/g, '');
+          const hit = doc && byDoc[doc];
+          if (hit) {
+            n.FornecedorRazao = hit.razao;
+            n.FornecedorFantasia = hit.fantasia;
+          }
+        }
+      }
+    } catch (e) {
+      diag.enrichErro = e.message;
+    }
+
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },

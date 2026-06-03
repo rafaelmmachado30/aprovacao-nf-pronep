@@ -1888,7 +1888,7 @@ function fmtDateTimeBRT(iso) {
       + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   } catch (e) { return String(iso).replace('T',' ').substring(0,16); }
 }
-function fornecedorOf(n) { return fornecedores[n.fornecedorIdx] || { razao: '—', cnpj: '—' }; }
+function fornecedorOf(n) { return fornecedores[n.fornecedorIdx] || { razao: (n && n.fornecedorRazao) || '—', cnpj: (n && n.fornecedorCnpj) || '—' }; }
 function statusPill(s, n) {
   // Se a NF estiver no 2o nivel, mostra um badge diferente (azul) em vez de amarelo de pendente
   if (n && n.aguardandoN2) {
@@ -2327,6 +2327,15 @@ async function carregarNotasReais() {
       const fornIdx = fornecedores.findIndex(f =>
         (f.documento || f.cnpj || '').replace(/\D/g,'') === cnpj.replace(/\D/g,'')
       );
+      // Razao do fornecedor: 1o tenta lookup local, 2o usa o que veio do backend (server-side join)
+      var razaoLookup = '';
+      if (fornIdx >= 0) {
+        razaoLookup = fornecedores[fornIdx].razao || '';
+      } else if (n.FornecedorRazao) {
+        razaoLookup = n.FornecedorRazao;  // backend ja resolveu o lookup
+      } else {
+        razaoLookup = '(fornecedor nao encontrado)';
+      }
       const statusMap = { 'Lancada': 'pendente', 'AguardandoN2': 'pendente', 'Aprovada': 'aprovada', 'Rejeitada': 'rejeitada' };
       return {
         id: 'ID-' + n.id,
@@ -2335,7 +2344,7 @@ async function carregarNotasReais() {
         serie: '',
         fornecedorIdx: fornIdx >= 0 ? fornIdx : null,
         fornecedorCnpj: cnpj,
-        fornecedorRazao: (fornIdx >= 0 ? fornecedores[fornIdx].razao : '(fornecedor nao encontrado)'),
+        fornecedorRazao: razaoLookup,
         valor: Number(n.Valor || 0),
         valorLiquido: Number(n.Valor || 0),
         vencimento: (n.DataVencimento || '').substring(0,10),
