@@ -538,9 +538,3 @@ module.exports = {
   ROOT_FOLDER_PATH,
   LIST_CONTRATOS
 };
-};
-icarPath,
-  normalizeStr,
-  ROOT_FOLDER_PATH,
-  LIST_CONTRATOS
-};
