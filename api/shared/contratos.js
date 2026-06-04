@@ -244,20 +244,26 @@ async function crawlPasta(client, driveId, pastaRaiz, opts) {
 // EXTRACAO DE TEXTO
 // ============================================================================
 
-async function baixarArquivo(client, driveId, itemId) {
-  const buffer = await client.api('/drives/' + driveId + '/items/' + itemId + '/content').getStream()
-    .then(stream => new Promise((resolve, reject) => {
-      const chunks = [];
-      stream.on('data', c => chunks.push(c));
-      stream.on('end', () => resolve(Buffer.concat(chunks)));
-      stream.on('error', reject);
-    }))
-    .catch(async function(){
-      // Fallback: get() retorna Buffer direto em algumas versoes do client
-      const buf = await client.api('/drives/' + driveId + '/items/' + itemId + '/content').get();
-      return buf;
-    });
-  return buffer;
+async function baixarArquivo(client, driveId, itemId, opts) {
+  opts = opts || {};
+  const tamanhoMaxMB = opts.tamanhoMaxMB || 8;
+  // Estrategia robusta: pega o item pra ver size + downloadUrl assinada,
+  // depois faz fetch direto (evita problemas com getStream do graph client).
+  const item = await client.api('/drives/' + driveId + '/items/' + itemId)
+    .select('id,name,size,@microsoft.graph.downloadUrl').get();
+  const size = item.size || 0;
+  if (size > tamanhoMaxMB * 1024 * 1024) {
+    throw new Error('arquivo_grande_demais: ' + Math.round(size/1024/1024) + 'MB (max ' + tamanhoMaxMB + 'MB)');
+  }
+  const downloadUrl = item['@microsoft.graph.downloadUrl'];
+  if (!downloadUrl) {
+    throw new Error('Graph nao retornou @microsoft.graph.downloadUrl');
+  }
+  const fetch = require('isomorphic-fetch');
+  const resp = await fetch(downloadUrl);
+  if (!resp.ok) throw new Error('download HTTP ' + resp.status);
+  const arrayBuffer = await resp.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
 
 async function extrairTextoPDF(buffer) {
@@ -280,8 +286,8 @@ async function extrairTextoDOCX(buffer) {
   }
 }
 
-async function extrairTexto(client, driveId, itemId, ext) {
-  const buf = await baixarArquivo(client, driveId, itemId);
+async function extrairTexto(client, driveId, itemId, ext, opts) {
+  const buf = await baixarArquivo(client, driveId, itemId, opts);
   if (ext === 'pdf') return await extrairTextoPDF(buf);
   if (ext === 'docx' || ext === 'doc') return await extrairTextoDOCX(buf);
   return { texto: '', vazio: true };
@@ -450,6 +456,39 @@ function classificarPath(ancestors) {
         fornecedor = ancestors[i+2] || ancestors[i+1] || '';
       } else {
         fornecedor = ancestors[i+1] || '';
+      }
+      break;
+    }
+  }
+  // Fallback: ultimo nivel da arvore costuma ser o prestador
+  if (!fornecedor && ancestors.length) {
+    fornecedor = ancestors[ancestors.length - 1] || '';
+  }
+  return { diretoria, unidade, fornecedor };
+}
+
+// ============================================================================
+// EXPORT
+// ============================================================================
+
+module.exports = {
+  getGraphClient,
+  resolveContratosSite,
+  garantirListaContratos,
+  getContratoColMap,
+  listarPasta,
+  crawlPasta,
+  extrairTexto,
+  extrairTextoPDF,
+  extrairVigenciaIA,
+  extrairVigenciaInteligente,
+  calcularStatus,
+  calcularDiasParaVencer,
+  classificarPath,
+  ROOT_FOLDER_PATH,
+  LIST_CONTRATOS
+};
+ fornecedor = ancestors[i+1] || '';
       }
       break;
     }
