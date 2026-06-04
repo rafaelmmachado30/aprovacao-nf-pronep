@@ -371,11 +371,14 @@ module.exports = async function (context, req) {
     } else if (validEmail(solicitanteEmail)) {
       submitterEmail = String(solicitanteEmail).toLowerCase();
       submitterSource = 'body_hint';
-      user = { oid: '', email: submitterEmail, name: submitterEmail };
+      // OID sintetico pra audit log nao silenciar (precisa de oid pra gravar)
+      user = { oid: 'body-' + Date.now(), email: submitterEmail, name: submitterEmail };
     } else {
       submitterEmail = 'desconhecido@pronep.com.br';
       submitterSource = 'desconhecido';
-      user = { oid: '', email: submitterEmail, name: submitterEmail };
+      // OID sintetico pra audit log nao silenciar - sem isso o caso "desconhecido"
+      // some da Trilha de Auditoria e cega o diagnostico (guard em auditLog.js linha 80).
+      user = { oid: 'anon-' + Date.now(), email: submitterEmail, name: submitterEmail };
     }
     diag.submitter = submitterEmail;
     diag.submitterSource = submitterSource;
@@ -383,8 +386,22 @@ module.exports = async function (context, req) {
       getUserOk: !!(usr && usr.email),
       principalEmailOk: !!validEmail(principalEmail),
       bodyEmailOk: !!validEmail(solicitanteEmail),
+      bodyEmailValueLen: typeof solicitanteEmail === 'string' ? solicitanteEmail.length : -1,
+      bodyEmailRaw: typeof solicitanteEmail === 'string' ? String(solicitanteEmail).slice(0, 80) : null,
+      hasEasyAuthHeader: !!(req.headers && (req.headers['x-ms-client-principal'] || req.headers['X-MS-CLIENT-PRINCIPAL'])),
+      hasTeamsToken: !!(req.headers && (req.headers['x-teams-token'] || req.headers['X-Teams-Token'])),
+      hasAuthHeader: !!(req.headers && (req.headers.authorization || req.headers.Authorization)),
+      userAgent: (req.headers && (req.headers['user-agent'] || req.headers['User-Agent'])) || null,
       authError: req._authError || null
     };
+    // Log estruturado pro Application Insights tambem (caso audit log falhe)
+    if (context && context.log) {
+      context.log('[PostNota submitter resolved]', JSON.stringify({
+        source: submitterSource,
+        email: submitterEmail,
+        debug: diag.submitterDebug
+      }));
+    }
 
     diag.step = 'graph';
     const client = await getGraphClient();
@@ -568,7 +585,16 @@ module.exports = async function (context, req) {
     auditRegistrar(user, 'lancamento',
       { tipo: 'nf', id: itemResp.id, numero: numero },
       'sucesso',
-      { fornecedor: fornecedorCNPJ, valor: valor, vencimento: vencimento, unidade: unidade, diretoria: diretoria, aprovador: aprovador && aprovador.email }
+      {
+        fornecedor: fornecedorCNPJ,
+        valor: valor,
+        vencimento: vencimento,
+        unidade: unidade,
+        diretoria: diretoria,
+        aprovador: aprovador && aprovador.email,
+        submitterSource: submitterSource,
+        submitterDebug: diag.submitterDebug
+      }
     ).catch(function(){});
 
     context.res = {
@@ -580,6 +606,10 @@ module.exports = async function (context, req) {
         title,
         urlPDF: uploadResp.webUrl,
         aprovador,
+        // FIX C: front usa esses 2 valores pra parar de fazer spoofing local
+        lancadoPor: submitterEmail,
+        submitterSource: submitterSource,
+        submitterDebug: diag.submitterDebug,
         diag
       }
     };

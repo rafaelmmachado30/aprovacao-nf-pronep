@@ -2066,13 +2066,16 @@ function registrarServiceWorker() {
       .catch(err => console.warn('[PWA] Falha ao registrar SW:', err));
   });
 
-  // Quando o SW ativa, recarrega a pagina pra pegar assets novos (apenas 1x por sessao)
+  // Quando o SW ativa, recarrega a pagina pra pegar assets novos (apenas 1x por sessao).
+  // ATIVADO em prod a partir de v3-fixdesconhecido pra invalidar cache PWA do bug
+  // "solicitante desconhecido" — usuarios precisam pegar o JS novo.
   let recarregou = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (recarregou) return;
     recarregou = true;
-    // Em desenvolvimento isso eh agressivo; em prod ajuda a evitar usuario preso em versao velha
-    console.log('[PWA] SW assumiu controle.');
+    console.log('[PWA] SW assumiu controle — recarregando pra pegar versao nova.');
+    // Aguarda 500ms pra evitar reload em loop em ambientes esquisitos
+    setTimeout(function(){ try { window.location.reload(); } catch(e) {} }, 500);
   });
 }
 
@@ -6168,6 +6171,10 @@ async function submitNF() {
     // Sucesso — adiciona na lista local pra atualizar UI imediatamente
     const novoId = data.id;
     const agora = agoraBRT();
+    // FIX C: usar lancadoPor que o BACKEND devolveu (fonte da verdade do SP),
+    // nao currentPersona.name. Assim, se a cascata cair em "desconhecido",
+    // o solicitante VE na hora e me chama (em vez de descobrir 1 dia depois pelo aprovador).
+    const lancadoPorReal = (data.lancadoPor || (currentPersona && currentPersona.email) || '').toLowerCase();
     notas.unshift({
       id: 'ID-' + novoId,
       numero: numero,
@@ -6182,7 +6189,7 @@ async function submitNF() {
       foraPrazo: diff < 5,
       negociouCom: negociouComNome,
       negociouComEmail: negociouComEmail,
-      lancadoPor: currentPersona.name,
+      lancadoPor: lancadoPorReal,
       lancadoEm: agora,
       aprovadoPor: null,
       aprovadoEm: null,
@@ -6190,10 +6197,20 @@ async function submitNF() {
       urlPDF: data.urlPDF || ''
     });
 
-    toast(`NF enviada — gestor ${data.aprovador.nome} notificado`, 'success');
+    // Alerta visivel se a cascata caiu em "desconhecido" - antes ficava
+    // escondido pelo spoofing local. Agora o solicitante percebe na hora.
+    if (lancadoPorReal.startsWith('desconhecido')) {
+      console.warn('[FIX C] cascata desconhecido', { source: data.submitterSource, debug: data.submitterDebug });
+      toast('Atencao: a NF foi gravada como SOLICITANTE "desconhecido" porque sua sessao perdeu autenticacao. Recarregue a pagina (Ctrl+Shift+R) antes de lancar a proxima NF.', 'error');
+    } else {
+      toast(`NF enviada — gestor ${data.aprovador.nome} notificado`, 'success');
+    }
 
     const extraInfo = diff < 5
       ? `<div style="margin-top:10px;padding:10px;background:var(--amarelo-bg);border-left:3px solid var(--amarelo);border-radius:4px;font-size:13px;color:#6D4C00"><b>⚠ Vencimento fora do prazo</b> — negociacao confirmada com <b>${negociouComNome}</b>.</div>`
+      : '';
+    const avisoDesconhecido = lancadoPorReal.startsWith('desconhecido')
+      ? `<div style="margin-top:10px;padding:12px;background:#FEE2E2;border-left:3px solid #DC2626;border-radius:4px;font-size:13px;color:#7F1D1D;text-align:left"><b>⚠ Atencao: solicitante nao identificado</b><br>Sua sessao de autenticacao expirou no momento do lancamento. A NF foi gravada com solicitante <b>"desconhecido@pronep.com.br"</b>. Por favor, <b>recarregue a pagina (Ctrl+Shift+R) e relogue antes de lancar a proxima NF</b>. Avise o admin (rafael.machado@pronep.com.br) sobre esta NF pra correcao retroativa.</div>`
       : '';
 
     openModal(`
@@ -6204,6 +6221,7 @@ async function submitNF() {
         <div class="small muted">Arquivo salvo em <span class="mono">SharePoint/Notas Fiscais/Pendentes/${forn.unidade}/Diretoria ${forn.diretoria}/</span></div>
         <div class="small muted" style="margin-top:4px">Aprovador: <b>${data.aprovador.nome}</b> (${data.aprovador.email})</div>
         ${extraInfo}
+        ${avisoDesconhecido}
       </div>
       <hr>
       <div style="text-align:center">

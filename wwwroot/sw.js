@@ -13,7 +13,7 @@
  * IMPORTANTE: pra atualizar o SW a cada deploy, bumpa CACHE_VERSION.
  */
 
-const CACHE_VERSION = 'pronep-nf-v2-push';
+const CACHE_VERSION = 'pronep-nf-v3-fixdesconhecido-20260603';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const SHELL_ASSETS = [
   '/',
