@@ -74,16 +74,27 @@ module.exports = async function (context, req) {
   try {
     const body = req.body || {};
     const id = body.id;
-    const status = body.status;
     const observacoes = body.observacoes;
+    const dataInicio = body.dataInicio;  // 'YYYY-MM-DD' ou null
+    const dataFim = body.dataFim;        // 'YYYY-MM-DD' ou null
+    let status = body.status;             // se vier 'auto' ou nada, recalcula com base na dataFim
 
     if (!id) {
       context.res = { status: 400, body: { error: 'id obrigatorio' } };
       return;
     }
-    if (!status || !STATUS_VALIDOS.has(status)) {
-      context.res = { status: 400, body: { error: 'status invalido. Validos: ' + Array.from(STATUS_VALIDOS).join(', ') } };
+    // status manual valida; mas se nao vier OU vier 'auto', recalcula com base em dataFim
+    if (status && status !== 'auto' && !STATUS_VALIDOS.has(status)) {
+      context.res = { status: 400, body: { error: 'status invalido. Validos: ' + Array.from(STATUS_VALIDOS).join(', ') + ' ou \'auto\'' } };
       return;
+    }
+    // Validacao de datas (formato YYYY-MM-DD)
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (dataInicio && dataInicio !== '' && !dateRe.test(dataInicio)) {
+      context.res = { status: 400, body: { error: 'dataInicio deve ser YYYY-MM-DD' } }; return;
+    }
+    if (dataFim && dataFim !== '' && !dateRe.test(dataFim)) {
+      context.res = { status: 400, body: { error: 'dataFim deve ser YYYY-MM-DD' } }; return;
     }
 
     // Auth
@@ -123,9 +134,24 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Constroi patch
+    // Recalcula status automaticamente se nao foi forcado E temos dataFim
+    if ((!status || status === 'auto') && dataFim) {
+      const contratos = require('../shared/contratos');
+      status = contratos.calcularStatus(dataFim, false);
+    } else if (!status) {
+      // Se nao passou status nem dataFim, mantem o existente
+      status = (item.fields && item.fields.Status) || 'Indeterminado';
+    }
+
+    // Constroi patch (so atualiza campos passados)
     const patch = { Status: status };
     if (observacoes !== undefined) patch.Observacoes = String(observacoes).slice(0, 30000);
+    if (dataInicio !== undefined) patch.DataInicio = dataInicio ? (dataInicio + 'T00:00:00Z') : null;
+    if (dataFim !== undefined) patch.DataFim = dataFim ? (dataFim + 'T00:00:00Z') : null;
+    // Marca como leitura manual quando user edita vigencia
+    if (dataInicio !== undefined || dataFim !== undefined) {
+      patch.LeituraIAStatus = 'manual';
+    }
 
     await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + id + '/fields').patch(patch);
 

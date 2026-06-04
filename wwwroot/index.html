@@ -4203,12 +4203,14 @@ function renderArvoreContratos(arvore) {
                 <div style="padding:8px 6px 6px;display:flex;flex-direction:column;gap:8px">
                   ${(un.fornecedores || []).map(function(forn){
                     return `
-                      <div style="padding:8px;background:#FAFAFA;border-radius:4px">
-                        <div style="font-weight:600;color:#1F2937;margin-bottom:6px">🏢 ${forn.fornecedor}</div>
-                        <div style="display:flex;flex-direction:column;gap:6px">
+                      <details style="padding:0;background:#FAFAFA;border-radius:4px">
+                        <summary style="padding:8px 12px;cursor:pointer;font-weight:600;color:#1F2937;list-style:none;display:flex;align-items:center;gap:6px">
+                          <span style="font-size:11px;color:#6B7280;width:10px">▶</span>🏢 ${forn.fornecedor} <span class="small muted">(${(forn.contratos||[]).length})</span>
+                        </summary>
+                        <div style="padding:6px 10px 10px;display:flex;flex-direction:column;gap:6px">
                           ${(forn.contratos || []).map(function(c){ return renderCardContrato(c); }).join('')}
                         </div>
-                      </div>
+                      </details>
                     `;
                   }).join('')}
                 </div>
@@ -4228,7 +4230,7 @@ function renderCardContrato(c) {
     'Vencendo60':   '#F59E0B',
     'Vencendo30':   '#DC2626',
     'Vencido':      '#7F1D1D',
-    'Cancelado':    '#6B7280',
+    'Cancelado':    '#DC2626',
     'SemVigencia':  '#9CA3AF',
     'Indeterminado':'#10B981'
   };
@@ -4254,9 +4256,10 @@ function renderCardContrato(c) {
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <span style="background:${cor};color:#fff;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600">${c.status || 'SemVigencia'}</span>
           <button class="btn btn-ghost" onclick="abrirContratoPDF('${c.id}')" title="Ver PDF" style="padding:4px 8px;font-size:12px">📄 PDF</button>
+          <button class="btn btn-ghost" onclick='editarVigenciaContrato(${JSON.stringify({id:c.id, title:c.title||c.nomeArquivo, dataInicio:c.dataInicio, dataFim:c.dataFim, observacoes:c.observacoes||"", status:c.status})})' title="Editar vigência" style="padding:4px 8px;font-size:12px">✎ Editar</button>
           ${isCancelado
             ? '<button class="btn btn-ghost" onclick="alterarStatusContrato(\'' + c.id + '\', \'Ativo\')" style="padding:4px 8px;font-size:12px">↻ Reativar</button>'
-            : '<button class="btn btn-ghost" onclick="alterarStatusContrato(\'' + c.id + '\', \'Cancelado\')" style="padding:4px 8px;font-size:12px;color:#7F1D1D">✕ Cancelar</button>'
+            : '<button class="btn btn-ghost" onclick="alterarStatusContrato(\'' + c.id + '\', \'Cancelado\')" style="padding:4px 8px;font-size:12px;color:#DC2626">✕ Cancelar</button>'
           }
         </div>
       </div>
@@ -4273,6 +4276,64 @@ function aplicaFiltroContratos() {
 
 function abrirContratoPDF(id) {
   window.open('/api/AbrirContrato?id=' + encodeURIComponent(id), '_blank');
+}
+
+function editarVigenciaContrato(c) {
+  const html = `
+    <h3 style="margin-top:0">Editar vigência do contrato</h3>
+    <div class="small muted" style="margin-bottom:14px">${(c.title || '').replace(/</g,'&lt;')}</div>
+    <div style="margin-bottom:10px">
+      <div class="label">Data de início (assinatura)</div>
+      <input id="evc-di" type="date" value="${c.dataInicio || ''}" style="width:100%">
+    </div>
+    <div style="margin-bottom:10px">
+      <div class="label">Data fim (deixe em branco se indeterminado)</div>
+      <input id="evc-df" type="date" value="${c.dataFim || ''}" style="width:100%">
+    </div>
+    <div style="margin-bottom:10px">
+      <div class="label">Observações (opcional)</div>
+      <textarea id="evc-obs" rows="3" style="width:100%;resize:vertical">${(c.observacoes || '').replace(/</g,'&lt;')}</textarea>
+    </div>
+    <div class="small muted" style="margin-bottom:14px">Status será recalculado automaticamente com base na data fim. Se quiser forçar um status específico (ex: Cancelado), use os botões do card.</div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="salvarVigenciaContrato('${c.id}')">Salvar</button>
+    </div>
+    <div id="evc-resultado" style="margin-top:14px"></div>
+  `;
+  openModal(html);
+}
+
+async function salvarVigenciaContrato(id) {
+  const dataInicio = document.getElementById('evc-di').value || '';
+  const dataFim = document.getElementById('evc-df').value || '';
+  const observacoes = document.getElementById('evc-obs').value || '';
+  const resDiv = document.getElementById('evc-resultado');
+  resDiv.innerHTML = '<div class="muted small">Salvando...</div>';
+  try {
+    const r = await fetch('/api/AtualizarStatusContrato', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: id,
+        dataInicio: dataInicio || null,
+        dataFim: dataFim || null,
+        observacoes: observacoes,
+        status: 'auto'
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      resDiv.innerHTML = '<div class="alert alert-error">' + (data.error || 'erro') + '</div>';
+      return;
+    }
+    if (typeof toast === 'function') toast('Vigência atualizada — status: ' + data.status, 'success');
+    closeModal();
+    carregarContratosReais();
+  } catch (e) {
+    resDiv.innerHTML = '<div class="alert alert-error">' + e.message + '</div>';
+  }
 }
 
 async function alterarStatusContrato(id, novoStatus) {

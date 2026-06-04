@@ -453,7 +453,7 @@ const MAPA_DIRETORIA = {
   'DIRETORIA DE OPERACOES': 'Operacoes',
   'DIRETORIA DE SUPRIMENTOS E LOGISTICA': 'Suprimentos',
   'DIRETORIA FINANCEIRA': 'Financeira',
-  'GERENCIA DE PROJETOS E TI': 'Tecnica',
+  'GERENCIA DE PROJETOS E TI': 'Tecnologia',
   'GERENCIA DE RH': 'RH',
   'JURIDICO': 'Juridica',
   'OUVIDORIA': 'Ouvidoria',
