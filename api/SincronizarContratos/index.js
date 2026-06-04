@@ -30,8 +30,14 @@
  *   }
  */
 
-const contratos = require('../shared/contratos');
-const { getUser } = require('../shared/auth');
+// IMPORTANTE: requires sao lazy (dentro do handler) pra evitar crash no carregamento
+// caso algum modulo grande quebre no startup (pdf-parse tem historia de bug com
+// arquivo de teste interno em algumas configs).
+let contratos, getUser;
+function carregarDeps() {
+  if (!contratos) contratos = require('../shared/contratos');
+  if (!getUser) getUser = require('../shared/auth').getUser;
+}
 
 function readClientPrincipal(req) {
   const header = req.headers && req.headers['x-ms-client-principal'];
@@ -49,6 +55,7 @@ async function isAdmin(req) {
   if (roles.includes('administrador') || roles.includes('admin')) return true;
   // Fallback: getUserRoles (consulta grupos AAD)
   try {
+    carregarDeps();
     const user = await getUser(req);
     if (!user || !user.oid) return false;
     const { getUserRoles } = require('../shared/userRoles');
@@ -69,6 +76,14 @@ function ctxErr(context, status, msg, extra) {
 
 module.exports = async function (context, req) {
   const inicio = Date.now();
+  // Carga lazy ANTES do try pra retornar erro especifico se shared/contratos falhar
+  try {
+    carregarDeps();
+  } catch (eDep) {
+    context.res = { status: 500, headers: { 'Content-Type': 'application/json' },
+      body: { error: 'falha ao carregar deps: ' + eDep.message, stack: (eDep.stack || '').split('\n').slice(0, 8) } };
+    return;
+  }
   try {
     // RBAC
     if (!(await isAdmin(req))) {
@@ -311,6 +326,24 @@ async function persistir(client, siteId, listId, colMap, arq, classif, vig, spIt
 }
 }
 ;
+  if (vig._escalacao) trechos.push('Escalado pra Sonnet apos Haiku reportar baixo confidence');
+  set('LeituraIATexto', trechos.join('\n').slice(0, 30000));
+
+  if (spItemIdExistente) {
+    await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + spItemIdExistente + '/fields')
+      .patch(fields);
+  } else {
+    await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
+      .post({ fields: fields });
+  }
+}
+';
+  set('LeituraIAStatus', leituraStatus);
+
+  const trechos = [];
+  if (vig.trecho) trechos.push(vig.trecho);
+  if (vig.motivo) trechos.push('Motivo: ' + vig.motivo);
+  if (vig._modelo) trechos.push('Modelo: ' + vig._modelo);
   if (vig._escalacao) trechos.push('Escalado pra Sonnet apos Haiku reportar baixo confidence');
   set('LeituraIATexto', trechos.join('\n').slice(0, 30000));
 

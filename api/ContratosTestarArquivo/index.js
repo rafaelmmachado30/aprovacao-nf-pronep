@@ -13,12 +13,20 @@
  * Anonymous pra facilitar diagnostico (somente admin no SincronizarContratos).
  */
 
-const contratos = require('../shared/contratos');
-
 module.exports = async function (context, req) {
   const diag = { steps: [], inicio: Date.now() };
   function logStep(nome, extra) {
     diag.steps.push(Object.assign({ step: nome, ms: Date.now() - diag.inicio }, extra || {}));
+  }
+
+  let contratos;
+  try {
+    contratos = require('../shared/contratos');
+    logStep('require_contratos');
+  } catch (e) {
+    context.res = { status: 500, headers: { 'Content-Type': 'application/json' },
+      body: { error: 'falha ao carregar shared/contratos: ' + e.message, stack: (e.stack || '').split('\n').slice(0, 8) } };
+    return;
   }
 
   try {
