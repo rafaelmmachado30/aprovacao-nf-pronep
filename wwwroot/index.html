@@ -4366,14 +4366,17 @@ function abrirSincronizarContratos() {
       <div class="label">Pasta (subpath)</div>
       <input id="syc-pasta" type="text" placeholder="Ex: /GERÊNCIA DE PROJETOS E TI/CORPORATIVO/TOTVS SA" style="width:100%" />
     </div>
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
       <div style="flex:1">
         <div class="label">Máximo de arquivos</div>
-        <input id="syc-max" type="number" value="20" min="1" max="100" style="width:100%">
+        <input id="syc-max" type="number" value="30" min="1" max="100" style="width:100%">
       </div>
       <div style="flex:1">
-        <label><input id="syc-dryrun" type="checkbox" checked> Dry-run (só simula, não grava)</label>
+        <label><input id="syc-dryrun" type="checkbox"> Dry-run (só simula, não grava)</label>
       </div>
+    </div>
+    <div style="margin-bottom:14px">
+      <label><input id="syc-force" type="checkbox"> Forçar releitura (re-processa arquivos já gravados — use ao corrigir mapeamento de diretoria ou regravar todos)</label>
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
@@ -4386,15 +4389,17 @@ function abrirSincronizarContratos() {
 
 async function executarSincronizarContratos() {
   const pasta = document.getElementById('syc-pasta').value;
-  const maxArquivos = parseInt(document.getElementById('syc-max').value) || 20;
+  const maxArquivos = parseInt(document.getElementById('syc-max').value) || 30;
   const dryRun = document.getElementById('syc-dryrun').checked;
+  const forcarReleitura = document.getElementById('syc-force').checked;
   const resDiv = document.getElementById('syc-resultado');
-  resDiv.innerHTML = '<div class="muted">Sincronizando... pode demorar até 1 min.</div>';
+  resDiv.innerHTML = '<div class="muted">Sincronizando... pode demorar até 4 min pra batches grandes.</div>';
   try {
     const params = new URLSearchParams();
     if (pasta) params.set('pasta', pasta);
     params.set('maxArquivos', String(maxArquivos));
     if (dryRun) params.set('dryRun', 'true');
+    if (forcarReleitura) params.set('forcarReleitura', 'true');
     const r = await fetch('/api/SincronizarContratos?' + params.toString(), { credentials: 'include' });
     const data = await r.json();
     if (!r.ok) {
