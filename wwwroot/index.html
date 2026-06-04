@@ -950,9 +950,9 @@
 // ============== STATE ==============
 const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
-  gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','mapa-aprovadores','arquitetura'] },
+  gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','contratos','mapa-aprovadores','arquitetura'] },
   financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','mapa-aprovadores','auditoria','arquitetura','configuracoes'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','auditoria','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -1813,6 +1813,7 @@ const menuItems = [
   { id: 'rejeitadas',        label: 'Notas Rejeitadas',           icon: ICONS.rejeitadas },
   { id: 'rejeitadas-minhas', label: 'Notas Rejeitadas',           icon: ICONS.rejeitadas },
   { id: 'fornecedores',      label: 'Fornecedores',               icon: ICONS.fornecedores },
+  { id: 'contratos',         label: 'Contratos',                  icon: ICONS.fornecedores },
   { id: 'mapa-aprovadores',  label: 'Mapa de Aprovadores',        icon: ICONS.mapa },
   { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
   { id: 'arquitetura',       label: 'Arquitetura do Sistema',     icon: ICONS.arquitetura },
@@ -3901,6 +3902,18 @@ const views = {
     return renderFornecedoresView();
   },
 
+  contratos: () => {
+    if (!window._filtroContratos) {
+      window._filtroContratos = { busca: '', status: 'TODOS', diretoria: 'TODAS', unidade: 'TODAS', mostrarCancelados: false };
+    }
+    if (!window._contratosCarregados) {
+      // Primeira vez nessa view: dispara o load assincrono
+      setTimeout(carregarContratosReais, 50);
+      return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:20px;color:var(--azul-escuro);margin-bottom:8px">Carregando contratos...</div><div class="small muted">Buscando contratos do SharePoint via API</div></div>';
+    }
+    return renderContratosView();
+  },
+
   auditoria: () => {
     if (!window._filtroAudit) {
       window._filtroAudit = { acao: '', userEmail: '', periodo: '7d' };
@@ -4073,6 +4086,276 @@ function descreveEscopoGestor(escopo) {
     grupos[diretoria].push(unidade);
   });
   return Object.entries(grupos).map(([d, us]) => `<b>${d}</b> em ${us.join(', ')}`).join(' · ');
+}
+
+// ============================================================================
+// MODULO CONTRATOS — listagem em arvore + KPIs + acoes
+// ============================================================================
+window._contratosCarregados = false;
+window._contratosArvore = null;
+window._contratosStats = null;
+window._contratosScope = null;
+
+async function carregarContratosReais() {
+  try {
+    const f = window._filtroContratos || {};
+    const params = new URLSearchParams();
+    if (f.busca) params.set('busca', f.busca);
+    if (f.diretoria && f.diretoria !== 'TODAS') params.set('diretoria', f.diretoria);
+    if (f.unidade && f.unidade !== 'TODAS') params.set('unidade', f.unidade);
+    if (f.status && f.status !== 'TODOS') params.set('status', f.status);
+    const r = await fetch('/api/ListarContratos?' + params.toString(), { credentials: 'include' });
+    if (!r.ok) {
+      document.getElementById('content-area').innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Falha ao carregar contratos (HTTP ' + r.status + ')</div>';
+      return;
+    }
+    const data = await r.json();
+    window._contratosArvore = data.arvore || [];
+    window._contratosStats = data.stats || {};
+    window._contratosScope = data.userScope || {};
+    window._contratosCarregados = true;
+    document.getElementById('content-area').innerHTML = renderContratosView();
+  } catch (e) {
+    console.error('[carregarContratosReais]', e);
+    document.getElementById('content-area').innerHTML = '<div class="alert alert-error"><span class="ico">x</span>' + (e.message || 'erro') + '</div>';
+  }
+}
+
+function renderContratosView() {
+  const stats = window._contratosStats || {};
+  const arvore = window._contratosArvore || [];
+  const scope = window._contratosScope || {};
+  const f = window._filtroContratos;
+
+  // KPIs
+  const kpiCards = [
+    { label: 'Total', v: stats.total || 0, cor: 'var(--azul-escuro)' },
+    { label: 'Ativos', v: stats.ativos || 0, cor: 'var(--verde)' },
+    { label: 'Vencendo 90d', v: stats.vencendo90 || 0, cor: '#3B82F6' },
+    { label: 'Vencendo 60d', v: stats.vencendo60 || 0, cor: '#F59E0B' },
+    { label: 'Vencendo 30d', v: stats.vencendo30 || 0, cor: '#DC2626' },
+    { label: 'Vencidos', v: stats.vencidos || 0, cor: '#7F1D1D' },
+    { label: 'Sem vigência', v: stats.semVigencia || 0, cor: '#6B7280' }
+  ];
+  const kpiHTML = kpiCards.map(k => `
+    <div class="kpi-card" style="border-left:4px solid ${k.cor};padding:12px;background:#fff;border-radius:6px;flex:1;min-width:120px;box-shadow:0 1px 3px rgba(0,0,0,.06)">
+      <div class="small muted" style="font-size:11px;text-transform:uppercase">${k.label}</div>
+      <div style="font-size:24px;font-weight:700;color:${k.cor}">${k.v}</div>
+    </div>
+  `).join('');
+
+  const escopo = Array.isArray(scope.diretoriasGestorOf) ? ('Diretorias: ' + scope.diretoriasGestorOf.join(', ')) : 'Acesso total (Admin)';
+
+  return `
+    <h2>Contratos</h2>
+    <div class="view-sub">Acervo de contratos vigentes e historicos da Pronep. Vigencia extraida automaticamente por IA. <b>${escopo}</b>.</div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+      ${kpiHTML}
+    </div>
+
+    <div class="filter-bar filter-stack-mobile" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
+      <div style="flex:1;min-width:200px">
+        <div class="label">Buscar (fornecedor, nome do arquivo)</div>
+        <input id="fct-busca" type="text" value="${(f.busca || '').replace(/"/g,'&quot;')}" placeholder="Ex: TOTVS, Aile..." oninput="aplicaFiltroContratos()" style="width:100%">
+      </div>
+      <div style="min-width:140px">
+        <div class="label">Status</div>
+        <select id="fct-status" onchange="aplicaFiltroContratos()">
+          <option value="TODOS"${f.status==='TODOS'?' selected':''}>Todos</option>
+          <option value="Ativo"${f.status==='Ativo'?' selected':''}>Ativo</option>
+          <option value="Vencendo30"${f.status==='Vencendo30'?' selected':''}>Vencendo 30d</option>
+          <option value="Vencendo60"${f.status==='Vencendo60'?' selected':''}>Vencendo 60d</option>
+          <option value="Vencendo90"${f.status==='Vencendo90'?' selected':''}>Vencendo 90d</option>
+          <option value="Vencido"${f.status==='Vencido'?' selected':''}>Vencido</option>
+          <option value="Cancelado"${f.status==='Cancelado'?' selected':''}>Cancelado</option>
+          <option value="SemVigencia"${f.status==='SemVigencia'?' selected':''}>Sem vigência</option>
+        </select>
+      </div>
+      <div>
+        <button class="btn btn-secondary" onclick="abrirSincronizarContratos()">Sincronizar pasta</button>
+      </div>
+    </div>
+
+    <div id="contratos-arvore">
+      ${renderArvoreContratos(arvore)}
+    </div>
+  `;
+}
+
+function renderArvoreContratos(arvore) {
+  if (!arvore || !arvore.length) {
+    return '<div class="card" style="text-align:center;padding:30px"><div class="muted">Nenhum contrato encontrado com esses filtros.</div></div>';
+  }
+  return arvore.map(function(dir) {
+    return `
+      <details open style="background:#fff;border:1px solid var(--cinza-borda);border-radius:6px;margin-bottom:10px">
+        <summary style="padding:12px 14px;cursor:pointer;font-weight:600;color:var(--azul-escuro);background:#F8FAFC">
+          📁 ${dir.diretoria} <span class="small muted">(${dir.total})</span>
+        </summary>
+        <div style="padding:8px 14px 14px">
+          ${(dir.unidades || []).map(function(un){
+            return `
+              <details open style="margin-top:8px">
+                <summary style="padding:6px 10px;cursor:pointer;font-weight:500;color:#374151;background:#F1F5F9;border-radius:4px">
+                  📍 ${un.unidade} <span class="small muted">(${un.total})</span>
+                </summary>
+                <div style="padding:8px 6px 6px;display:flex;flex-direction:column;gap:8px">
+                  ${(un.fornecedores || []).map(function(forn){
+                    return `
+                      <div style="padding:8px;background:#FAFAFA;border-radius:4px">
+                        <div style="font-weight:600;color:#1F2937;margin-bottom:6px">🏢 ${forn.fornecedor}</div>
+                        <div style="display:flex;flex-direction:column;gap:6px">
+                          ${(forn.contratos || []).map(function(c){ return renderCardContrato(c); }).join('')}
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </details>
+            `;
+          }).join('')}
+        </div>
+      </details>
+    `;
+  }).join('');
+}
+
+function renderCardContrato(c) {
+  const corStatus = {
+    'Ativo':        '#10B981',
+    'Vencendo90':   '#3B82F6',
+    'Vencendo60':   '#F59E0B',
+    'Vencendo30':   '#DC2626',
+    'Vencido':      '#7F1D1D',
+    'Cancelado':    '#6B7280',
+    'SemVigencia':  '#9CA3AF',
+    'Indeterminado':'#10B981'
+  };
+  const cor = corStatus[c.status] || '#6B7280';
+  const vigenciaStr = c.dataInicio || c.dataFim
+    ? (c.dataInicio || '?') + ' → ' + (c.dataFim || (c.status === 'Cancelado' ? 'Cancelado' : 'Indeterminado'))
+    : (c.status === 'Cancelado' ? 'Contrato cancelado' : 'Sem vigência identificada');
+  const dias = c.diasParaVencer;
+  const diasTxt = (dias !== null && dias !== undefined && c.status !== 'Cancelado')
+    ? (dias < 0 ? ' (vencido há ' + Math.abs(dias) + 'd)' : ' (' + dias + 'd pra vencer)')
+    : '';
+  const valor = c.valor ? ' · ' + Number(c.valor).toLocaleString('pt-BR', {style:'currency',currency:'BRL'}) : '';
+  const fornecImg = (c.fornecedor || c.title || '').slice(0, 50);
+  const isCancelado = c.status === 'Cancelado';
+
+  return `
+    <div style="padding:10px;background:#fff;border:1px solid #E5E7EB;border-left:4px solid ${cor};border-radius:4px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
+        <div style="flex:1;min-width:240px">
+          <div style="font-weight:600;color:#1F2937">${c.title || c.nomeArquivo || 'Sem nome'}</div>
+          <div class="small muted" style="margin-top:4px">${vigenciaStr}${diasTxt}${valor}</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <span style="background:${cor};color:#fff;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600">${c.status || 'SemVigencia'}</span>
+          <button class="btn btn-ghost" onclick="abrirContratoPDF('${c.id}')" title="Ver PDF" style="padding:4px 8px;font-size:12px">📄 PDF</button>
+          ${isCancelado
+            ? '<button class="btn btn-ghost" onclick="alterarStatusContrato(\'' + c.id + '\', \'Ativo\')" style="padding:4px 8px;font-size:12px">↻ Reativar</button>'
+            : '<button class="btn btn-ghost" onclick="alterarStatusContrato(\'' + c.id + '\', \'Cancelado\')" style="padding:4px 8px;font-size:12px;color:#7F1D1D">✕ Cancelar</button>'
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function aplicaFiltroContratos() {
+  const f = window._filtroContratos;
+  f.busca = document.getElementById('fct-busca').value;
+  f.status = document.getElementById('fct-status').value;
+  carregarContratosReais();
+}
+
+function abrirContratoPDF(id) {
+  window.open('/api/AbrirContrato?id=' + encodeURIComponent(id), '_blank');
+}
+
+async function alterarStatusContrato(id, novoStatus) {
+  const acao = novoStatus === 'Cancelado' ? 'cancelar' : 'reativar';
+  if (!confirm('Confirma ' + acao + ' este contrato?')) return;
+  try {
+    const r = await fetch('/api/AtualizarStatusContrato', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: id, status: novoStatus })
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      if (typeof toast === 'function') toast('Erro: ' + (data.error || r.status), 'error');
+      return;
+    }
+    if (typeof toast === 'function') toast('Contrato ' + (novoStatus === 'Cancelado' ? 'cancelado' : 'reativado'), 'success');
+    carregarContratosReais();
+  } catch (e) {
+    if (typeof toast === 'function') toast('Erro: ' + e.message, 'error');
+  }
+}
+
+function abrirSincronizarContratos() {
+  const html = `
+    <h3 style="margin-top:0">Sincronizar contratos do SharePoint</h3>
+    <div class="small muted" style="margin-bottom:14px">Indique o caminho da pasta dentro de <span class="mono">/CONTRATOS/CONTRATOS E DOCUMENTOS - PRESTADORES</span>. Deixe vazio para sincronizar tudo (cuidado, varios PDFs podem custar tempo + tokens).</div>
+    <div style="margin-bottom:10px">
+      <div class="label">Pasta (subpath)</div>
+      <input id="syc-pasta" type="text" placeholder="Ex: /GERÊNCIA DE PROJETOS E TI/CORPORATIVO/TOTVS SA" style="width:100%" />
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
+      <div style="flex:1">
+        <div class="label">Máximo de arquivos</div>
+        <input id="syc-max" type="number" value="20" min="1" max="100" style="width:100%">
+      </div>
+      <div style="flex:1">
+        <label><input id="syc-dryrun" type="checkbox" checked> Dry-run (só simula, não grava)</label>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="executarSincronizarContratos()">Sincronizar</button>
+    </div>
+    <div id="syc-resultado" style="margin-top:14px"></div>
+  `;
+  openModal(html);
+}
+
+async function executarSincronizarContratos() {
+  const pasta = document.getElementById('syc-pasta').value;
+  const maxArquivos = parseInt(document.getElementById('syc-max').value) || 20;
+  const dryRun = document.getElementById('syc-dryrun').checked;
+  const resDiv = document.getElementById('syc-resultado');
+  resDiv.innerHTML = '<div class="muted">Sincronizando... pode demorar até 1 min.</div>';
+  try {
+    const params = new URLSearchParams();
+    if (pasta) params.set('pasta', pasta);
+    params.set('maxArquivos', String(maxArquivos));
+    if (dryRun) params.set('dryRun', 'true');
+    const r = await fetch('/api/SincronizarContratos?' + params.toString(), { credentials: 'include' });
+    const data = await r.json();
+    if (!r.ok) {
+      resDiv.innerHTML = '<div class="alert alert-error">' + (data.error || 'erro') + '</div>';
+      return;
+    }
+    const s = data.stats || {};
+    resDiv.innerHTML = `
+      <div class="alert alert-success">
+        <b>Sincronização concluída.</b><br>
+        Total encontrados: ${data.totalEncontrados} · Processados: ${data.processados}<br>
+        Novos: ${s.novos || 0} · Atualizados: ${s.atualizados || 0} · Pulados: ${s.pulados || 0} · Erros: ${s.erros || 0}<br>
+        Tempo: ${Math.round((data.tempoMs || 0)/1000)}s
+        ${dryRun ? '<br><b>(modo dry-run: nada foi gravado)</b>' : ''}
+      </div>
+    `;
+    if (!dryRun) {
+      setTimeout(function(){ closeModal(); carregarContratosReais(); }, 2000);
+    }
+  } catch (e) {
+    resDiv.innerHTML = '<div class="alert alert-error">' + e.message + '</div>';
+  }
 }
 
 function renderFornecedoresView() {
@@ -6338,7 +6621,6 @@ async function doApprove(id) {
     const r = await fetch('/api/AprovarNota', {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: spId })
     });
     const data = await r.json().catch(() => ({}));
