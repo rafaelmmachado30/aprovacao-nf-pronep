@@ -4172,8 +4172,9 @@ function renderContratosView() {
           <option value="SemVigencia"${f.status==='SemVigencia'?' selected':''}>Sem vigência</option>
         </select>
       </div>
-      <div>
+      <div style="display:flex;gap:6px">
         <button class="btn btn-secondary" onclick="abrirSincronizarContratos()">Sincronizar pasta</button>
+        <button class="btn btn-primary" onclick="abrirSincronizarTudo()" title="Varre as 10 diretorias da Pronep em sequencia">⚡ Sincronizar TUDO</button>
       </div>
     </div>
 
@@ -4356,6 +4357,138 @@ async function alterarStatusContrato(id, novoStatus) {
   } catch (e) {
     if (typeof toast === 'function') toast('Erro: ' + e.message, 'error');
   }
+}
+
+// ============================================================================
+// ORQUESTRADOR: SincronizarTudo — varre as 10 diretorias-raiz em sequencia
+// Roda no front (escapa do timeout do SWA Functions) com progresso em tempo real.
+// ============================================================================
+const DIRETORIAS_PRONEP = [
+  { id: '/OUVIDORIA',                                  label: 'Ouvidoria' },
+  { id: '/QUALIDADE',                                  label: 'Qualidade' },
+  { id: '/PACIENTES PARTICULARES',                     label: 'Pacientes Particulares' },
+  { id: '/GERÊNCIA DE RH',                             label: 'RH' },
+  { id: '/DIRETORIA COMERCIAL',                        label: 'Comercial' },
+  { id: '/DIRETORIA FINANCEIRA',                       label: 'Financeira' },
+  { id: '/DIRETORIA DE OPERAÇÕES',                     label: 'Operações' },
+  { id: '/DIRETORIA DE SUPRIMENTOS E LOGÍSTICA',       label: 'Suprimentos' },
+  { id: '/JURÍDICO',                                   label: 'Jurídico' },
+  { id: '/GERÊNCIA DE PROJETOS E TI',                  label: 'Tecnologia' }
+];
+
+window._syncCancelado = false;
+
+async function sincronizarTudoOrquestrado() {
+  if (!confirm('Vai varrer as 10 diretorias da Pronep no SharePoint, ler todos os PDFs novos e extrair vigência via IA. Pode levar 30-90 minutos e custar $1.50 a $4 em tokens Claude. Confirma?')) return;
+
+  window._syncCancelado = false;
+  const modal = document.getElementById('modal-content');
+  if (modal) modal.scrollTop = 0;
+
+  const totalStart = Date.now();
+  const acumulado = { novos: 0, atualizados: 0, pulados: 0, erros: 0, batches: 0, diretorias: 0 };
+
+  const resDiv = document.getElementById('syc-resultado');
+  function atualiza(html) { if (resDiv) resDiv.innerHTML = html; }
+
+  function renderProgresso(idxDir, nomeDir, batchInfo) {
+    const pct = Math.round((idxDir / DIRETORIAS_PRONEP.length) * 100);
+    const tempoSeg = Math.round((Date.now() - totalStart) / 1000);
+    atualiza(`
+      <div class="alert" style="background:#EFF6FF;border-left:3px solid #3B82F6;color:#1E3A8A;padding:14px;border-radius:4px">
+        <div style="font-weight:600;margin-bottom:6px">Sincronizando diretoria ${idxDir + 1}/${DIRETORIAS_PRONEP.length}: <span style="color:var(--azul-escuro)">${nomeDir}</span></div>
+        <div style="height:10px;background:#DBEAFE;border-radius:5px;overflow:hidden;margin-bottom:8px">
+          <div style="height:100%;width:${pct}%;background:#3B82F6;transition:width .3s"></div>
+        </div>
+        <div class="small muted">${batchInfo || ''}</div>
+        <div class="small muted" style="margin-top:6px">Acumulado: <b>${acumulado.novos}</b> novos · ${acumulado.atualizados} atualizados · ${acumulado.pulados} pulados · ${acumulado.erros} erros · ${acumulado.batches} chamadas · ${tempoSeg}s</div>
+        <div style="margin-top:10px"><button class="btn btn-ghost" style="font-size:12px;padding:4px 10px" onclick="window._syncCancelado = true">⏹ Cancelar (termina o batch atual)</button></div>
+      </div>
+    `);
+  }
+
+  for (let i = 0; i < DIRETORIAS_PRONEP.length; i++) {
+    if (window._syncCancelado) break;
+    const dir = DIRETORIAS_PRONEP[i];
+    let tentativas = 0;
+    let pastaCompletaMsg = '';
+
+    while (true) {
+      if (window._syncCancelado) break;
+      tentativas++;
+      renderProgresso(i, dir.label, `Batch ${tentativas} dessa diretoria... ${pastaCompletaMsg}`);
+      acumulado.batches++;
+
+      try {
+        const params = new URLSearchParams();
+        params.set('pasta', dir.id);
+        params.set('maxArquivos', '30');
+        const r = await fetch('/api/SincronizarContratos?' + params.toString(), { credentials: 'include' });
+        const data = await r.json();
+        if (!r.ok) {
+          acumulado.erros++;
+          pastaCompletaMsg = `<b style="color:#DC2626">Erro nessa diretoria:</b> ${data.error || ('HTTP ' + r.status)}`;
+          break;
+        }
+        const s = data.stats || {};
+        acumulado.novos += (s.novos || 0);
+        acumulado.atualizados += (s.atualizados || 0);
+        acumulado.pulados += (s.pulados || 0);
+        acumulado.erros += (s.erros || 0);
+
+        const novosNesseBatch = (s.novos || 0) + (s.atualizados || 0);
+        pastaCompletaMsg = `Batch ${tentativas}: ${data.totalEncontrados} encontrados, ${s.novos || 0} novos, ${s.pulados || 0} pulados`;
+
+        // Termina essa diretoria se NAO houve novos (tudo foi pulado = ja processado antes)
+        // OU se o total encontrado eh igual ao limite (vai bater no proximo batch)
+        if (novosNesseBatch === 0) break;
+        if (tentativas > 20) break; // safety: 20 batches × 30 arquivos = 600 max
+      } catch (e) {
+        acumulado.erros++;
+        pastaCompletaMsg = `<b style="color:#DC2626">Erro de rede:</b> ${e.message}`;
+        break;
+      }
+    }
+
+    acumulado.diretorias++;
+  }
+
+  const tempoTotal = Math.round((Date.now() - totalStart) / 1000);
+  const min = Math.floor(tempoTotal / 60);
+  const seg = tempoTotal % 60;
+  atualiza(`
+    <div class="alert alert-success" style="padding:14px;border-radius:4px">
+      <div style="font-weight:600;font-size:16px;margin-bottom:8px">${window._syncCancelado ? '⏹ Sincronização cancelada' : '✓ Sincronização concluída'}</div>
+      <div>Diretorias processadas: <b>${acumulado.diretorias}/${DIRETORIAS_PRONEP.length}</b></div>
+      <div>Novos contratos: <b>${acumulado.novos}</b></div>
+      <div>Atualizados: ${acumulado.atualizados}</div>
+      <div>Já existentes (pulados): ${acumulado.pulados}</div>
+      <div>Erros: ${acumulado.erros}</div>
+      <div>Total de batches: ${acumulado.batches}</div>
+      <div>Tempo total: ${min}m ${seg}s</div>
+      <div style="margin-top:14px"><button class="btn btn-primary" onclick="closeModal(); carregarContratosReais();">Fechar e atualizar lista</button></div>
+    </div>
+  `);
+}
+
+function abrirSincronizarTudo() {
+  openModal(`
+    <h3 style="margin-top:0">Sincronizar TODAS as diretorias da Pronep</h3>
+    <div style="background:#FEF3C7;border-left:3px solid #F59E0B;padding:12px;border-radius:4px;margin-bottom:14px">
+      <b>Atenção:</b> Esta operação vai varrer as 10 diretorias do SharePoint, ler todos os PDFs novos e extrair vigência via IA.
+      <ul style="margin:6px 0 0 18px;padding:0">
+        <li>Duração: <b>30 a 90 minutos</b></li>
+        <li>Custo estimado: <b>$1.50 a $4 em tokens Claude</b></li>
+        <li>Arquivos já gravados são pulados (não há custo extra)</li>
+        <li>Pode cancelar a qualquer momento (termina o batch atual)</li>
+      </ul>
+    </div>
+    <div id="syc-resultado" style="margin-bottom:14px"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
+      <button class="btn btn-primary" onclick="sincronizarTudoOrquestrado()">▶ Iniciar sincronização completa</button>
+    </div>
+  `);
 }
 
 function abrirSincronizarContratos() {
@@ -6845,6 +6978,7 @@ async function integrarOmie(id, numero, fornecedor, unidade) {
         <div id="omie-step-1" style="color:var(--azul-escuro);font-weight:600">
           <span class="omie-step-icon">⏳</span> Buscando fornecedor no Omie
         </div>
+        <div id="omie-step-2" style="color:#999">
         <div id="omie-step-2" style="color:#999">
           <span class="omie-step-icon">○</span> Localizando conta a pagar (pode demorar)
         </div>
