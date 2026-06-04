@@ -236,7 +236,16 @@ async function crawlPasta(client, driveId, pastaRaiz, opts) {
     }
   }
 
-  await recurse(pastaRaiz, 0, []);
+  // ancestors iniciais: tudo entre ROOT_FOLDER_PATH e pastaRaiz.
+  // Ex: pastaRaiz = "/CONTRATOS/CONTRATOS E DOCUMENTOS - PRESTADORES/GERÊNCIA DE PROJETOS E TI/CORPORATIVO/TOTVS SA"
+  //     ROOT       = "/CONTRATOS/CONTRATOS E DOCUMENTOS - PRESTADORES"
+  //     iniciais   = ['GERÊNCIA DE PROJETOS E TI', 'CORPORATIVO', 'TOTVS SA']
+  // Sem isso, ao descer pra subpasta CONTRATOS o ancestors fica ['CONTRATOS'] e perde a hierarquia.
+  let relRaiz = pastaRaiz;
+  if (relRaiz.startsWith(ROOT_FOLDER_PATH)) relRaiz = relRaiz.slice(ROOT_FOLDER_PATH.length);
+  const ancestorsIniciais = relRaiz.split('/').filter(function(s){ return s && s.length > 0; });
+
+  await recurse(pastaRaiz, 0, ancestorsIniciais);
   return resultado;
 }
 
@@ -499,6 +508,36 @@ function classificarPath(ancestors) {
   }
   // Fallback robusto: percorre ancestors de tras pra frente, pulando subpastas estruturais
   if (!fornecedor && ancestors.length) {
+    for (let i = ancestors.length - 1; i >= 0; i--) {
+      const aNorm = normalizeStr(ancestors[i]);
+      if (!SUBPASTAS_ESTRUTURAIS.has(aNorm) && !MAPA_DIRETORIA[aNorm] && !UNIDADES_VALIDAS.includes(aNorm)) {
+        fornecedor = ancestors[i];
+        break;
+      }
+    }
+  }
+  return { diretoria, unidade, fornecedor };
+}
+
+module.exports = {
+  getGraphClient,
+  resolveContratosSite,
+  garantirListaContratos,
+  getContratoColMap,
+  listarPasta,
+  crawlPasta,
+  extrairTexto,
+  extrairTextoPDF,
+  extrairVigenciaIA,
+  extrairVigenciaInteligente,
+  calcularStatus,
+  calcularDiasParaVencer,
+  classificarPath,
+  normalizeStr,
+  ROOT_FOLDER_PATH,
+  LIST_CONTRATOS
+};
+{
     for (let i = ancestors.length - 1; i >= 0; i--) {
       const aNorm = normalizeStr(ancestors[i]);
       if (!SUBPASTAS_ESTRUTURAIS.has(aNorm) && !MAPA_DIRETORIA[aNorm] && !UNIDADES_VALIDAS.includes(aNorm)) {
