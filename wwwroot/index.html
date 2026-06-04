@@ -4377,11 +4377,13 @@ const DIRETORIAS_PRONEP = [
 ];
 
 window._syncCancelado = false;
+window._syncErros = [];
 
 async function sincronizarTudoOrquestrado() {
   if (!confirm('Vai varrer as 10 diretorias da Pronep no SharePoint, ler todos os PDFs novos e extrair vigência via IA. Pode levar 30-90 minutos e custar $1.50 a $4 em tokens Claude. Confirma?')) return;
 
   window._syncCancelado = false;
+  window._syncErros = [];
   const modal = document.getElementById('modal-content');
   if (modal) modal.scrollTop = 0;
 
@@ -4421,13 +4423,16 @@ async function sincronizarTudoOrquestrado() {
 
       try {
         const params = new URLSearchParams();
-        params.set('pasta', dir.id);
+        // IMPORTANTE: normaliza pra Unicode NFC (composto) — alguns paths com acentos
+        // podem vir em NFD do JavaScript e o Graph API rejeita.
+        params.set('pasta', dir.id.normalize('NFC'));
         params.set('maxArquivos', '30');
         const r = await fetch('/api/SincronizarContratos?' + params.toString(), { credentials: 'include' });
         const data = await r.json();
         if (!r.ok) {
           acumulado.erros++;
-          pastaCompletaMsg = `<b style="color:#DC2626">Erro nessa diretoria:</b> ${data.error || ('HTTP ' + r.status)}`;
+          window._syncErros.push({ diretoria: dir.label, pasta: dir.id, statusHttp: r.status, error: data.error || 'sem mensagem', step: data.step, graphStatusCode: data.graphStatusCode, graphBody: data.graphBody });
+          pastaCompletaMsg = `<b style="color:#DC2626">Erro:</b> ${data.error || ('HTTP ' + r.status)}`;
           break;
         }
         const s = data.stats || {};
@@ -4436,15 +4441,21 @@ async function sincronizarTudoOrquestrado() {
         acumulado.pulados += (s.pulados || 0);
         acumulado.erros += (s.erros || 0);
 
+        // Captura erros individuais de arquivos
+        for (const r2 of (data.resultados || [])) {
+          if (r2.erro) {
+            window._syncErros.push({ diretoria: dir.label, pasta: dir.id, arquivo: r2.nome, erro: r2.erro });
+          }
+        }
+
         const novosNesseBatch = (s.novos || 0) + (s.atualizados || 0);
         pastaCompletaMsg = `Batch ${tentativas}: ${data.totalEncontrados} encontrados, ${s.novos || 0} novos, ${s.pulados || 0} pulados`;
 
-        // Termina essa diretoria se NAO houve novos (tudo foi pulado = ja processado antes)
-        // OU se o total encontrado eh igual ao limite (vai bater no proximo batch)
         if (novosNesseBatch === 0) break;
-        if (tentativas > 20) break; // safety: 20 batches × 30 arquivos = 600 max
+        if (tentativas > 20) break;
       } catch (e) {
         acumulado.erros++;
+        window._syncErros.push({ diretoria: dir.label, pasta: dir.id, error: 'rede: ' + e.message });
         pastaCompletaMsg = `<b style="color:#DC2626">Erro de rede:</b> ${e.message}`;
         break;
       }
@@ -4456,16 +4467,30 @@ async function sincronizarTudoOrquestrado() {
   const tempoTotal = Math.round((Date.now() - totalStart) / 1000);
   const min = Math.floor(tempoTotal / 60);
   const seg = tempoTotal % 60;
+
+  const errosHTML = (window._syncErros && window._syncErros.length)
+    ? `<details style="margin-top:12px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:4px">
+         <summary style="padding:10px;cursor:pointer;font-weight:600;color:#7F1D1D">⚠ Ver detalhes dos ${window._syncErros.length} erros</summary>
+         <div style="padding:10px;font-family:monospace;font-size:11px;max-height:300px;overflow-y:auto">
+           ${window._syncErros.slice(0, 30).map(function(e){
+             return '<div style="margin-bottom:8px;padding:6px;background:#fff;border-radius:3px"><b>' + (e.diretoria || '?') + '</b> ' + (e.arquivo ? '· <span style="color:#6B7280">' + e.arquivo + '</span>' : '') + '<br>' + (e.error || e.erro || '?') + (e.step ? ' (step: ' + e.step + ')' : '') + (e.graphStatusCode ? ' (graph: ' + e.graphStatusCode + ')' : '') + '</div>';
+           }).join('')}
+           ${window._syncErros.length > 30 ? '<div class="muted">...e mais ' + (window._syncErros.length - 30) + ' erros</div>' : ''}
+         </div>
+       </details>`
+    : '';
+
   atualiza(`
-    <div class="alert alert-success" style="padding:14px;border-radius:4px">
-      <div style="font-weight:600;font-size:16px;margin-bottom:8px">${window._syncCancelado ? '⏹ Sincronização cancelada' : '✓ Sincronização concluída'}</div>
-      <div>Diretorias processadas: <b>${acumulado.diretorias}/${DIRETORIAS_PRONEP.length}</b></div>
-      <div>Novos contratos: <b>${acumulado.novos}</b></div>
-      <div>Atualizados: ${acumulado.atualizados}</div>
-      <div>Já existentes (pulados): ${acumulado.pulados}</div>
-      <div>Erros: ${acumulado.erros}</div>
-      <div>Total de batches: ${acumulado.batches}</div>
-      <div>Tempo total: ${min}m ${seg}s</div>
+    <div class="alert alert-success" style="padding:14px;border-radius:4px;display:block">
+      <div style="font-weight:600;font-size:16px;margin-bottom:10px">${window._syncCancelado ? '⏹ Sincronização cancelada' : '✓ Sincronização concluída'}</div>
+      <div style="display:block;margin-bottom:4px"><b>Diretorias processadas:</b> ${acumulado.diretorias}/${DIRETORIAS_PRONEP.length}</div>
+      <div style="display:block;margin-bottom:4px"><b>Novos contratos:</b> ${acumulado.novos}</div>
+      <div style="display:block;margin-bottom:4px"><b>Atualizados:</b> ${acumulado.atualizados}</div>
+      <div style="display:block;margin-bottom:4px"><b>Já existentes (pulados):</b> ${acumulado.pulados}</div>
+      <div style="display:block;margin-bottom:4px"><b>Erros:</b> ${acumulado.erros}</div>
+      <div style="display:block;margin-bottom:4px"><b>Total de batches:</b> ${acumulado.batches}</div>
+      <div style="display:block;margin-bottom:4px"><b>Tempo total:</b> ${min}m ${seg}s</div>
+      ${errosHTML}
       <div style="margin-top:14px"><button class="btn btn-primary" onclick="closeModal(); carregarContratosReais();">Fechar e atualizar lista</button></div>
     </div>
   `);
