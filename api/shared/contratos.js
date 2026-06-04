@@ -537,33 +537,3 @@ module.exports = {
   ROOT_FOLDER_PATH,
   LIST_CONTRATOS
 };
-{
-    for (let i = ancestors.length - 1; i >= 0; i--) {
-      const aNorm = normalizeStr(ancestors[i]);
-      if (!SUBPASTAS_ESTRUTURAIS.has(aNorm) && !MAPA_DIRETORIA[aNorm] && !UNIDADES_VALIDAS.includes(aNorm)) {
-        fornecedor = ancestors[i];
-        break;
-      }
-    }
-  }
-  return { diretoria, unidade, fornecedor };
-}
-
-module.exports = {
-  getGraphClient,
-  resolveContratosSite,
-  garantirListaContratos,
-  getContratoColMap,
-  listarPasta,
-  crawlPasta,
-  extrairTexto,
-  extrairTextoPDF,
-  extrairVigenciaIA,
-  extrairVigenciaInteligente,
-  calcularStatus,
-  calcularDiasParaVencer,
-  classificarPath,
-  normalizeStr,
-  ROOT_FOLDER_PATH,
-  LIST_CONTRATOS
-};
