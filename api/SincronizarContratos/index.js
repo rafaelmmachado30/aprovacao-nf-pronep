@@ -243,12 +243,39 @@ module.exports = async function (context, req) {
           if (itensExistentes[arq.id]) stats.atualizados++; else stats.novos++;
         }
       } catch (e) {
-        stats.erros++;
-        resultados.push({
-          nome: arq.nome,
-          path: arq.path,
-          erro: e.message
-        });
+        // Caso especial: arquivo muito grande — grava entry vazia pra usuario
+        // ver no sistema e editar manualmente, em vez de simplesmente "errar".
+        if (e.message && e.message.indexOf('arquivo_grande_demais') === 0) {
+          try {
+            const classif = contratos.classificarPath(arq.ancestors);
+            const vig = { naoEncontrou: true, motivo: 'arquivo grande demais (' + (arq.size ? Math.round(arq.size/1024/1024) + 'MB' : '?') + ') - extracao manual necessaria' };
+            resultados.push({
+              nome: arq.nome,
+              path: arq.path,
+              diretoria: classif.diretoria,
+              unidade: classif.unidade,
+              fornecedor: classif.fornecedor,
+              vigencia: vig,
+              status: 'SemVigencia',
+              persistido: !dryRun,
+              obsLeitura: 'arquivo_grande'
+            });
+            if (!dryRun && garantirLista) {
+              await persistir(client, siteNF, listIdContratos, colMap, arq, classif, vig, itensExistentes[arq.id]);
+              if (itensExistentes[arq.id]) stats.atualizados++; else stats.novos++;
+            }
+          } catch (e2) {
+            stats.erros++;
+            resultados.push({ nome: arq.nome, path: arq.path, erro: 'arq grande + falha persist: ' + e2.message });
+          }
+        } else {
+          stats.erros++;
+          resultados.push({
+            nome: arq.nome,
+            path: arq.path,
+            erro: e.message
+          });
+        }
       }
     }
 

@@ -171,7 +171,8 @@ async function listarPasta(client, driveId, folderPath) {
       });
     } else if (it.file) {
       const ext = (it.name || '').split('.').pop().toLowerCase();
-      if (['pdf', 'docx', 'doc'].includes(ext)) {
+      // Politica: apenas PDFs (Word editavel fica fora do padrao Pronep)
+      if (ext === 'pdf') {
         files.push({
           name: it.name,
           id: it.id,
@@ -255,7 +256,7 @@ async function crawlPasta(client, driveId, pastaRaiz, opts) {
 
 async function baixarArquivo(client, driveId, itemId, opts) {
   opts = opts || {};
-  const tamanhoMaxMB = opts.tamanhoMaxMB || 8;
+  const tamanhoMaxMB = opts.tamanhoMaxMB || 30;
   // Pega item SEM select — @microsoft.graph.downloadUrl eh "instance annotation"
   // e $select a oculta. Sem select, ela vem incluida automaticamente.
   const item = await client.api('/drives/' + driveId + '/items/' + itemId).get();
@@ -303,8 +304,8 @@ async function extrairTextoDOCX(buffer) {
 async function extrairTexto(client, driveId, itemId, ext, opts) {
   const buf = await baixarArquivo(client, driveId, itemId, opts);
   if (ext === 'pdf') return await extrairTextoPDF(buf);
-  if (ext === 'docx' || ext === 'doc') return await extrairTextoDOCX(buf);
-  return { texto: '', vazio: true };
+  // Politica Pronep: so PDFs. Outros formatos ignorados.
+  return { texto: '', vazio: true, erro: 'formato_nao_suportado' };
 }
 
 // ============================================================================
@@ -533,6 +534,12 @@ module.exports = {
   calcularStatus,
   calcularDiasParaVencer,
   classificarPath,
+  normalizeStr,
+  ROOT_FOLDER_PATH,
+  LIST_CONTRATOS
+};
+};
+icarPath,
   normalizeStr,
   ROOT_FOLDER_PATH,
   LIST_CONTRATOS

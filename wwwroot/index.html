@@ -4190,14 +4190,14 @@ function renderArvoreContratos(arvore) {
   }
   return arvore.map(function(dir) {
     return `
-      <details open style="background:#fff;border:1px solid var(--cinza-borda);border-radius:6px;margin-bottom:10px">
+      <details style="background:#fff;border:1px solid var(--cinza-borda);border-radius:6px;margin-bottom:10px">
         <summary style="padding:12px 14px;cursor:pointer;font-weight:600;color:var(--azul-escuro);background:#F8FAFC">
           📁 ${dir.diretoria} <span class="small muted">(${dir.total})</span>
         </summary>
         <div style="padding:8px 14px 14px">
           ${(dir.unidades || []).map(function(un){
             return `
-              <details open style="margin-top:8px">
+              <details style="margin-top:8px">
                 <summary style="padding:6px 10px;cursor:pointer;font-weight:500;color:#374151;background:#F1F5F9;border-radius:4px">
                   📍 ${un.unidade} <span class="small muted">(${un.total})</span>
                 </summary>
@@ -4388,7 +4388,8 @@ async function sincronizarTudoOrquestrado() {
   if (modal) modal.scrollTop = 0;
 
   const totalStart = Date.now();
-  const acumulado = { novos: 0, atualizados: 0, pulados: 0, erros: 0, batches: 0, diretorias: 0 };
+  const acumulado = { novos: 0, atualizados: 0, pulados: 0, erros: 0, batches: 0, diretorias: 0, totalEncontrados: 0 };
+  const porDiretoria = [];
 
   const resDiv = document.getElementById('syc-resultado');
   function atualiza(html) { if (resDiv) resDiv.innerHTML = html; }
@@ -4440,6 +4441,7 @@ async function sincronizarTudoOrquestrado() {
         acumulado.atualizados += (s.atualizados || 0);
         acumulado.pulados += (s.pulados || 0);
         acumulado.erros += (s.erros || 0);
+        acumulado.totalEncontrados += (data.totalEncontrados || 0);
 
         // Captura erros individuais de arquivos
         for (const r2 of (data.resultados || [])) {
@@ -4449,8 +4451,12 @@ async function sincronizarTudoOrquestrado() {
         }
 
         const novosNesseBatch = (s.novos || 0) + (s.atualizados || 0);
-        pastaCompletaMsg = `Batch ${tentativas}: ${data.totalEncontrados} encontrados, ${s.novos || 0} novos, ${s.pulados || 0} pulados`;
+        const totalEncBatch = data.totalEncontrados || 0;
+        pastaCompletaMsg = `Batch ${tentativas}: ${totalEncBatch} encontrados, ${s.novos || 0} novos, ${s.pulados || 0} pulados`;
 
+        // Termina se: nada novo E nada pulado (pasta vazia) OU se atingiu o limite
+        if (novosNesseBatch === 0 && (s.pulados || 0) === 0) break;
+        // Se houve pulados e novos = 0, JA processou tudo nessa diretoria
         if (novosNesseBatch === 0) break;
         if (tentativas > 20) break;
       } catch (e) {
@@ -4462,6 +4468,7 @@ async function sincronizarTudoOrquestrado() {
     }
 
     acumulado.diretorias++;
+    porDiretoria.push({ label: dir.label, encontrados: acumulado.totalEncontrados });
   }
 
   const tempoTotal = Math.round((Date.now() - totalStart) / 1000);
@@ -4489,6 +4496,7 @@ async function sincronizarTudoOrquestrado() {
       <div style="display:block;margin-bottom:4px"><b>Já existentes (pulados):</b> ${acumulado.pulados}</div>
       <div style="display:block;margin-bottom:4px"><b>Erros:</b> ${acumulado.erros}</div>
       <div style="display:block;margin-bottom:4px"><b>Total de batches:</b> ${acumulado.batches}</div>
+      <div style="display:block;margin-bottom:4px"><b>Total de arquivos encontrados:</b> ${acumulado.totalEncontrados}</div>
       <div style="display:block;margin-bottom:4px"><b>Tempo total:</b> ${min}m ${seg}s</div>
       ${errosHTML}
       <div style="margin-top:14px"><button class="btn btn-primary" onclick="closeModal(); carregarContratosReais();">Fechar e atualizar lista</button></div>
