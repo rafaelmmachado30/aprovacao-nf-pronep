@@ -324,34 +324,3 @@ async function persistir(client, siteId, listId, colMap, arq, classif, vig, spIt
       .post({ fields: fields });
   }
 }
-}
-;
-  if (vig._escalacao) trechos.push('Escalado pra Sonnet apos Haiku reportar baixo confidence');
-  set('LeituraIATexto', trechos.join('\n').slice(0, 30000));
-
-  if (spItemIdExistente) {
-    await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + spItemIdExistente + '/fields')
-      .patch(fields);
-  } else {
-    await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
-      .post({ fields: fields });
-  }
-}
-';
-  set('LeituraIAStatus', leituraStatus);
-
-  const trechos = [];
-  if (vig.trecho) trechos.push(vig.trecho);
-  if (vig.motivo) trechos.push('Motivo: ' + vig.motivo);
-  if (vig._modelo) trechos.push('Modelo: ' + vig._modelo);
-  if (vig._escalacao) trechos.push('Escalado pra Sonnet apos Haiku reportar baixo confidence');
-  set('LeituraIATexto', trechos.join('\n').slice(0, 30000));
-
-  if (spItemIdExistente) {
-    await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + spItemIdExistente + '/fields')
-      .patch(fields);
-  } else {
-    await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
-      .post({ fields: fields });
-  }
-}

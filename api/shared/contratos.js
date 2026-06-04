@@ -488,36 +488,3 @@ module.exports = {
   ROOT_FOLDER_PATH,
   LIST_CONTRATOS
 };
- fornecedor = ancestors[i+1] || '';
-      }
-      break;
-    }
-  }
-  // Fallback: ultimo nivel da arvore costuma ser o prestador
-  if (!fornecedor && ancestors.length) {
-    fornecedor = ancestors[ancestors.length - 1] || '';
-  }
-  return { diretoria, unidade, fornecedor };
-}
-
-// ============================================================================
-// EXPORT
-// ============================================================================
-
-module.exports = {
-  getGraphClient,
-  resolveContratosSite,
-  garantirListaContratos,
-  getContratoColMap,
-  listarPasta,
-  crawlPasta,
-  extrairTexto,
-  extrairTextoPDF,
-  extrairVigenciaIA,
-  extrairVigenciaInteligente,
-  calcularStatus,
-  calcularDiasParaVencer,
-  classificarPath,
-  ROOT_FOLDER_PATH,
-  LIST_CONTRATOS
-};
