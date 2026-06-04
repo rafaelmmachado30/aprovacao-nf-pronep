@@ -92,10 +92,20 @@ module.exports = async function (context, req) {
     // 1. Garante lista PRONEP-NF-Contratos (no site do sistema NF)
     let siteNF, listIdContratos, listaCriada = false;
     if (garantirLista) {
-      const r = await contratos.garantirListaContratos(client);
-      siteNF = r.siteId;
-      listIdContratos = r.listId;
-      listaCriada = r.criada;
+      try {
+        const r = await contratos.garantirListaContratos(client);
+        siteNF = r.siteId;
+        listIdContratos = r.listId;
+        listaCriada = r.criada;
+      } catch (eLista) {
+        return ctxErr(context, 500, 'Falha ao garantir lista PRONEP-NF-Contratos: ' + eLista.message, {
+          step: 'garantirLista',
+          graphStatusCode: eLista.statusCode,
+          graphBody: eLista.body,
+          graphCode: eLista.code,
+          stack: (eLista.stack || '').split('\n').slice(0, 8)
+        });
+      }
     }
 
     // 2. Resolve site de Contratos + driveId
@@ -107,7 +117,8 @@ module.exports = async function (context, req) {
     if (recursivo) {
       arquivos = await contratos.crawlPasta(client, driveId, pastaCompleta, {
         maxDepth: 6,
-        onProgress: function(ev){ progress.push(ev); }
+        maxArquivos: maxArquivos,
+        onProgress: function(ev){ if (progress.length < 50) progress.push(ev); }
       });
     } else {
       const listing = await contratos.listarPasta(client, driveId, pastaCompleta);
@@ -298,4 +309,16 @@ async function persistir(client, siteId, listId, colMap, arq, classif, vig, spIt
       .post({ fields: fields });
   }
 }
+}
+;
+  if (vig._escalacao) trechos.push('Escalado pra Sonnet apos Haiku reportar baixo confidence');
+  set('LeituraIATexto', trechos.join('\n').slice(0, 30000));
+
+  if (spItemIdExistente) {
+    await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + spItemIdExistente + '/fields')
+      .patch(fields);
+  } else {
+    await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
+      .post({ fields: fields });
+  }
 }

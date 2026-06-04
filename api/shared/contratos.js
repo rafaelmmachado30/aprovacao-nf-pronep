@@ -189,28 +189,35 @@ async function listarPasta(client, driveId, folderPath) {
 
 /**
  * Faz crawl recursivo de uma pasta. Retorna lista plana de arquivos com metadata.
+ * EARLY-STOP: para assim que `maxArquivos` for atingido (evita varrer dezenas de
+ * pastas grandes quando o consumidor so precisa de N arquivos).
  *
- * @param {string} pastaRaiz - caminho relativo no drive, ex: "/CONTRATOS/CONTRATOS E DOCUMENTOS - PRESTADORES/JURIDICO"
- * @param {object} opts - { maxDepth?, onProgress? }
+ * @param {string} pastaRaiz - caminho relativo no drive
+ * @param {object} opts - { maxDepth?, maxArquivos?, onProgress? }
  */
 async function crawlPasta(client, driveId, pastaRaiz, opts) {
   opts = opts || {};
   const maxDepth = opts.maxDepth || 8;
+  const maxArquivos = opts.maxArquivos || 999999;
   const onProgress = opts.onProgress || function(){};
   const resultado = [];
+  let pastasVisitadas = 0;
 
   async function recurse(path, depth, ancestors) {
     if (depth > maxDepth) return;
+    if (resultado.length >= maxArquivos) return;  // early-stop
     let listing;
     try {
       listing = await listarPasta(client, driveId, path);
+      pastasVisitadas++;
     } catch (e) {
       onProgress({ tipo: 'erro_pasta', path, erro: e.message });
       return;
     }
-    onProgress({ tipo: 'pasta', path, files: listing.files.length, folders: listing.folders.length });
+    onProgress({ tipo: 'pasta', path, files: listing.files.length, folders: listing.folders.length, visitadas: pastasVisitadas });
     // Arquivos primeiro
     for (const f of listing.files) {
+      if (resultado.length >= maxArquivos) return;
       resultado.push({
         nome: f.name,
         id: f.id,
@@ -224,6 +231,7 @@ async function crawlPasta(client, driveId, pastaRaiz, opts) {
     }
     // Recursivo
     for (const sub of listing.folders) {
+      if (resultado.length >= maxArquivos) return;
       await recurse(sub.path, depth + 1, ancestors.concat([sub.name]));
     }
   }
