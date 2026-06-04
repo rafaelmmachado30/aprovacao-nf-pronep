@@ -23,6 +23,7 @@
 <script src="/vendor/teams-js.min.js"></script>
 <!-- SheetJS pra parser XLSX no browser (importacao de fornecedores) -->
 <script src="/vendor/xlsx.full.min.js"></script>
+<script src="/contratos-bfs.js?v=20260604"></script>
 <style>
   :root {
     --azul-escuro: #1F4E79;
@@ -4518,7 +4519,7 @@ function abrirSincronizarTudo() {
     <div id="syc-resultado" style="margin-bottom:14px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end">
       <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
-      <button class="btn btn-primary" onclick="sincronizarTudoOrquestrado()">▶ Iniciar sincronização completa</button>
+      <button class="btn btn-primary" onclick="window.contratosBfs.iniciar()">▶ Iniciar sincronização completa (BFS)</button>
     </div>
   `);
 }
