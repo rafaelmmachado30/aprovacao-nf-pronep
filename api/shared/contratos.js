@@ -247,23 +247,28 @@ async function crawlPasta(client, driveId, pastaRaiz, opts) {
 async function baixarArquivo(client, driveId, itemId, opts) {
   opts = opts || {};
   const tamanhoMaxMB = opts.tamanhoMaxMB || 8;
-  // Estrategia robusta: pega o item pra ver size + downloadUrl assinada,
-  // depois faz fetch direto (evita problemas com getStream do graph client).
-  const item = await client.api('/drives/' + driveId + '/items/' + itemId)
-    .select('id,name,size,@microsoft.graph.downloadUrl').get();
+  // Pega item SEM select — @microsoft.graph.downloadUrl eh "instance annotation"
+  // e $select a oculta. Sem select, ela vem incluida automaticamente.
+  const item = await client.api('/drives/' + driveId + '/items/' + itemId).get();
   const size = item.size || 0;
   if (size > tamanhoMaxMB * 1024 * 1024) {
     throw new Error('arquivo_grande_demais: ' + Math.round(size/1024/1024) + 'MB (max ' + tamanhoMaxMB + 'MB)');
   }
   const downloadUrl = item['@microsoft.graph.downloadUrl'];
-  if (!downloadUrl) {
-    throw new Error('Graph nao retornou @microsoft.graph.downloadUrl');
+  if (downloadUrl) {
+    const fetch = require('isomorphic-fetch');
+    const resp = await fetch(downloadUrl);
+    if (!resp.ok) throw new Error('download HTTP ' + resp.status);
+    const arrayBuffer = await resp.arrayBuffer();
+    return Buffer.from(arrayBuffer);
   }
-  const fetch = require('isomorphic-fetch');
-  const resp = await fetch(downloadUrl);
-  if (!resp.ok) throw new Error('download HTTP ' + resp.status);
-  const arrayBuffer = await resp.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  // Fallback: /content endpoint via Graph client (faz 302 -> downloadUrl)
+  try {
+    const buf = await client.api('/drives/' + driveId + '/items/' + itemId + '/content').responseType('arraybuffer').get();
+    return Buffer.from(buf);
+  } catch (e) {
+    throw new Error('Graph nao retornou downloadUrl e fallback /content falhou: ' + e.message);
+  }
 }
 
 async function extrairTextoPDF(buffer) {
