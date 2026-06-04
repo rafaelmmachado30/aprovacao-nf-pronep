@@ -4451,14 +4451,12 @@ async function sincronizarTudoOrquestrado() {
           }
         }
 
-        const novosNesseBatch = (s.novos || 0) + (s.atualizados || 0);
+        const restantes = data.restantes || 0;
         const totalEncBatch = data.totalEncontrados || 0;
-        pastaCompletaMsg = `Batch ${tentativas}: ${totalEncBatch} encontrados, ${s.novos || 0} novos, ${s.pulados || 0} pulados`;
+        pastaCompletaMsg = `Batch ${tentativas}: ${totalEncBatch} encontrados na árvore, ${s.novos || 0} novos, ${s.pulados || 0} já gravados, ${restantes} ainda a processar`;
 
-        // Termina se: nada novo E nada pulado (pasta vazia) OU se atingiu o limite
-        if (novosNesseBatch === 0 && (s.pulados || 0) === 0) break;
-        // Se houve pulados e novos = 0, JA processou tudo nessa diretoria
-        if (novosNesseBatch === 0) break;
+        // Termina se NAO ha mais arquivos novos a processar nessa diretoria
+        if (restantes === 0) break;
         if (tentativas > 20) break;
       } catch (e) {
         acumulado.erros++;

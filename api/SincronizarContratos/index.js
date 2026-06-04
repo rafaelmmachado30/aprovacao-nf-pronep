@@ -130,9 +130,12 @@ module.exports = async function (context, req) {
     const progress = [];
     let arquivos;
     if (recursivo) {
+      // Crawl COMPLETO da arvore (sem aplicar maxArquivos aqui) — assim NUNCA
+      // perdemos pastas porque o limite foi atingido na fase de listagem.
+      // O `maxArquivos` se aplica somente aos NAO-EXISTENTES no loop de processamento.
       arquivos = await contratos.crawlPasta(client, driveId, pastaCompleta, {
         maxDepth: 6,
-        maxArquivos: maxArquivos,
+        maxArquivos: 5000,
         onProgress: function(ev){ if (progress.length < 50) progress.push(ev); }
       });
     } else {
@@ -172,19 +175,20 @@ module.exports = async function (context, req) {
       }
     }
 
-    // 5. Limita por maxArquivos
-    const aProcessar = arquivos.slice(0, maxArquivos);
-    const pulados = arquivos.length - aProcessar.length;
-
-    // 6. Processa cada arquivo
+    // 5. Filtra: separa arquivos a processar (novos OU forcar) dos pulados (ja gravados)
+    const stats = { novos: 0, atualizados: 0, pulados: 0, erros: 0 };
     const resultados = [];
-    let stats = { novos: 0, atualizados: 0, pulados: pulados, erros: 0 };
-
-    for (const arq of aProcessar) {
-      try {
-        // Skip se ja existe e nao for forcarReleitura
-        if (itensExistentes[arq.id] && !forcarReleitura) {
-          stats.pulados++;
+    let aFiltrados;
+    if (forcarReleitura) {
+      aFiltrados = arquivos;
+    } else {
+      // Conta pulados (ja existentes) ANTES de cortar pra maxArquivos
+      aFiltrados = arquivos.filter(function(a){ return !itensExistentes[a.id]; });
+      const jaExistentes = arquivos.length - aFiltrados.length;
+      stats.pulados = jaExistentes;
+      // Adiciona os pulados aos resultados pra rastreabilidade (sem dados pesados)
+      for (const arq of arquivos) {
+        if (itensExistentes[arq.id]) {
           resultados.push({
             nome: arq.nome,
             path: arq.path,
@@ -192,8 +196,17 @@ module.exports = async function (context, req) {
             motivo: 'ja_existe',
             spItemId: itensExistentes[arq.id]
           });
-          continue;
         }
+      }
+    }
+
+    // 6. Limita aos NAO-EXISTENTES por maxArquivos
+    const aProcessar = aFiltrados.slice(0, maxArquivos);
+    const restantes = aFiltrados.length - aProcessar.length;
+
+    // 7. Processa cada arquivo
+    for (const arq of aProcessar) {
+      try {
 
         // Classifica path -> diretoria/unidade/fornecedor
         const classif = contratos.classificarPath(arq.ancestors);
@@ -287,6 +300,7 @@ module.exports = async function (context, req) {
         pasta: pastaCompleta,
         totalEncontrados,
         processados: aProcessar.length,
+        restantes,
         stats,
         dryRun,
         recursivo,
@@ -351,3 +365,18 @@ async function persistir(client, siteId, listId, colMap, arq, classif, vig, spIt
       .post({ fields: fields });
   }
 }
+vo,
+        listaCriada,
+        tempoMs: Date.now() - inicio,
+        resultados,
+        progress: progress.slice(0, 20)
+      }
+    };
+  } catch (err) {
+    context.log && context.log.error && context.log.error('SincronizarContratos error:', err);
+    ctxErr(context, 500, err.message, { stack: (err.stack || '').split('\n').slice(0, 8) });
+  }
+};
+;
+  }
+};
