@@ -309,31 +309,43 @@ function getAnthropic() {
 }
 
 const PROMPT_VIGENCIA = [
-  'Voce e um analista juridico extraindo VIGENCIA de um contrato.',
+  'Voce e um analista juridico EXTRAINDO A VIGENCIA DE UM CONTRATO.',
   '',
-  'TAREFA: Identifique a DATA DE INICIO e DATA DE FIM do contrato a partir do texto abaixo.',
+  'CONCEITOS CRITICOS — NAO CONFUNDA:',
+  '• "VIGENCIA DO CONTRATO" = periodo em que o contrato esta valido executando (ex: "Vigencia de 12 meses", "Prazo de 24 meses prorrogavel", "Vigora ate 31/12/2027").',
+  '• "VALIDADE DA PROPOSTA" = prazo limite pra ACEITAR uma proposta comercial (ex: "Proposta valida ate 31/08/2020"). ISSO NAO E VIGENCIA. Se o texto so menciona validade da proposta, retorne { "naoEncontrou": true, "motivo": "documento eh proposta sem vigencia contratual" }.',
   '',
-  'REGRAS:',
-  '1. Procure por clausulas como "Vigencia", "Prazo", "Vigora a partir de", "Por X meses/anos", "Validade".',
-  '2. Se a vigencia for "por X meses a partir da assinatura", calcule DataFim = DataAssinatura + X meses.',
-  '3. Se for "indeterminada" ou "renovacao automatica", retorne { "indeterminado": true, "dataInicio": "YYYY-MM-DD", "trecho": "..." }.',
-  '4. Se NAO encontrar nada de vigencia, retorne { "naoEncontrou": true, "motivo": "explicacao curta" }.',
-  '5. Se ambiguo (multiplas datas ou dificil de cravar), retorne { "confidence": "baixo", ... }.',
-  '6. Sempre inclua o "trecho" da clausula onde encontrou.',
+  'O QUE BUSCAR (palavras-chave de vigencia REAL):',
+  '• "Vigencia", "Prazo de vigencia", "Prazo do contrato"',
+  '• "Vigora a partir de... pelo prazo de X meses/anos"',
+  '• "Por prazo determinado de N (numero) anos"',
+  '• "Validade dos servicos de X meses, renovavel automaticamente"',
+  '• "Prazo indeterminado", "Renovacao automatica"',
   '',
-  'FORMATO DE SAIDA (JSON estrito):',
+  'REGRAS DE OUTPUT:',
+  '1. Vigencia explicita com DataInicio e DataFim absolutas: { "dataInicio": "YYYY-MM-DD", "dataFim": "YYYY-MM-DD", "indeterminado": false, "confidence": "alto" }',
+  '2. Vigencia relativa "N meses a contar da assinatura DD/MM/YYYY": calcule DataFim e retorne com confidence "alto".',
+  '3. Vigencia indeterminada ou renovacao automatica: { "dataInicio": "YYYY-MM-DD"|null, "dataFim": null, "indeterminado": true, "confidence": "alto" }.',
+  '4. Documento eh PROPOSTA COMERCIAL sem clausula de vigencia: { "naoEncontrou": true, "motivo": "proposta sem vigencia contratual explicita" }. NAO use validade da proposta como vigencia.',
+  '5. Documento eh ADITIVO/NDA/aprovacao interna sem vigencia propria: { "naoEncontrou": true, "motivo": "documento sem clausula propria de vigencia (ex: aditivo, NDA, aprovacao interna)" }.',
+  '6. Ambiguidade real (multiplas vigencias citadas, datas conflitantes): { "confidence": "baixo", ... }.',
+  '7. SEMPRE inclua "trecho" com a citacao EXATA da clausula onde achou (max 400 chars). Se naoEncontrou=true, trecho fica null ou vazio.',
+  '',
+  'FORMATO DE SAIDA (JSON estrito, sem markdown):',
   '{',
   '  "dataInicio": "YYYY-MM-DD" | null,',
   '  "dataFim": "YYYY-MM-DD" | null,',
   '  "indeterminado": boolean,',
   '  "naoEncontrou": boolean,',
   '  "confidence": "alto" | "baixo",',
-  '  "trecho": "string com a clausula original (max 300 chars)",',
-  '  "valorContrato": number | null (valor mensal ou total se explicitado),',
-  '  "fornecedorIdentificado": "nome do fornecedor mencionado no contrato" | null',
+  '  "trecho": "string com a clausula original ou null",',
+  '  "motivo": "se naoEncontrou=true, explique brevemente",',
+  '  "valorContrato": number | null (valor mensal ou total se explicitado, em BRL),',
+  '  "fornecedorIdentificado": "nome do fornecedor mencionado no contrato" | null,',
+  '  "tipoDocumento": "contrato" | "proposta" | "aditivo" | "nda" | "outro"',
   '}',
   '',
-  'NAO INCLUA EXPLICACAO. NAO USE MARKDOWN. APENAS O JSON.'
+  'APENAS O JSON. SEM EXPLICACOES ADICIONAIS, SEM MARKDOWN.'
 ].join('\n');
 
 async function extrairVigenciaIA(texto, opts) {
@@ -424,57 +436,79 @@ function calcularDiasParaVencer(dataFim) {
 // MAPEAMENTO DE METADATA (Diretoria, Unidade, Fornecedor) A PARTIR DO PATH
 // ============================================================================
 
+// Mapa SEM acentos — usamos normalizeStr() na hora de comparar.
+// Acentos no SP podem vir como Unicode composto (Ê = U+00CA) OU decomposto (E + U+0302).
+// Pra evitar falha de match, normalizamos ambos pra ASCII puro.
 const MAPA_DIRETORIA = {
   'DIRETORIA COMERCIAL': 'Comercial',
   'DIRETORIA DE OPERACOES': 'Operacoes',
-  'DIRETORIA DE OPERAÇÕES': 'Operacoes',
   'DIRETORIA DE SUPRIMENTOS E LOGISTICA': 'Suprimentos',
-  'DIRETORIA DE SUPRIMENTOS E LOGÍSTICA': 'Suprimentos',
   'DIRETORIA FINANCEIRA': 'Financeira',
   'GERENCIA DE PROJETOS E TI': 'Tecnica',
-  'GERÊNCIA DE PROJETOS E TI': 'Tecnica',
   'GERENCIA DE RH': 'RH',
-  'GERÊNCIA DE RH': 'RH',
   'JURIDICO': 'Juridica',
-  'JURÍDICO': 'Juridica',
   'OUVIDORIA': 'Ouvidoria',
   'PACIENTES PARTICULARES': 'Particulares',
   'QUALIDADE': 'Qualidade'
 };
 
+// Pastas "estruturais" que existem dentro do prestador mas NAO sao o nome do prestador.
+const SUBPASTAS_ESTRUTURAIS = new Set(['CONTRATOS', 'DOCUMENTOS', 'ADITIVOS', 'PROPOSTAS', 'NDAS', 'OUTROS']);
+
+function normalizeStr(s) {
+  return String(s || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')  // tira acentos (NFD + remove combining chars)
+    .toUpperCase()
+    .replace(/\s+/g, ' ').trim();
+}
+
 const UNIDADES_VALIDAS = ['SP', 'RJ', 'ES', 'CORPORATIVO'];
 
 function classificarPath(ancestors) {
-  // ancestors = ['DIRETORIA COMERCIAL', 'SP', 'PRESTADOR X']
+  // ancestors = ['GERÊNCIA DE PROJETOS E TI', 'CORPORATIVO', 'TOTVS SA', 'CONTRATOS']
+  // Queremos: diretoria='Tecnica', unidade='CORPORATIVO', fornecedor='TOTVS SA'
   let diretoria = '';
   let unidade = 'CORPORATIVO';
   let fornecedor = '';
+
   for (let i = 0; i < ancestors.length; i++) {
-    const a = ancestors[i] || '';
-    const aUp = a.toUpperCase().replace(/\s+/g, ' ').trim();
-    if (MAPA_DIRETORIA[aUp]) {
-      diretoria = MAPA_DIRETORIA[aUp];
-      // proximo nivel pode ser unidade ou prestador direto
-      const next = (ancestors[i+1] || '').toUpperCase().trim();
-      if (UNIDADES_VALIDAS.includes(next)) {
-        unidade = next;
-        fornecedor = ancestors[i+2] || ancestors[i+1] || '';
+    const aNorm = normalizeStr(ancestors[i]);
+    if (MAPA_DIRETORIA[aNorm]) {
+      diretoria = MAPA_DIRETORIA[aNorm];
+      // proximo nivel pode ser unidade (CORPORATIVO|SP|RJ|ES) ou prestador direto
+      const nextNorm = normalizeStr(ancestors[i+1]);
+      let idxFornecedor;
+      if (UNIDADES_VALIDAS.includes(nextNorm)) {
+        unidade = nextNorm;
+        idxFornecedor = i + 2;
       } else {
-        fornecedor = ancestors[i+1] || '';
+        idxFornecedor = i + 1;
+      }
+      // O proximo ancestor depois da unidade EH o fornecedor, EXCETO se for
+      // uma subpasta estrutural (CONTRATOS, DOCUMENTOS, etc.) — nesse caso
+      // pega o anterior.
+      const candidato = ancestors[idxFornecedor] || '';
+      if (SUBPASTAS_ESTRUTURAIS.has(normalizeStr(candidato))) {
+        // Sao raras essas — o fornecedor real esta um nivel acima
+        fornecedor = ancestors[idxFornecedor - 1] || candidato;
+      } else {
+        fornecedor = candidato;
       }
       break;
     }
   }
-  // Fallback: ultimo nivel da arvore costuma ser o prestador
+  // Fallback robusto: percorre ancestors de tras pra frente, pulando subpastas estruturais
   if (!fornecedor && ancestors.length) {
-    fornecedor = ancestors[ancestors.length - 1] || '';
+    for (let i = ancestors.length - 1; i >= 0; i--) {
+      const aNorm = normalizeStr(ancestors[i]);
+      if (!SUBPASTAS_ESTRUTURAIS.has(aNorm) && !MAPA_DIRETORIA[aNorm] && !UNIDADES_VALIDAS.includes(aNorm)) {
+        fornecedor = ancestors[i];
+        break;
+      }
+    }
   }
   return { diretoria, unidade, fornecedor };
 }
-
-// ============================================================================
-// EXPORT
-// ============================================================================
 
 module.exports = {
   getGraphClient,
@@ -490,6 +524,7 @@ module.exports = {
   calcularStatus,
   calcularDiasParaVencer,
   classificarPath,
+  normalizeStr,
   ROOT_FOLDER_PATH,
   LIST_CONTRATOS
 };
