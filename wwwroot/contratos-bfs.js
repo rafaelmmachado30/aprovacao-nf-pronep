@@ -301,7 +301,3 @@
 
   window.contratosBfs = { iniciar: iniciar, cancelar: cancelar };
 })();
-iciar, cancelar: cancelar };
-})();
-ciar, cancelar: cancelar };
-})();
