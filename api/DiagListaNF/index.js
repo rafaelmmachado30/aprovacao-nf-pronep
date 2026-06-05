@@ -58,33 +58,32 @@ module.exports = async function (context, req) {
     // Se passou ?criarColunaNova=1&testarPatch=ID, cria coluna hyperlink limpa via Graph
     // e tenta PATCH nela — confirma se o Graph aceita coluna criada por ele mesmo.
     if (req.query && req.query.criarColunaNova) {
-      const nomeColTeste = 'TesteHL_' + Date.now();
+      // Tenta criar como TEXT (Multi-line). URLs sao strings, nao precisa ser hyperlink real.
+      const nomeColTeste = 'TesteUrlStr_' + Date.now();
       try {
         const created = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').post({
           name: nomeColTeste,
           displayName: nomeColTeste,
-          hyperlinkOrPicture: { isPicture: false }
+          text: { allowMultipleLines: true, appendChangesToExistingText: false, linesForEditing: 3 }
         });
-        out.colunaTeste = { nome: nomeColTeste, internal: created.name, criada: true };
-        // Tenta PATCH na coluna nova (testarPatch precisa ser ID de NF existente)
+        out.colunaTeste = { nome: nomeColTeste, internal: created.name, criada: true, tipo: 'text-multiline' };
         if (req.query.testarPatch) {
           const testUrl = 'https://exemplo.com/teste-' + Date.now() + '.pdf';
           const itemId = req.query.testarPatch;
           const patch = {};
-          patch[created.name] = { Url: testUrl, Description: 'teste' };
+          patch[created.name] = testUrl;  // string simples — text aceita
           try {
             await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + itemId + '/fields').patch(patch);
             out.colunaTeste.patchSucesso = true;
-            // Le item de volta
             const item = await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + itemId + '?expand=fields').get();
             out.colunaTeste.valorGravado = (item.fields || {})[created.name];
           } catch (eP) {
             out.colunaTeste.patchErro = { msg: eP.message, status: eP.statusCode, body: eP.body };
           }
         }
-        out.colunaTeste.aviso = 'COLUNA DE TESTE CRIADA NA LISTA. Apague manualmente no SP depois do teste.';
+        out.colunaTeste.aviso = 'COLUNA DE TESTE TEXT CRIADA. Apague manualmente no SP.';
       } catch (e) {
-        out.colunaTeste = { erro: e.message, statusCode: e.statusCode, body: e.body };
+        out.colunaTeste = { erro: e.message, statusCode: e.statusCode, body: e.body, tentou: 'text-multiline' };
       }
     }
 
