@@ -162,16 +162,35 @@ module.exports = async function (context, req) {
     }
 
     // 4. Carrega lista atual pra dedup (busca por DriveItemId)
+    // PROTECAO ANTI-VAZAMENTO DE TOKENS: valida que a lista REALMENTE existe e responde
+    // ANTES de qualquer chamada Claude. Se o garantirListaContratos retornou um listId
+    // stale/invalido (ou se a lista foi deletada manualmente), esse GET vai 404 e a gente
+    // aborta com erro CLARO, sem queimar Claude.
     let colMap = {};
     let itensExistentes = {};
     if (!dryRun && garantirLista) {
-      colMap = await contratos.getContratoColMap(client, siteNF, listIdContratos);
-      const existentes = await client.api('/sites/' + siteNF + '/lists/' + listIdContratos + '/items?expand=fields&$top=999').get();
-      const colDriveId = colMap['DriveItemId'] || 'DriveItemId';
-      for (const it of (existentes.value || [])) {
-        const f = it.fields || {};
-        const did = f[colDriveId] || f.DriveItemId || '';
-        if (did) itensExistentes[did] = it.id;
+      try {
+        colMap = await contratos.getContratoColMap(client, siteNF, listIdContratos);
+        const existentes = await client.api('/sites/' + siteNF + '/lists/' + listIdContratos + '/items?expand=fields&$top=999').get();
+        const colDriveId = colMap['DriveItemId'] || 'DriveItemId';
+        for (const it of (existentes.value || [])) {
+          const f = it.fields || {};
+          const did = f[colDriveId] || f.DriveItemId || '';
+          if (did) itensExistentes[did] = it.id;
+        }
+      } catch (eLista) {
+        // Lista nao existe, foi deletada, ou listId esta stale. ABORTA antes de Claude.
+        return ctxErr(context, 500,
+          'Lista PRONEP-NF-Contratos nao acessivel (listId=' + listIdContratos + '): ' + eLista.message +
+          '. Acesse /api/CriarListaContratos pra criar/validar a lista antes de sincronizar.',
+          {
+            step: 'validar_lista_pre_claude',
+            listIdConsultado: listIdContratos,
+            graphStatusCode: eLista.statusCode,
+            graphCode: eLista.code,
+            graphBody: eLista.body
+          }
+        );
       }
     }
 
@@ -223,7 +242,15 @@ module.exports = async function (context, req) {
     const restantes = aFiltrados.length - aProcessar.length;
 
     // 7. Processa cada arquivo
+    // CIRCUIT BREAKER local: se detectar lista 404 / itemNotFound durante persist,
+    // aborta o resto do batch — nao adianta continuar queimando Claude se nao consegue gravar.
+    let abortarPorListaInacessivel = false;
     for (const arq of aProcessar) {
+      if (abortarPorListaInacessivel) {
+        resultados.push({ nome: arq.nome, path: arq.path, erro: 'pulado: lista PRONEP-NF-Contratos inacessivel — batch abortado pra preservar tokens' });
+        stats.erros++;
+        continue;
+      }
       try {
 
         // Classifica path -> diretoria/unidade/fornecedor
@@ -274,6 +301,26 @@ module.exports = async function (context, req) {
           if (itensExistentes[arq.id]) stats.atualizados++; else stats.novos++;
         }
       } catch (e) {
+        // DETECCAO DE LISTA INACESSIVEL: se persistir lancou 404 / ItemNotFound,
+        // marca pra abortar batch (proximos arquivos nao gastam Claude).
+        const msg = (e && e.message) || '';
+        const code = (e && e.code) || '';
+        const status = (e && e.statusCode) || 0;
+        if (status === 404 || code === 'itemNotFound' || /itemNotFound|not found|nao encontrad/i.test(msg)) {
+          // Confirma que eh sobre a lista (e nao sobre o drive item do arquivo).
+          // Se o erro veio de persistir (apos extrair texto), eh quase certo que eh a lista.
+          if (msg.indexOf('/lists/') >= 0 || msg.indexOf('list') >= 0 || code === 'itemNotFound') {
+            abortarPorListaInacessivel = true;
+            stats.erros++;
+            resultados.push({
+              nome: arq.nome,
+              path: arq.path,
+              erro: 'lista PRONEP-NF-Contratos inacessivel: ' + msg + ' - batch abortado',
+              circuitBreaker: 'lista_404'
+            });
+            continue;
+          }
+        }
         // Caso especial: arquivo muito grande — grava entry vazia pra usuario
         // ver no sistema e editar manualmente, em vez de simplesmente "errar".
         if (e.message && e.message.indexOf('arquivo_grande_demais') === 0) {
