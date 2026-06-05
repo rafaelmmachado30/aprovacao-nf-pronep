@@ -520,6 +520,35 @@ function classificarPath(ancestors) {
   return { diretoria, unidade, fornecedor };
 }
 
+// ============================================================================
+// FILTRO DE RELEVANCIA — economiza tokens Claude pulando arquivos que claramente
+// NAO sao contratos comerciais (docs cadastrais, certidoes, emails, etc).
+// ============================================================================
+const PATTERNS_IGNORAR_CONTRATO = [
+  /documentos[_ ]unificados/i,
+  /^cnpj[_ .-]/i,
+  /^contrato[_ ]social/i,
+  /inscri[cç][aã]o[_ -]?municipal/i,
+  /inscri[cç][aã]o[_ -]?estadual/i,
+  /licenciamento[_ -]integrado/i,
+  /licenciamento[_ -]prefeitura/i,
+  /^alvar[aá][_ .-]/i,
+  /^certid[aã]o[_ .-]/i,
+  /^comprovante[_ -]/i,
+  /\bemail[_ -]/i,
+  /^rg[_ .-]/i,
+  /^cpf[_ .-]/i,
+  /procura[cç][aã]o[_ -]?simples/i
+];
+
+function eRelevantePraContrato(nomeArquivo) {
+  const nome = String(nomeArquivo || '');
+  for (const re of PATTERNS_IGNORAR_CONTRATO) {
+    if (re.test(nome)) return { relevante: false, motivo: 'nome_filtrado: ' + re.toString() };
+  }
+  return { relevante: true };
+}
+
 module.exports = {
   getGraphClient,
   resolveContratosSite,
@@ -535,6 +564,8 @@ module.exports = {
   calcularDiasParaVencer,
   classificarPath,
   normalizeStr,
+  eRelevantePraContrato,
+  PATTERNS_IGNORAR_CONTRATO,
   ROOT_FOLDER_PATH,
   LIST_CONTRATOS
 };

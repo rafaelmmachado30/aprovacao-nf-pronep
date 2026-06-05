@@ -176,17 +176,14 @@ module.exports = async function (context, req) {
     }
 
     // 5. Filtra: separa arquivos a processar (novos OU forcar) dos pulados (ja gravados)
-    const stats = { novos: 0, atualizados: 0, pulados: 0, erros: 0 };
+    //    e tambem filtra por NOME (PATTERNS_IGNORAR_CONTRATO) — economia Claude.
+    const stats = { novos: 0, atualizados: 0, pulados: 0, erros: 0, ignoradosPorNome: 0 };
     const resultados = [];
     let aFiltrados;
     if (forcarReleitura) {
       aFiltrados = arquivos;
     } else {
-      // Conta pulados (ja existentes) ANTES de cortar pra maxArquivos
-      aFiltrados = arquivos.filter(function(a){ return !itensExistentes[a.id]; });
-      const jaExistentes = arquivos.length - aFiltrados.length;
-      stats.pulados = jaExistentes;
-      // Adiciona os pulados aos resultados pra rastreabilidade (sem dados pesados)
+      // Pulados por ja-existir
       for (const arq of arquivos) {
         if (itensExistentes[arq.id]) {
           resultados.push({
@@ -198,7 +195,28 @@ module.exports = async function (context, req) {
           });
         }
       }
+      aFiltrados = arquivos.filter(function(a){ return !itensExistentes[a.id]; });
+      stats.pulados = arquivos.length - aFiltrados.length;
     }
+
+    // FILTRO POR NOME — pula arquivos que claramente nao sao contratos
+    const antesFiltro = aFiltrados.length;
+    const aFiltradosRelevantes = [];
+    for (const arq of aFiltrados) {
+      const filtro = contratos.eRelevantePraContrato(arq.nome);
+      if (!filtro.relevante) {
+        stats.ignoradosPorNome++;
+        resultados.push({
+          nome: arq.nome,
+          path: arq.path,
+          persistido: false,
+          motivo: 'filtrado_por_nome: ' + (filtro.motivo || 'irrelevante')
+        });
+      } else {
+        aFiltradosRelevantes.push(arq);
+      }
+    }
+    aFiltrados = aFiltradosRelevantes;
 
     // 6. Limita aos NAO-EXISTENTES por maxArquivos
     const aProcessar = aFiltrados.slice(0, maxArquivos);
