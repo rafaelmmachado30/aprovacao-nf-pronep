@@ -23,11 +23,11 @@
   var DIRETORIAS = [
     { id: '/OUVIDORIA',                                  label: 'Ouvidoria' },
     { id: '/QUALIDADE',                                  label: 'Qualidade' },
-    { id: '/PACIENTES PARTICULARES',                     label: 'Pacientes Particulares' },
+    // { id: '/PACIENTES PARTICULARES',                  label: 'Pacientes Particulares' },  // removido pelo Rafa nesta leva
     { id: '/GERÊNCIA DE RH',                             label: 'RH' },
     // { id: '/DIRETORIA COMERCIAL',                     label: 'Comercial' },   // vinculo prestador-Pronep
     // { id: '/DIRETORIA FINANCEIRA',                    label: 'Financeira' },  // vinculo prestador-Pronep
-    { id: '/DIRETORIA DE OPERAÇÕES',                     label: 'Operacoes' },
+    // { id: '/DIRETORIA DE OPERAÇÕES',                  label: 'Operacoes' },   // removido pelo Rafa nesta leva
     { id: '/DIRETORIA DE SUPRIMENTOS E LOGÍSTICA',       label: 'Suprimentos' },
     { id: '/JURÍDICO',                                   label: 'Juridico' },
     { id: '/GERÊNCIA DE PROJETOS E TI',                  label: 'Tecnologia' }
@@ -300,4 +300,8 @@
   }
 
   window.contratosBfs = { iniciar: iniciar, cancelar: cancelar };
+})();
+iciar, cancelar: cancelar };
+})();
+ciar, cancelar: cancelar };
 })();
