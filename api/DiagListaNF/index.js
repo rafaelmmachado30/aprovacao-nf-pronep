@@ -43,15 +43,7 @@ module.exports = async function (context, req) {
     const interesse = ['UrlPDFAprovado', 'UrlPDF', 'urlPDFAprovado', 'urlPDF', 'Status', 'AprovadoEm'];
     out.colunasRelevantes = (cols.value || [])
       .filter(c => interesse.indexOf(c.displayName) !== -1 || interesse.indexOf(c.name) !== -1)
-      .map(c => ({
-        displayName: c.displayName,
-        name: c.name,
-        tipoDetectado: c.text ? 'text' : (c.dateTime ? 'dateTime' : (c.hyperlinkOrPicture ? 'hyperlink' : (c.number ? 'number' : (c.choice ? 'choice' : 'outro')))),
-        text: c.text,
-        hyperlinkOrPicture: c.hyperlinkOrPicture,
-        readOnly: c.readOnly,
-        required: c.required
-      }));
+      .map(c => c);  // DUMP COMPLETO — pra ver TODAS as propriedades da coluna no SP
 
     // Procura ESPECIFICAMENTE qualquer coluna que pareca ser UrlPDFAprovado
     out.suspeitasUrlPDFAprovado = (cols.value || [])
