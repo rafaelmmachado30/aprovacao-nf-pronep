@@ -526,18 +526,21 @@ function classificarPath(ancestors) {
 // ============================================================================
 const PATTERNS_IGNORAR_CONTRATO = [
   /documentos[_ ]unificados/i,
-  /^cnpj[_ .-]/i,
-  /^contrato[_ ]social/i,
+  /(^|[ _-])cnpj([_ .-]|$)/i,             // "CNPJ_", " CNPJ ", "-CNPJ.pdf"
+  /cart[aã]o[_ -]?cnpj/i,                 // "CARTÃO CNPJ" / "cartao CNPJ"
+  /(^|[ _-])contrato[_ ]social/i,
+  /estatuto[_ -]?social/i,                // "estatuto e ata consolidado"
+  /\bestatuto[_ -]?e[_ -]?ata/i,
   /inscri[cç][aã]o[_ -]?municipal/i,
   /inscri[cç][aã]o[_ -]?estadual/i,
   /licenciamento[_ -]integrado/i,
   /licenciamento[_ -]prefeitura/i,
-  /^alvar[aá][_ .-]/i,
-  /^certid[aã]o[_ .-]/i,
-  /^comprovante[_ -]/i,
+  /(^|[ _-])alvar[aá]([_ .-]|$)/i,
+  /(^|[ _-])certid[aã]o([_ .-]|$)/i,
+  /(^|[ _-])comprovante[_ -]/i,
   /\bemail[_ -]/i,
-  /^rg[_ .-]/i,
-  /^cpf[_ .-]/i,
+  /(^|[ _-])rg([_ .-]|$)/i,
+  /(^|[ _-])cpf([_ .-]|$)/i,
   /procura[cç][aã]o[_ -]?simples/i
 ];
 
