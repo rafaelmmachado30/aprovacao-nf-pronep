@@ -55,6 +55,39 @@ module.exports = async function (context, req) {
         text: !!c.text
       }));
 
+    // Se passou ?criarColunaNova=1&testarPatch=ID, cria coluna hyperlink limpa via Graph
+    // e tenta PATCH nela — confirma se o Graph aceita coluna criada por ele mesmo.
+    if (req.query && req.query.criarColunaNova) {
+      const nomeColTeste = 'TesteHL_' + Date.now();
+      try {
+        const created = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').post({
+          name: nomeColTeste,
+          displayName: nomeColTeste,
+          hyperlinkOrPicture: { isPicture: false }
+        });
+        out.colunaTeste = { nome: nomeColTeste, internal: created.name, criada: true };
+        // Tenta PATCH na coluna nova (testarPatch precisa ser ID de NF existente)
+        if (req.query.testarPatch) {
+          const testUrl = 'https://exemplo.com/teste-' + Date.now() + '.pdf';
+          const itemId = req.query.testarPatch;
+          const patch = {};
+          patch[created.name] = { Url: testUrl, Description: 'teste' };
+          try {
+            await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + itemId + '/fields').patch(patch);
+            out.colunaTeste.patchSucesso = true;
+            // Le item de volta
+            const item = await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + itemId + '?expand=fields').get();
+            out.colunaTeste.valorGravado = (item.fields || {})[created.name];
+          } catch (eP) {
+            out.colunaTeste.patchErro = { msg: eP.message, status: eP.statusCode, body: eP.body };
+          }
+        }
+        out.colunaTeste.aviso = 'COLUNA DE TESTE CRIADA NA LISTA. Apague manualmente no SP depois do teste.';
+      } catch (e) {
+        out.colunaTeste = { erro: e.message, statusCode: e.statusCode, body: e.body };
+      }
+    }
+
     // Se passou ?testarPatch=ID, tenta gravar URL de teste na NF e mostra o resultado
     if (req.query && req.query.testarPatch) {
       const itemId = req.query.testarPatch;
@@ -101,9 +134,6 @@ module.exports = async function (context, req) {
           tipoUrlPDFAprovado: typeof f.UrlPDFAprovado
         };
         // Tambem pelos campos de colInternal
-        if (colInternal) {
-          out.testarPatch.itemDepois.viaInternal = f[colInternal.name];
-        }
       } catch (e) { out.testarPatch.itemDepoisErro = e.message; }
     }
   } catch (e) {
