@@ -77,6 +77,7 @@ module.exports = async function (context, req) {
     const observacoes = body.observacoes;
     const dataInicio = body.dataInicio;  // 'YYYY-MM-DD' ou null
     const dataFim = body.dataFim;        // 'YYYY-MM-DD' ou null
+    const valor = body.valor;             // number ou null
     let status = body.status;             // se vier 'auto' ou nada, recalcula com base na dataFim
 
     if (!id) {
@@ -148,6 +149,14 @@ module.exports = async function (context, req) {
     if (observacoes !== undefined) patch.Observacoes = String(observacoes).slice(0, 30000);
     if (dataInicio !== undefined) patch.DataInicio = dataInicio ? (dataInicio + 'T00:00:00Z') : null;
     if (dataFim !== undefined) patch.DataFim = dataFim ? (dataFim + 'T00:00:00Z') : null;
+    if (valor !== undefined) {
+      if (valor === null || valor === '') {
+        patch.ValorContrato = null;
+      } else {
+        const n = typeof valor === 'number' ? valor : parseFloat(valor);
+        if (!isNaN(n) && n >= 0) patch.ValorContrato = n;
+      }
+    }
     // Marca como leitura manual quando user edita vigencia
     if (dataInicio !== undefined || dataFim !== undefined) {
       patch.LeituraIAStatus = 'manual';
