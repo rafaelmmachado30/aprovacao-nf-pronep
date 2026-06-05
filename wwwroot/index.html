@@ -3758,8 +3758,8 @@ const views = {
         </div>
 
         <div class="form-row">
-          <label>Número da NF *</label>
-          <input id="frm-numero" placeholder="ex.: 2545">
+          <label>Número da NF <span class="small muted" style="font-weight:400">(opcional — deixe vazio p/ reembolso, rescisão, etc.)</span></label>
+          <input id="frm-numero" placeholder="ex.: 2545 — ou vazio p/ gerar automático">
         </div>
         <div class="form-row">
           <label>Série</label>
@@ -4219,11 +4219,26 @@ function renderArvoreContratos(arvore) {
                     var contratos = forn.contratos || [];
                     var todosCancelados = contratos.length > 0 && contratos.every(function(c){ return c.status === 'Cancelado'; });
                     var corPasta = todosCancelados ? '#DC2626' : '#3B82F6';
+                    // Acao do botao: se TODOS cancelados → Reativar, senao → Cancelar
+                    var acaoBatch = todosCancelados ? 'reativar' : 'cancelar';
+                    var labelBatch = todosCancelados ? 'Reativar todos' : 'Cancelar todos';
+                    var corBtn = todosCancelados ? '#10B981' : '#DC2626';
+                    // Encoda nome do fornecedor pra atributo HTML (escape de aspas)
+                    var fEsc = String(forn.fornecedor).replace(/"/g,'&quot;').replace(/&/g,'&amp;');
+                    var dEsc = String(dir.diretoria).replace(/"/g,'&quot;').replace(/&/g,'&amp;');
+                    var uEsc = String(un.unidade).replace(/"/g,'&quot;').replace(/&/g,'&amp;');
                     return `
                       <details style="padding:0;background:#FAFAFA;border-radius:4px">
                         <summary style="padding:8px 12px;cursor:pointer;font-weight:600;color:#1F2937;list-style:none;display:flex;align-items:center;gap:6px">
                           <span style="font-size:11px;color:#6B7280;width:10px">▶</span>${iconePasta(corPasta)} ${forn.fornecedor} <span class="small muted">(${contratos.length})</span>
                           ${todosCancelados ? '<span style="font-size:10px;background:#FEE2E2;color:#7F1D1D;padding:1px 6px;border-radius:8px;margin-left:4px">cancelado</span>' : ''}
+                          <span style="flex:1"></span>
+                          <button type="button"
+                            onclick="event.stopPropagation();event.preventDefault();cancelarFornecedorClick(this)"
+                            data-diretoria="${dEsc}" data-unidade="${uEsc}" data-fornecedor="${fEsc}" data-acao="${acaoBatch}"
+                            style="background:#fff;border:1px solid ${corBtn};color:${corBtn};padding:3px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600">
+                            ${labelBatch}
+                          </button>
                         </summary>
                         <div style="padding:6px 10px 10px;display:flex;flex-direction:column;gap:6px">
                           ${contratos.map(function(c){ return renderCardContrato(c); }).join('')}
@@ -4246,6 +4261,55 @@ function iconePasta(cor) {
   return '<svg style="display:inline-block;vertical-align:middle;width:18px;height:14px" viewBox="0 0 24 18" fill="' + cor + '">' +
     '<path d="M2 0h7l2 2h11a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2z"/>' +
     '</svg>';
+}
+
+// Cancelar/Reativar TODOS os contratos de um fornecedor de uma vez.
+// Disparado pelo botao "Cancelar todos" / "Reativar todos" no summary do fornecedor na arvore.
+async function cancelarFornecedorClick(btn) {
+  var diretoria = btn.getAttribute('data-diretoria');
+  var unidade = btn.getAttribute('data-unidade');
+  var fornecedor = btn.getAttribute('data-fornecedor');
+  var acao = btn.getAttribute('data-acao');
+  var verbo = acao === 'cancelar' ? 'CANCELAR todos' : 'REATIVAR todos';
+  var msg = verbo + ' os contratos de "' + fornecedor + '" (' + diretoria + ' / ' + unidade + ')?\n\nEssa acao afeta TODOS os documentos da pasta.';
+  if (!confirm(msg)) return;
+
+  var labelOriginal = btn.textContent.trim();
+  btn.disabled = true;
+  btn.textContent = '...';
+  btn.style.opacity = '0.6';
+  try {
+    var r = await fetch('/api/CancelarFornecedor', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ diretoria: diretoria, unidade: unidade, fornecedor: fornecedor, acao: acao })
+    });
+    var j = await r.json();
+    if (!r.ok) {
+      alert('Erro: ' + (j.error || ('HTTP ' + r.status)));
+      btn.disabled = false;
+      btn.textContent = labelOriginal;
+      btn.style.opacity = '1';
+      return;
+    }
+    if (typeof toast === 'function') {
+      toast(acao === 'cancelar'
+        ? ('Cancelados ' + j.atualizados + ' de ' + j.total + ' contratos')
+        : ('Reativados ' + j.atualizados + ' de ' + j.total + ' contratos'), 'sucesso');
+    }
+    // Recarrega a arvore pra refletir as mudancas
+    if (typeof carregarContratosReais === 'function') {
+      await carregarContratosReais();
+    } else {
+      location.reload();
+    }
+  } catch (e) {
+    alert('Falha: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = labelOriginal;
+    btn.style.opacity = '1';
+  }
 }
 
 function renderCardContrato(c) {
@@ -6606,8 +6670,14 @@ async function submitNF() {
   const descricao = (document.getElementById('frm-descricao')||{}).value || '';
   const file = window.fakeFile || window.selectedFile;
 
-  if (!fornIdx || !numero || !valor || !venc || !file) {
-    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>Campos obrigatorios faltando.</b> Verifique fornecedor, numero, valor, vencimento e o anexo PDF.</div></div>';
+  // numero NAO eh mais obrigatorio - quando vazio, backend gera automaticamente (reembolso, rescisao, etc).
+  // Mas quando numero for vazio, exigimos descricao pra ter algo identificador minimo no Title.
+  if (!fornIdx || !valor || !venc || !file) {
+    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>Campos obrigatorios faltando.</b> Verifique fornecedor, valor, vencimento e o anexo PDF.</div></div>';
+    return;
+  }
+  if (!numero && !descricao.trim()) {
+    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>NF sem numero precisa de descricao.</b> Como nao informou o numero (reembolso, rescisao, etc.), preencha o campo Descricao explicando o lancamento.</div></div>';
     return;
   }
 

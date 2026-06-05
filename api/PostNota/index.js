@@ -272,11 +272,48 @@ async function resolveAprovador(client, siteId, listDirId, unidade, diretoria) {
   return { email: f.field_3 || '', nome: f.field_4 || '' };
 }
 
-// Checa duplicata: hash igual OU (CNPJ + numero + serie iguais)
-// IGNORA NFs com status 'Rejeitada' — afinal foram rejeitadas justamente porque tinham
-// problema, entao o fluxo natural eh o user corrigir e reenviar. Bloquear isso seria
-// um falso positivo.
-async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj, numero, serie, chaveAcesso) {
+// Gera proximo numero auto-sequencial (00001, 00002, ...) consultando max(NumeroNF)
+// entre items com NumeroAutogerado=true. Pagina via @odata.nextLink pra cobrir
+// listas grandes (Graph limita 999 por pagina).
+// Race condition: 2 submissoes simultaneas podem pegar o mesmo numero. No contexto
+// Pronep (1-2 submissoes/min no pico) o risco eh aceitavel; se ocorrer, sao 2 NFs
+// com mesmo numero auto que admin pode renumerar no SP UI.
+async function gerarProximoNumeroAuto(client, siteId, listNotasId, colMap) {
+  const colNumero = (colMap && colMap['NumeroNF']) || 'NumeroNF';
+  const colAuto   = (colMap && colMap['NumeroAutogerado']) || 'NumeroAutogerado';
+  let maxNum = 0;
+  let nextUrl = `/sites/${siteId}/lists/${listNotasId}/items?expand=fields&$top=999`;
+  let pages = 0;
+  while (nextUrl && pages < 20) {  // hard stop ~20k itens
+    pages++;
+    const r = await client.api(nextUrl).get();
+    for (const it of (r.value || [])) {
+      const f = it.fields || {};
+      const auto = f[colAuto];
+      // SP boolean retorna true/false; se a coluna foi criada como text (fallback),
+      // pode vir como 'true' ou '1'. Aceita os 3.
+      const isAuto = (auto === true || auto === 'true' || auto === '1' || auto === 1);
+      if (!isAuto) continue;
+      const numStr = String(f[colNumero] || f.NumeroNF || '');
+      const num = parseInt(numStr, 10);
+      if (!isNaN(num) && num > maxNum) maxNum = num;
+    }
+    const nextLink = r['@odata.nextLink'];
+    if (nextLink) {
+      const idx = nextLink.indexOf('/v1.0/');
+      nextUrl = idx >= 0 ? nextLink.substring(idx + 5) : null;
+    } else nextUrl = null;
+  }
+  const proximo = maxNum + 1;
+  return String(proximo).padStart(5, '0');
+}
+
+// Checa duplicata: chave_acesso OU hash OU (CNPJ + numero) OU (CNPJ + valor + vencimento).
+// A ultima regra so eh disparada quando o numero veio AUTOGERADO no upload novo —
+// nesse caso CNPJ+numero nao tem como bater (cada auto gera numero novo), entao
+// confiamos em CNPJ+valor+vencimento pra pegar reenvio do mesmo "reembolso/rescisao".
+// IGNORA NFs com status 'Rejeitada' — usuario pode corrigir e reenviar.
+async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj, numero, serie, chaveAcesso, valor, vencimento, isNumeroAutogerado) {
   const resp = await client
     .api(`/sites/${siteId}/lists/${listNotasId}/items?expand=fields&$top=999`)
     .get();
@@ -286,6 +323,9 @@ async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj
   const colCNPJ    = (colMap && colMap['CNPJFornecedor']) || 'CNPJFornecedor';
   const colNumero  = (colMap && colMap['NumeroNF']) || 'NumeroNF';
   const colChave   = (colMap && colMap['ChaveAcesso']) || 'ChaveAcesso';
+  const colValor   = (colMap && colMap['Valor']) || 'Valor';
+  const colVenc    = (colMap && colMap['DataVencimento']) || 'DataVencimento';
+  const vencNorm   = vencimento ? String(vencimento).substring(0, 10) : '';
 
   for (const item of (resp.value || [])) {
     const f = item.fields || {};
@@ -299,7 +339,6 @@ async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj
     const itemChave = f[colChave]  || f.ChaveAcesso    || '';
 
     // Criterio MAIS FORTE: chave de acesso de 44 digitos (identificador legal unico).
-    // Mesmo se PDF for re-emitido (hash muda) ou numero reusado, a chave eh constante.
     if (chaveAcesso && itemChave && String(chaveAcesso).replace(/\D/g,'') === String(itemChave).replace(/\D/g,'')) {
       return { motivo: 'chave_acesso', notaId: item.id, status: itemStatus, chave: itemChave };
     }
@@ -308,6 +347,15 @@ async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj
     }
     if (cnpj && numero && itemDoc === cnpj && itemNum === numero) {
       return { motivo: 'cnpj_numero', notaId: item.id, status: itemStatus };
+    }
+    // REGRA EXTRA: numero veio autogerado no upload novo → confia em CNPJ+valor+venc.
+    // Catches: usuario refaz upload do mesmo PDF (re-exportado) sem numero formal.
+    if (isNumeroAutogerado && cnpj && valor && vencNorm && itemDoc === cnpj) {
+      const itemValor = Number(f[colValor] || f.Valor || 0);
+      const itemVenc  = String(f[colVenc] || f.DataVencimento || '').substring(0, 10);
+      if (Math.abs(itemValor - Number(valor)) < 0.01 && itemVenc === vencNorm) {
+        return { motivo: 'cnpj_valor_vencimento', notaId: item.id, status: itemStatus };
+      }
     }
   }
   return null;
@@ -326,7 +374,8 @@ module.exports = async function (context, req) {
 
     // Validacao
     if (!fornecedorCNPJ) return ctxErr(context, 400, 'fornecedorCNPJ obrigatorio');
-    if (!numero)         return ctxErr(context, 400, 'numero obrigatorio');
+    // numero NAO eh mais obrigatorio - quando vazio, geramos sequencial automatico
+    // (caso de reembolso, rescisao, etc onde nao existe NF formal numerada)
     if (typeof valor !== 'number' || valor <= 0) return ctxErr(context, 400, 'valor invalido');
     if (!vencimento)     return ctxErr(context, 400, 'vencimento obrigatorio');
     if (!unidade)        return ctxErr(context, 400, 'unidade obrigatoria');
@@ -427,13 +476,28 @@ module.exports = async function (context, req) {
     const chaveAcesso = await extrairChaveAcesso(pdfBuffer);
     diag.chaveAcesso = chaveAcesso || '(nao encontrada — pode ser NFS-e municipal)';
 
+    // AUTO-NUMERACAO: se usuario nao informou numero (reembolso/rescisao/etc),
+    // gera proximo sequencial 00001, 00002, ...
+    diag.step = 'auto_numerar';
+    var numeroFinal = numero;
+    var foiAutogerado = false;
+    if (!numero || !String(numero).trim()) {
+      numeroFinal = await gerarProximoNumeroAuto(client, siteId, listNotasId, colMap);
+      foiAutogerado = true;
+      diag.numeroGerado = numeroFinal;
+      diag.numeroAutogerado = true;
+    } else {
+      numeroFinal = String(numero).trim();
+      diag.numeroAutogerado = false;
+    }
+
     diag.step = 'check_duplicate';
-    const dup = await verificaDuplicata(client, siteId, listNotasId, colMap, hash, fornecedorCNPJ, numero, serie, chaveAcesso);
+    const dup = await verificaDuplicata(client, siteId, listNotasId, colMap, hash, fornecedorCNPJ, numeroFinal, serie, chaveAcesso, valor, vencimento, foiAutogerado);
     if (dup) {
       auditRegistrar(user, 'lancamento',
-        { tipo: 'nf', numero: numero },
+        { tipo: 'nf', numero: numeroFinal },
         'bloqueado',
-        { fornecedor: fornecedorCNPJ, valor: valor, motivo: 'duplicidade: ' + (dup.motivo || ''), notaIdConflito: dup.notaId, statusConflito: dup.status }
+        { fornecedor: fornecedorCNPJ, valor: valor, motivo: 'duplicidade: ' + (dup.motivo || ''), notaIdConflito: dup.notaId, statusConflito: dup.status, autogerado: foiAutogerado }
       ).catch(function(){});
 
       context.res = { status: 409, headers: { 'Content-Type': 'application/json' },
@@ -444,7 +508,7 @@ module.exports = async function (context, req) {
     diag.step = 'upload_pdf';
     // Padrao Pronep de nomenclatura — ver buildPdfFileName no topo do arquivo
     const finalName = buildPdfFileName({
-      numero: numero,
+      numero: numeroFinal,
       fornecedor: fornecedorRazao,
       unidade: unidade,
       valor: valor,
@@ -461,15 +525,19 @@ module.exports = async function (context, req) {
     diag.webUrl = uploadResp.webUrl;
 
     diag.step = 'create_list_item';
-    // Title = "NF {numero}" ou descricao se nao tem numero
-    const title = numero ? `NF ${numero}` : (descricao || 'NF sem numero').slice(0, 80);
+    // Title pra NF autogerada inclui descricao pra distinguir visualmente.
+    // Ex: "NF auto 00001 - Reembolso Joao" ou "NF 12345" (manual)
+    const title = foiAutogerado
+      ? (`NF auto ${numeroFinal}` + (descricao ? ' - ' + descricao : '')).slice(0, 80)
+      : `NF ${numeroFinal}`;
     // Constroi o objeto com displayNames; buildFieldsObject converte pra internalNames
     // Formata datas como ISO completo (DataVencimento precisa de hora pra SharePoint Date+Time)
     // Se a coluna for soh Date, o SharePoint aceita ISO completo tambem (truncar)
     const isoVenc = (vencimento && vencimento.length === 10) ? (vencimento + 'T00:00:00Z') : vencimento;
     const rawFields = {
       Title:           title,
-      NumeroNF:        numero || '',
+      NumeroNF:        numeroFinal,
+      NumeroAutogerado: foiAutogerado,  // boolean - identifica NFs sem numero formal
       CNPJFornecedor:  fornecedorCNPJ,
       Descricao:       descricao || '',
       Valor:           valor,                       // <-- NUMERO (nao string)
@@ -586,16 +654,18 @@ module.exports = async function (context, req) {
     diag.step = 'notify';
     const notifResult = await notificar('lancada', [aprovador.email], {
       itemId: itemResp.id,    // <-- pra gerar links assinados nos botoes
-      numero, fornecedor: fornecedorRazao, valor, vencimento,
+      numero: numeroFinal, fornecedor: fornecedorRazao, valor, vencimento,
       unidade, diretoria, aprovador: aprovador.nome,
       submitter: submitterEmail,
-      urlPDF: uploadResp.webUrl
+      urlPDF: uploadResp.webUrl,
+      autogerado: foiAutogerado,
+      descricao: descricao || ''
     });
     diag.notificado = true;
     diag.notifResult = notifResult;  // <-- expoe detalhe (email, teamsAtividade, teamsWebhook) pra debug
 
     auditRegistrar(user, 'lancamento',
-      { tipo: 'nf', id: itemResp.id, numero: numero },
+      { tipo: 'nf', id: itemResp.id, numero: numeroFinal, autogerado: foiAutogerado },
       'sucesso',
       {
         fornecedor: fornecedorCNPJ,
