@@ -79,6 +79,31 @@ module.exports = async function (context, req) {
     const diretoria = fields.Diretoria || '';
     const numero = String(fields.NumeroNF || '');
 
+    // FIX CRITICO: usa URLs ESPECIFICAS gravadas na NF como FONTE DA VERDADE.
+    // Antes o sistema fazia busca por NOME do arquivo (NumeroNF) na pasta, o que
+    // CONFUNDIA NFs com mesmo numero (ex: varias NF 0001 / NF 1). Resultado: PDF
+    // de um fornecedor aparecia ao abrir NF de outro. Agora redireciona DIRETO
+    // pra URL especifica gravada no item — zero ambiguidade.
+    function extrairWebUrl(v) {
+      if (!v) return null;
+      if (typeof v === 'string' && v.startsWith('http')) return v;
+      if (typeof v === 'object' && v.Url && v.Url.startsWith('http')) return v.Url;
+      return null;
+    }
+    if (status === 'Aprovada') {
+      const urlApr = extrairWebUrl(fields.UrlPDFAprovado);
+      if (urlApr) {
+        context.res = { status: 302, headers: { 'Location': urlApr } };
+        return;
+      }
+    } else {
+      const urlPend = extrairWebUrl(fields.UrlPDF);
+      if (urlPend) {
+        context.res = { status: 302, headers: { 'Location': urlPend } };
+        return;
+      }
+    }
+
     if (!unidade || !diretoria) {
       context.res = { status: 400, headers: { 'Content-Type': 'text/html; charset=utf-8' },
         body: htmlErro('Dados insuficientes', 'Esta NF nao tem Unidade ou Diretoria definidas.', 'Procure manualmente no SharePoint.') };
