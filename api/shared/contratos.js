@@ -390,12 +390,34 @@ function temPalavrasChaveVigencia(texto) {
 async function extrairVigenciaIA(texto, opts) {
   opts = opts || {};
   const anthropic = getAnthropic();
-  // Trunca pra economizar tokens. Pega comeco (preambulo + qualificacao das partes)
-  // + final (assinaturas + clausula de vigencia geralmente esta nas ultimas paginas).
-  // Era 20k chars (~8k tokens). Agora 5k chars (~2k tokens) — economia ~60%.
-  const textoLimitado = texto.length > 5000
-    ? texto.slice(0, 3500) + '\n\n[...TRUNCADO MEIO DO DOCUMENTO...]\n\n' + texto.slice(-1500)
-    : texto;
+  // Trunca pra economizar tokens MAS preservando o miolo onde fica a vigencia.
+  // Estrategia: se texto tem palavras-chave de vigencia, IDENTIFICA o trecho ao
+  // redor delas e envia esse contexto. Se nao, envia inicio+fim truncados.
+  // Limite total ~12k chars (~4k tokens) = economia ~50% vs 20k original.
+  let textoLimitado;
+  if (texto.length <= 12000) {
+    textoLimitado = texto;
+  } else {
+    // Tenta achar a primeira ocorrencia de palavra-chave de vigencia
+    const tNorm = String(texto).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    let idxAlvo = -1;
+    for (const p of PALAVRAS_VIGENCIA) {
+      const i = tNorm.indexOf(p);
+      if (i !== -1 && (idxAlvo === -1 || i < idxAlvo)) idxAlvo = i;
+    }
+    if (idxAlvo !== -1) {
+      // Pega 8k chars ao redor da palavra-chave + 2k do comeco + 2k do fim
+      const ini = Math.max(0, idxAlvo - 4000);
+      const fim = Math.min(texto.length, idxAlvo + 4000);
+      const miolo = texto.slice(ini, fim);
+      const comeco = texto.slice(0, 2000);
+      const final = texto.slice(-2000);
+      textoLimitado = comeco + '\n\n[...trecho com vigência...]\n\n' + miolo + '\n\n[...trecho final...]\n\n' + final;
+    } else {
+      // Sem palavra-chave (raro chegar aqui — pre-filtro elimina antes)
+      textoLimitado = texto.slice(0, 8000) + '\n\n[...TRUNCADO...]\n\n' + texto.slice(-4000);
+    }
+  }
 
   const modelo = opts.modelo || 'claude-haiku-4-5-20251001';
   let resposta;
@@ -575,8 +597,7 @@ const PATTERNS_IGNORAR_CONTRATO = [
   /\bestatuto[_ -]?e[_ -]?ata/i,
   /inscri[cç][aã]o[_ -]?municipal/i,
   /inscri[cç][aã]o[_ -]?estadual/i,
-  /licenciamento[_ -]integrado/i,
-  /licenciamento[_ -]prefeitura/i,
+  /licenciamento[_ -]integrado/i,  /licenciamento[_ -]prefeitura/i,
   /(^|[ _-])alvar[aá]([_ .-]|$)/i,
   /(^|[ _-])certid[aã]o([_ .-]|$)/i,
   /(^|[ _-])comprovante[_ -]/i,
