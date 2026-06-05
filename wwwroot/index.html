@@ -1949,13 +1949,20 @@ function confirmarAcao(opts) {
     info:    { borda: '#93C5FD', fundo: '#DBEAFE', icoCor: '#2563EB', btn: '#2563EB', btnTxt: '#fff', icone: 'i' }
   };
   const c = corMap[tipo] || corMap.danger;
-  // Escape basico HTML pra evitar quebra (mas mantem <br>, <b>, <i> simples que o caller possa querer)
+  // Escape basico HTML pra evitar XSS
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
-  // mensagem pode ter \n - converte pra <br>
-  const mensagemHTML = esc(mensagem).replace(/\n/g, '<br>');
+  // Restaura tags da whitelist (b, i, br, strong, em) DEPOIS do escape - permite formatacao basica
+  function unescWhitelist(s) {
+    return s
+      .replace(/&lt;(\/?)(b|i|br|strong|em)&gt;/g, '<$1$2>')
+      .replace(/&lt;br\s*\/&gt;/g, '<br>');
+  }
+  // mensagem pode ter \n - converte pra <br> apos escape
+  const mensagemHTML = unescWhitelist(esc(mensagem)).replace(/\n/g, '<br>');
+  const tituloHTML   = unescWhitelist(esc(titulo));
   return new Promise(function(resolve) {
     window._confirmacaoResolve = function(valor) {
       try { delete window._confirmacaoResolve; } catch (e) { window._confirmacaoResolve = null; }
@@ -1967,7 +1974,7 @@ function confirmarAcao(opts) {
       '  <div style="display:flex;gap:14px;align-items:flex-start;padding:18px 20px;background:' + c.fundo + ';border-left:4px solid ' + c.icoCor + ';border-radius:6px 6px 0 0">' +
       '    <div style="width:36px;height:36px;flex-shrink:0;background:' + c.icoCor + ';color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700">' + c.icone + '</div>' +
       '    <div style="flex:1;min-width:0">' +
-      '      <h3 style="margin:0 0 8px;color:#1F2937;font-size:16px;font-weight:600">' + esc(titulo) + '</h3>' +
+      '      <h3 style="margin:0 0 8px;color:#1F2937;font-size:16px;font-weight:600">' + tituloHTML + '</h3>' +
       '      <div style="color:#374151;font-size:14px;line-height:1.5">' + mensagemHTML + '</div>' +
       '    </div>' +
       '  </div>' +
