@@ -395,27 +395,44 @@ async function extrairVigenciaIA(texto, opts) {
   // redor delas e envia esse contexto. Se nao, envia inicio+fim truncados.
   // Limite total ~12k chars (~4k tokens) = economia ~50% vs 20k original.
   let textoLimitado;
-  if (texto.length <= 12000) {
+  if (texto.length <= 14000) {
     textoLimitado = texto;
   } else {
-    // Tenta achar a primeira ocorrencia de palavra-chave de vigencia
     const tNorm = String(texto).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    // Palavras FORTES (especificas de vigencia contratual real) - mais confiavel
+    const PALAVRAS_FORTES = [
+      'renovacao automatica', 'renovado automaticamente', 'renovavel automaticamente',
+      'sucessivos periodos', 'iguais e sucessivos',
+      'vigencia', 'vigora',
+      'prazo determinado', 'prazo indeterminado',
+      'a contar da data de assinatura',
+      'a partir da assinatura',
+      '12 meses', '24 meses', '36 meses', '48 meses', '60 meses',
+      '12 (doze) meses', '24 (vinte e quatro) meses',
+      'doze meses', 'vinte e quatro meses',
+      'um ano', 'dois anos', 'tres anos'
+    ];
     let idxAlvo = -1;
-    for (const p of PALAVRAS_VIGENCIA) {
+    for (const p of PALAVRAS_FORTES) {
       const i = tNorm.indexOf(p);
       if (i !== -1 && (idxAlvo === -1 || i < idxAlvo)) idxAlvo = i;
     }
+    if (idxAlvo === -1) {
+      for (const p of PALAVRAS_VIGENCIA) {
+        const i = tNorm.indexOf(p);
+        if (i !== -1 && (idxAlvo === -1 || i < idxAlvo)) idxAlvo = i;
+      }
+    }
     if (idxAlvo !== -1) {
-      // Pega 8k chars ao redor da palavra-chave + 2k do comeco + 2k do fim
-      const ini = Math.max(0, idxAlvo - 4000);
-      const fim = Math.min(texto.length, idxAlvo + 4000);
+      // Janela GRANDE: 5k antes + 5k depois = 10k miolo + 2k comeco + 2k fim
+      const ini = Math.max(0, idxAlvo - 5000);
+      const fim = Math.min(texto.length, idxAlvo + 5000);
       const miolo = texto.slice(ini, fim);
       const comeco = texto.slice(0, 2000);
       const final = texto.slice(-2000);
       textoLimitado = comeco + '\n\n[...trecho com vigência...]\n\n' + miolo + '\n\n[...trecho final...]\n\n' + final;
     } else {
-      // Sem palavra-chave (raro chegar aqui — pre-filtro elimina antes)
-      textoLimitado = texto.slice(0, 8000) + '\n\n[...TRUNCADO...]\n\n' + texto.slice(-4000);
+      textoLimitado = texto.slice(0, 10000) + '\n\n[...TRUNCADO...]\n\n' + texto.slice(-4000);
     }
   }
 
