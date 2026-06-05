@@ -2383,8 +2383,8 @@ async function carregarNotasReais() {
         aprovadoEm: n.AprovadoEm ? fmtDateTimeBRT(n.AprovadoEm) : null,
         motivo: n.MotivoRejeicao || '',
         hash: (n.HashSHA256 || '').substring(0,16),
-        urlPDF: extrairUrlHyperlink(n.UrlPDF),
-        urlPDFAprovado: extrairUrlHyperlink(n.UrlPDFAprovado),
+        urlPDF: extrairUrlHyperlink(n.UrlPDFStr) || extrairUrlHyperlink(n.UrlPDF),
+        urlPDFAprovado: extrairUrlHyperlink(n.UrlPDFAprovadoStr) || extrairUrlHyperlink(n.UrlPDFAprovado),
         processado: !!n.Processado
       };
     });

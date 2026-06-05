@@ -561,13 +561,25 @@ module.exports = async function (context, req) {
           .patch(hyperlinkFields);
         diag.hyperlinkPatchOk = true;
       } catch (patchErr) {
-        // Nao falha o lancamento se o PATCH do hyperlink der erro - item ja foi criado
+        // Esperado falhar — coluna UrlPDF antiga tem tipo nao reconhecido pelo Graph.
+        // Fallback abaixo grava em UrlPDFStr (text-multiline novo).
         diag.hyperlinkPatchError = {
           message: patchErr.message,
           statusCode: patchErr.statusCode,
           body: patchErr.body
         };
       }
+    }
+
+    // Passo 3: grava URL como STRING em UrlPDFStr (coluna text-multiline criada via Graph
+    // como fallback robusto pra coluna UrlPDF antiga que tem tipo invalido).
+    try {
+      await client
+        .api(`/sites/${siteId}/lists/${listNotasId}/items/${itemResp.id}/fields`)
+        .patch({ UrlPDFStr: uploadResp.webUrl || '' });
+      diag.urlPDFStrOk = true;
+    } catch (e) {
+      diag.urlPDFStrError = { message: e.message, statusCode: e.statusCode };
     }
 
     // Dispara notificacao (nao-bloqueante) pro aprovador

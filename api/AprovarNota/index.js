@@ -439,19 +439,19 @@ module.exports = async function (context, req) {
     }, colMap, colTypes);
     await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(basePayload);
 
-    diag.step = 'update_list_hyperlink';
-    const hyperlinkPayload = buildPatchPayload({
-      UrlPDFAprovado: uploadResp.webUrl
-    }, colMap, colTypes);
+    // FIX: grava URL como STRING na coluna UrlPDFAprovadoStr (text-multiline criada via Graph).
+    // A coluna UrlPDFAprovado original tem tipo nao reconhecido pelo Graph (sem 'text' nem
+    // 'hyperlinkOrPicture' no schema) - sempre falha. Migrar pra Str resolve.
+    diag.step = 'update_list_url_string';
     try {
-      await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(hyperlinkPayload);
-      diag.urlPDFAprovadoPatchOk = true;
-    } catch (urlErr) {
-      // Nao falha a aprovacao se o PATCH do hyperlink der erro
-      diag.urlPDFAprovadoPatchError = {
-        message: urlErr.message,
-        statusCode: urlErr.statusCode,
-        body: urlErr.body
+      await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`)
+        .patch({ UrlPDFAprovadoStr: uploadResp.webUrl });
+      diag.urlPDFAprovadoStrOk = true;
+    } catch (urlStrErr) {
+      diag.urlPDFAprovadoStrError = {
+        message: urlStrErr.message,
+        statusCode: urlStrErr.statusCode,
+        body: urlStrErr.body
       };
     }
 

@@ -91,13 +91,14 @@ module.exports = async function (context, req) {
       return null;
     }
     if (status === 'Aprovada') {
-      const urlApr = extrairWebUrl(fields.UrlPDFAprovado);
+      // Prefere coluna NOVA (text-multiline) - resolve bug das colunas antigas
+      const urlApr = extrairWebUrl(fields.UrlPDFAprovadoStr) || extrairWebUrl(fields.UrlPDFAprovado);
       if (urlApr) {
         context.res = { status: 302, headers: { 'Location': urlApr } };
         return;
       }
     } else {
-      const urlPend = extrairWebUrl(fields.UrlPDF);
+      const urlPend = extrairWebUrl(fields.UrlPDFStr) || extrairWebUrl(fields.UrlPDF);
       if (urlPend) {
         context.res = { status: 302, headers: { 'Location': urlPend } };
         return;
