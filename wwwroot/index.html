@@ -4205,24 +4205,28 @@ function renderArvoreContratos(arvore) {
     return `
       <details style="background:#fff;border:1px solid var(--cinza-borda);border-radius:6px;margin-bottom:10px">
         <summary style="padding:12px 14px;cursor:pointer;font-weight:600;color:var(--azul-escuro);background:#F8FAFC">
-          📁 ${dir.diretoria} <span class="small muted">(${dir.total})</span>
+          ${iconePasta('#3B82F6')} ${dir.diretoria} <span class="small muted">(${dir.total})</span>
         </summary>
         <div style="padding:8px 14px 14px">
           ${(dir.unidades || []).map(function(un){
             return `
               <details style="margin-top:8px">
                 <summary style="padding:6px 10px;cursor:pointer;font-weight:500;color:#374151;background:#F1F5F9;border-radius:4px">
-                  📍 ${un.unidade} <span class="small muted">(${un.total})</span>
+                  ${iconePasta('#3B82F6')} ${un.unidade} <span class="small muted">(${un.total})</span>
                 </summary>
                 <div style="padding:8px 6px 6px;display:flex;flex-direction:column;gap:8px">
                   ${(un.fornecedores || []).map(function(forn){
+                    var contratos = forn.contratos || [];
+                    var todosCancelados = contratos.length > 0 && contratos.every(function(c){ return c.status === 'Cancelado'; });
+                    var corPasta = todosCancelados ? '#DC2626' : '#3B82F6';
                     return `
                       <details style="padding:0;background:#FAFAFA;border-radius:4px">
                         <summary style="padding:8px 12px;cursor:pointer;font-weight:600;color:#1F2937;list-style:none;display:flex;align-items:center;gap:6px">
-                          <span style="font-size:11px;color:#6B7280;width:10px">▶</span>🏢 ${forn.fornecedor} <span class="small muted">(${(forn.contratos||[]).length})</span>
+                          <span style="font-size:11px;color:#6B7280;width:10px">▶</span>${iconePasta(corPasta)} ${forn.fornecedor} <span class="small muted">(${contratos.length})</span>
+                          ${todosCancelados ? '<span style="font-size:10px;background:#FEE2E2;color:#7F1D1D;padding:1px 6px;border-radius:8px;margin-left:4px">cancelado</span>' : ''}
                         </summary>
                         <div style="padding:6px 10px 10px;display:flex;flex-direction:column;gap:6px">
-                          ${(forn.contratos || []).map(function(c){ return renderCardContrato(c); }).join('')}
+                          ${contratos.map(function(c){ return renderCardContrato(c); }).join('')}
                         </div>
                       </details>
                     `;
@@ -4235,6 +4239,13 @@ function renderArvoreContratos(arvore) {
       </details>
     `;
   }).join('');
+}
+
+// Ícone SVG de pasta colorida — substitui o emoji 📁/📍/🏢
+function iconePasta(cor) {
+  return '<svg style="display:inline-block;vertical-align:middle;width:18px;height:14px" viewBox="0 0 24 18" fill="' + cor + '">' +
+    '<path d="M2 0h7l2 2h11a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2z"/>' +
+    '</svg>';
 }
 
 function renderCardContrato(c) {
