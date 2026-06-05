@@ -117,7 +117,12 @@ const VIEW_SCOPES = {
   'rejeitadas':   { titulo: 'Notas Rejeitadas', foco: 'apenas orientacao sobre o que aparece aqui. Sem tools.', tools: [] },
   'minhas-nfs':   { titulo: 'Minhas NFs', foco: 'orientacao + leitura de aprovadas. Tools de leitura ok, sem acoes.', tools: ['listar_aprovadas','detalhes_nf'] },
   'rejeitadas-minhas': { titulo: 'Minhas NFs Rejeitadas', foco: 'apenas orientacao. Sem tools.', tools: [] },
-  'configuracoes': { titulo: 'Configuracoes', foco: 'apenas orientacao sobre opcoes de admin/usuario. Sem tools.', tools: [] }
+  'configuracoes': { titulo: 'Configuracoes', foco: 'apenas orientacao sobre opcoes de admin/usuario. Sem tools.', tools: [] },
+  'contratos':    {
+    titulo: 'Contratos',
+    foco: 'consulta da base de contratos vigentes e historicos da Pronep. Responda duvidas sobre vigencias, valores, fornecedores, vencimentos. Use as tools de contratos sempre que o usuario perguntar algo factual sobre contratos. NAO ha aprovar/rejeitar contratos aqui.',
+    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo']
+  }
 };
 
 function getViewScope(viewAtual) {
@@ -372,6 +377,67 @@ const TOOLS = [
         required: ['id']
       }
     }
+  },
+  // ===== TOOLS DE CONTRATOS =====
+  {
+    type: 'function',
+    function: {
+      name: 'listar_contratos',
+      description: 'Lista contratos cadastrados da Pronep com filtros opcionais. Use quando o usuario perguntar sobre os contratos com um fornecedor especifico ("contratos da TOTVS", "contratos da Tecnologia", "contratos vencidos"). Retorna no maximo 50 itens. Cada item tem id, titulo, fornecedor, diretoria, unidade, dataInicio, dataFim, valor, status, diasParaVencer, urlSharePoint.',
+      parameters: {
+        type: 'object',
+        properties: {
+          diretoria: { type: 'string', description: 'Filtrar pela diretoria (ex: Tecnologia, RH, Juridico, Qualidade, Ouvidoria)' },
+          unidade: { type: 'string', enum: ['CORPORATIVO','SP','RJ','ES'], description: 'Filtrar pela unidade' },
+          fornecedor: { type: 'string', description: 'Substring (case-insensitive) do nome do fornecedor (ex: "TOTVS", "Cirion")' },
+          status: { type: 'string', enum: ['Ativo','Vencendo30','Vencendo60','Vencendo90','Vencido','Cancelado','SemVigencia'], description: 'Status do contrato' },
+          busca: { type: 'string', description: 'Substring livre buscada no titulo/nome do arquivo' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'detalhes_contrato',
+      description: 'Retorna o contrato especifico por id (do SharePoint) OU faz busca por substring de fornecedor/titulo. Use quando o usuario quiser detalhes de UM contrato ("me mostra o contrato X", "qual a vigencia do contrato Y").',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'spListItemId do contrato (se ja sabe)' },
+          busca: { type: 'string', description: 'Substring de fornecedor ou titulo. Retorna o primeiro match.' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'agregar_contratos',
+      description: 'Agrega contratos por status, diretoria ou fornecedor. Util pra "quantos contratos ativos?", "valor total dos contratos da Tecnologia", "top fornecedores por valor". Retorna stats numericas e grupos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          agrupar_por: { type: 'string', enum: ['status','diretoria','fornecedor','unidade'], description: 'Campo de agrupamento (default status)' },
+          diretoria: { type: 'string', description: 'Limitar a uma diretoria' },
+          top_n: { type: 'integer', description: 'Limitar aos top N grupos (default 10)' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'contratos_vencendo',
+      description: 'Lista contratos que vencem nos proximos N dias. Use pra "contratos vencendo essa semana", "o que vence nos proximos 30 dias", "quais contratos preciso renegociar". Ja exclui contratos cancelados.',
+      parameters: {
+        type: 'object',
+        properties: {
+          dias: { type: 'integer', description: 'Janela em dias (default 30). Ex: 7, 30, 60, 90' },
+          incluir_vencidos: { type: 'boolean', description: 'Se true, inclui tambem contratos ja vencidos (default false)' }
+        }
+      }
+    }
   }
 ];
 
@@ -388,9 +454,10 @@ const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 const LIST_FORNECEDORES = 'PRONEP-NF-Fornecedores';
 const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
+const LIST_CONTRATOS = 'PRONEP-NF-Contratos';
 
 // Cache de site/list em memoria
-const _cache = { siteId: null, listNotasId: null, listFornecId: null, listDirId: null, colMap: null, invColMap: null, fornCache: null, fornCacheAt: 0 };
+const _cache = { siteId: null, listNotasId: null, listFornecId: null, listDirId: null, listContratosId: null, colMap: null, invColMap: null, colMapContratos: null, invColMapContratos: null, fornCache: null, fornCacheAt: 0 };
 
 async function getGraphClient() {
   const tenantId = process.env.AAD_TENANT_ID;
@@ -415,6 +482,7 @@ async function resolveSiteAndLists(client) {
     if (l.displayName === LIST_NOTAS) _cache.listNotasId = l.id;
     if (l.displayName === LIST_FORNECEDORES) _cache.listFornecId = l.id;
     if (l.displayName === LIST_DIRETORIAS) _cache.listDirId = l.id;
+    if (l.displayName === LIST_CONTRATOS) _cache.listContratosId = l.id;
   }
   // colMap (displayName -> internalName) e invColMap (internalName -> displayName)
   const colsResp = await client.api('/sites/' + _cache.siteId + '/lists/' + _cache.listNotasId + '/columns').get();
@@ -424,6 +492,19 @@ async function resolveSiteAndLists(client) {
       _cache.colMap[c.displayName] = c.name;
       _cache.invColMap[c.name] = c.displayName;
     }
+  }
+  // colMap da lista de contratos (best-effort - so se a lista existe)
+  if (_cache.listContratosId) {
+    try {
+      const cc = await client.api('/sites/' + _cache.siteId + '/lists/' + _cache.listContratosId + '/columns').get();
+      _cache.colMapContratos = {}; _cache.invColMapContratos = {};
+      for (const c of (cc.value || [])) {
+        if (c.displayName && c.name) {
+          _cache.colMapContratos[c.displayName] = c.name;
+          _cache.invColMapContratos[c.name] = c.displayName;
+        }
+      }
+    } catch (e) { /* sem contratos disponiveis - tools de contrato vao falhar gracefully */ }
   }
   return _cache;
 }
@@ -768,6 +849,183 @@ async function tool_propor_marcar_processado(args, ctx) {
   };
 }
 
+// ===== TOOLS DE CONTRATOS =====
+// Helper: carrega TODOS os contratos paginando (Graph limita 999 por pagina)
+async function _carregarTodosContratos(ctx) {
+  const { client, siteId, listContratosId, invColMapContratos } = ctx.gr;
+  if (!listContratosId) return [];
+  const todos = [];
+  let nextUrl = '/sites/' + siteId + '/lists/' + listContratosId + '/items?expand=fields&$top=999';
+  let pages = 0;
+  while (nextUrl && pages < 50) {
+    pages++;
+    const r = await client.api(nextUrl).get();
+    for (const it of (r.value || [])) {
+      const rawF = it.fields || {};
+      // Normaliza usando invColMapContratos
+      const fl = {};
+      for (const [k, v] of Object.entries(rawF)) {
+        const display = invColMapContratos[k] || k;
+        fl[display] = v;
+      }
+      todos.push({
+        _id: it.id,
+        Title: fl.Title || '',
+        Diretoria: fl.Diretoria || '',
+        Unidade: fl.Unidade || 'CORPORATIVO',
+        Fornecedor: fl.Fornecedor || '',
+        CNPJFornecedor: fl.CNPJFornecedor || '',
+        DataInicio: fl.DataInicio ? String(fl.DataInicio).substring(0,10) : null,
+        DataFim: fl.DataFim ? String(fl.DataFim).substring(0,10) : null,
+        Status: fl.Status || '',
+        ValorContrato: fl.ValorContrato != null ? Number(fl.ValorContrato) : null,
+        Observacoes: fl.Observacoes || '',
+        CaminhoSharepoint: fl.CaminhoSharepoint || ''
+      });
+    }
+    const next = r['@odata.nextLink'];
+    if (next) {
+      const idx = next.indexOf('/v1.0/');
+      nextUrl = idx >= 0 ? next.substring(idx + 5) : null;
+    } else nextUrl = null;
+  }
+  return todos;
+}
+
+// Helper: calcula dias para vencer (negativo se ja venceu)
+function _diasParaVencer(dataFim) {
+  if (!dataFim) return null;
+  const hoje = new Date(new Date().getTime() - 3*60*60*1000);
+  const hojeStr = hoje.toISOString().substring(0,10);
+  const hj = new Date(hojeStr + 'T00:00:00Z');
+  const fim = new Date(dataFim + 'T00:00:00Z');
+  return Math.round((fim.getTime() - hj.getTime()) / (24*60*60*1000));
+}
+
+async function tool_listar_contratos(args, ctx) {
+  if (!ctx.gr.listContratosId) return { erro: 'Lista PRONEP-NF-Contratos nao disponivel' };
+  let todos = await _carregarTodosContratos(ctx);
+  if (args.diretoria)  todos = todos.filter(c => String(c.Diretoria || '').toLowerCase() === String(args.diretoria).toLowerCase());
+  if (args.unidade)    todos = todos.filter(c => String(c.Unidade || '') === args.unidade);
+  if (args.fornecedor) todos = todos.filter(c => String(c.Fornecedor || '').toLowerCase().indexOf(String(args.fornecedor).toLowerCase()) >= 0);
+  if (args.status)     todos = todos.filter(c => String(c.Status || '') === args.status);
+  if (args.busca) {
+    const b = String(args.busca).toLowerCase();
+    todos = todos.filter(c => (String(c.Title || '') + ' ' + String(c.Fornecedor || '')).toLowerCase().indexOf(b) >= 0);
+  }
+  // Ordena por dataFim ascendente (vencendo primeiro)
+  todos.sort((a, b) => String(a.DataFim || '9999').localeCompare(String(b.DataFim || '9999')));
+  const totalAntes = todos.length;
+  todos = todos.slice(0, 50);
+  return {
+    total: totalAntes,
+    truncado: totalAntes > 50,
+    contratos: todos.map(c => ({
+      id: c._id,
+      titulo: c.Title,
+      fornecedor: c.Fornecedor,
+      cnpj: c.CNPJFornecedor,
+      diretoria: c.Diretoria,
+      unidade: c.Unidade,
+      dataInicio: c.DataInicio,
+      dataFim: c.DataFim,
+      diasParaVencer: _diasParaVencer(c.DataFim),
+      valor: c.ValorContrato,
+      status: c.Status,
+      urlSharePoint: c.CaminhoSharepoint
+    }))
+  };
+}
+
+async function tool_detalhes_contrato(args, ctx) {
+  if (!ctx.gr.listContratosId) return { erro: 'Lista PRONEP-NF-Contratos nao disponivel' };
+  const todos = await _carregarTodosContratos(ctx);
+  let c = null;
+  if (args.id) {
+    c = todos.find(x => x._id === args.id);
+  } else if (args.busca) {
+    const b = String(args.busca).toLowerCase();
+    c = todos.find(x => (String(x.Title || '') + ' ' + String(x.Fornecedor || '')).toLowerCase().indexOf(b) >= 0);
+  }
+  if (!c) return { erro: 'contrato nao encontrado', criterios: args };
+  return {
+    id: c._id,
+    titulo: c.Title,
+    fornecedor: c.Fornecedor,
+    cnpj: c.CNPJFornecedor,
+    diretoria: c.Diretoria,
+    unidade: c.Unidade,
+    dataInicio: c.DataInicio,
+    dataFim: c.DataFim,
+    diasParaVencer: _diasParaVencer(c.DataFim),
+    valor: c.ValorContrato,
+    status: c.Status,
+    observacoes: c.Observacoes,
+    urlSharePoint: c.CaminhoSharepoint
+  };
+}
+
+async function tool_agregar_contratos(args, ctx) {
+  if (!ctx.gr.listContratosId) return { erro: 'Lista PRONEP-NF-Contratos nao disponivel' };
+  let todos = await _carregarTodosContratos(ctx);
+  if (args.diretoria) todos = todos.filter(c => String(c.Diretoria || '').toLowerCase() === String(args.diretoria).toLowerCase());
+  const campoMap = { status: 'Status', diretoria: 'Diretoria', fornecedor: 'Fornecedor', unidade: 'Unidade' };
+  const campo = campoMap[args.agrupar_por || 'status'] || 'Status';
+  const buckets = {};
+  for (const c of todos) {
+    const k = String(c[campo] || '(vazio)');
+    if (!buckets[k]) buckets[k] = { chave: k, quantidade: 0, valor_total: 0 };
+    buckets[k].quantidade++;
+    buckets[k].valor_total += Number(c.ValorContrato || 0);
+  }
+  let grupos = Object.values(buckets).sort((a, b) => b.valor_total - a.valor_total || b.quantidade - a.quantidade);
+  const topN = args.top_n || 10;
+  const truncado = grupos.length > topN;
+  grupos = grupos.slice(0, topN);
+  return {
+    total_contratos: todos.length,
+    agrupado_por: args.agrupar_por || 'status',
+    diretoria_filtro: args.diretoria || null,
+    grupos: grupos,
+    truncado: truncado
+  };
+}
+
+async function tool_contratos_vencendo(args, ctx) {
+  if (!ctx.gr.listContratosId) return { erro: 'Lista PRONEP-NF-Contratos nao disponivel' };
+  const dias = args.dias || 30;
+  const incluirVencidos = !!args.incluir_vencidos;
+  let todos = await _carregarTodosContratos(ctx);
+  todos = todos.filter(c => {
+    if (c.Status === 'Cancelado') return false;
+    if (!c.DataFim) return false;
+    const d = _diasParaVencer(c.DataFim);
+    if (d == null) return false;
+    if (d < 0) return incluirVencidos;
+    return d <= dias;
+  });
+  todos.sort((a, b) => String(a.DataFim || '9999').localeCompare(String(b.DataFim || '9999')));
+  const totalAntes = todos.length;
+  todos = todos.slice(0, 50);
+  return {
+    janela_dias: dias,
+    incluir_vencidos: incluirVencidos,
+    total: totalAntes,
+    truncado: totalAntes > 50,
+    contratos: todos.map(c => ({
+      id: c._id,
+      titulo: c.Title,
+      fornecedor: c.Fornecedor,
+      diretoria: c.Diretoria,
+      unidade: c.Unidade,
+      dataFim: c.DataFim,
+      diasParaVencer: _diasParaVencer(c.DataFim),
+      valor: c.ValorContrato,
+      status: c.Status
+    }))
+  };
+}
+
 const TOOL_IMPL = {
   listar_fila: tool_listar_fila,
   listar_aprovadas: tool_listar_aprovadas,
@@ -777,7 +1035,11 @@ const TOOL_IMPL = {
   propor_aprovacao: tool_propor_aprovacao,
   propor_rejeicao: tool_propor_rejeicao,
   abrir_nf: tool_abrir_nf,
-  propor_marcar_processado: tool_propor_marcar_processado
+  propor_marcar_processado: tool_propor_marcar_processado,
+  listar_contratos: tool_listar_contratos,
+  detalhes_contrato: tool_detalhes_contrato,
+  agregar_contratos: tool_agregar_contratos,
+  contratos_vencendo: tool_contratos_vencendo
 };
 
 // =============================================================================
@@ -815,8 +1077,9 @@ async function runSol(history, userMessage, user, opts) {
   const isFinanceiro = !!opts.isFinanceiro;
 
   const client = await getGraphClient();
-  const { siteId, listNotasId, invColMap } = await resolveSiteAndLists(client);
-  const ctx = { user, isAdmin, isFinanceiro, gr: { client, siteId, listNotasId, invColMap } };
+  const cacheResolved = await resolveSiteAndLists(client);
+  const { siteId, listNotasId, invColMap, listContratosId, colMapContratos, invColMapContratos } = cacheResolved;
+  const ctx = { user, isAdmin, isFinanceiro, gr: { client, siteId, listNotasId, invColMap, listContratosId, colMapContratos, invColMapContratos } };
   const systemPrompt = buildSystemPrompt(user, viewAtual);
 
   // Tenta Anthropic primeiro
