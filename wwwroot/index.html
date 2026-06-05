@@ -5303,7 +5303,7 @@ async function salvarFornecedor(idx) {
   }
 }
 
-function excluirFornecedor(idx) {
+async function excluirFornecedor(idx) {
   const okExc = await confirmarAcao({
     titulo: 'Excluir fornecedor?',
     mensagem: 'Tem certeza que deseja <b>excluir</b> este fornecedor?\n\nSe preferir, você pode apenas marcá-lo como <b>inativo</b> — a base preserva o histórico de NFs.',
