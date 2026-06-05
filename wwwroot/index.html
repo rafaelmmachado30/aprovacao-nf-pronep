@@ -1505,7 +1505,14 @@ window.solChat = (function() {
   }
 
   async function limparHistorico() {
-    if (!confirm('Apagar TODO o historico de conversa com a SAN? Essa acao nao pode ser desfeita.')) return;
+    const okLimpar = await confirmarAcao({
+      titulo: 'Apagar histórico da SAN?',
+      mensagem: 'Você vai apagar <b>TODO</b> o histórico de conversa com a SAN.\n\nEssa ação não pode ser desfeita.',
+      tipo: 'danger',
+      confirmLabel: 'Sim, apagar tudo',
+      cancelLabel: 'Cancelar'
+    });
+    if (!okLimpar) return;
     try {
       var r = await fetch('/api/SolHistorico', { method: 'DELETE', credentials: 'include' });
       if (r.ok) {
@@ -4574,7 +4581,17 @@ async function salvarVigenciaContrato(id) {
 
 async function alterarStatusContrato(id, novoStatus) {
   const acao = novoStatus === 'Cancelado' ? 'cancelar' : 'reativar';
-  if (!confirm('Confirma ' + acao + ' este contrato?')) return;
+  const ehCancel = acao === 'cancelar';
+  const okStatus = await confirmarAcao({
+    titulo: ehCancel ? 'Cancelar este contrato?' : 'Reativar este contrato?',
+    mensagem: ehCancel
+      ? 'Você vai marcar este contrato como <b>Cancelado</b>.\n\nO documento continuará no SharePoint, apenas a sinalização vai mudar.'
+      : 'Você vai <b>reativar</b> este contrato.\n\nO status volta a ser calculado pela data de vigência.',
+    tipo: ehCancel ? 'danger' : 'success',
+    confirmLabel: ehCancel ? 'Sim, cancelar' : 'Sim, reativar',
+    cancelLabel: 'Cancelar'
+  });
+  if (!okStatus) return;
   try {
     const r = await fetch('/api/AtualizarStatusContrato', {
       method: 'POST',
@@ -4615,7 +4632,18 @@ window._syncCancelado = false;
 window._syncErros = [];
 
 async function sincronizarTudoOrquestrado() {
-  if (!confirm('Vai varrer as 10 diretorias da Pronep no SharePoint, ler todos os PDFs novos e extrair vigência via IA. Pode levar 30-90 minutos e custar $1.50 a $4 em tokens Claude. Confirma?')) return;
+  const okSync = await confirmarAcao({
+    titulo: 'Sincronizar TODAS as diretorias?',
+    mensagem:
+      'O sistema vai varrer as diretorias da Pronep no SharePoint, ler todos os PDFs novos e extrair vigência via IA.\n\n' +
+      '<b>Tempo:</b> 30 a 90 minutos\n' +
+      '<b>Custo estimado:</b> $1.50 a $4 em tokens Claude\n\n' +
+      'Recomendado rodar fora do horário de pico.',
+    tipo: 'warning',
+    confirmLabel: 'Sim, sincronizar',
+    cancelLabel: 'Cancelar'
+  });
+  if (!okSync) return;
 
   window._syncCancelado = false;
   window._syncErros = [];
@@ -5269,7 +5297,14 @@ async function salvarFornecedor(idx) {
 }
 
 function excluirFornecedor(idx) {
-  if (!confirm('Tem certeza que deseja excluir este fornecedor? Se preferir, marque como inativo.')) return;
+  const okExc = await confirmarAcao({
+    titulo: 'Excluir fornecedor?',
+    mensagem: 'Tem certeza que deseja <b>excluir</b> este fornecedor?\n\nSe preferir, você pode apenas marcá-lo como <b>inativo</b> — a base preserva o histórico de NFs.',
+    tipo: 'danger',
+    confirmLabel: 'Sim, excluir',
+    cancelLabel: 'Cancelar'
+  });
+  if (!okExc) return;
   const x = fornecedores[idx];
   fornecedores.splice(idx, 1);
   toast(`Fornecedor "${x.razao}" removido.`, 'success');
@@ -7248,14 +7283,20 @@ async function integrarOmie(id, numero, fornecedor, unidade) {
     alert('Apenas Admin ou Financeiro pode integrar com Omie.');
     return;
   }
-  if (!confirm(
-    'Integrar NF ' + numero + ' com Omie ' + unidade + '?\n\n' +
-    'Fornecedor: ' + fornecedor + '\n\n' +
-    '→ O sistema vai BUSCAR a conta a pagar correspondente no Omie ' + unidade + '\n' +
-    '→ Se encontrar, ANEXA o PDF aprovado na conta\n' +
-    '→ A acao eh registrada na Trilha de Auditoria\n\n' +
-    'Continuar?'
-  )) return;
+  const okOmie = await confirmarAcao({
+    titulo: 'Integrar NF ' + numero + ' com Omie ' + unidade + '?',
+    mensagem:
+      'Fornecedor: <b>' + fornecedor + '</b>\n\n' +
+      'O que vai acontecer:\n' +
+      '→ O sistema vai <b>buscar</b> a conta a pagar correspondente no Omie ' + unidade + '\n' +
+      '→ Se encontrar, <b>anexa</b> o PDF aprovado na conta\n' +
+      '→ A ação é registrada na Trilha de Auditoria\n\n' +
+      'Deseja continuar?',
+    tipo: 'info',
+    confirmLabel: 'Sim, integrar',
+    cancelLabel: 'Cancelar'
+  });
+  if (!okOmie) return;
 
   // Modal de loading com etapas animadas
   openModal(`
@@ -7359,7 +7400,14 @@ async function rejeitarAprovada(id, numero, fornecedor, valor) {
     alert('Motivo muito curto. Informe pelo menos 5 caracteres explicando o porquê do estorno.');
     return;
   }
-  if (!confirm('Confirma o ESTORNO da NF ' + numero + '?\n\nMotivo: ' + motivoTrim)) return;
+  const okEst = await confirmarAcao({
+    titulo: 'Estornar a NF ' + numero + '?',
+    mensagem: 'Você vai realizar o <b>ESTORNO</b> desta NF.\n\n<b>Motivo:</b> ' + motivoTrim + '\n\nO PDF aprovado será removido do Omie e a NF voltará a aparecer na fila de aprovação.',
+    tipo: 'danger',
+    confirmLabel: 'Sim, estornar',
+    cancelLabel: 'Cancelar'
+  });
+  if (!okEst) return;
   try {
     const r = await fetch('/api/RejeitarNota', {
       method: 'POST',
