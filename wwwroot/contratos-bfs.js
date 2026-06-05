@@ -16,13 +16,17 @@
 
   var ROOT = '/CONTRATOS/CONTRATOS E DOCUMENTOS - PRESTADORES';
 
+  // Diretorias VARRIDAS pelo BFS — somente as que têm contratos de PRESTADORES (custos pagos).
+  // Comercial e Financeira foram REMOVIDAS porque contêm contratos de VÍNCULO com a Pronep
+  // (Pronep prestando serviço pra outros), não cobranças que recebemos. Decisão Rafa 04/06/2026.
+  // Pra incluir no futuro: descomenta as 2 linhas abaixo.
   var DIRETORIAS = [
     { id: '/OUVIDORIA',                                  label: 'Ouvidoria' },
     { id: '/QUALIDADE',                                  label: 'Qualidade' },
     { id: '/PACIENTES PARTICULARES',                     label: 'Pacientes Particulares' },
     { id: '/GERÊNCIA DE RH',                             label: 'RH' },
-    { id: '/DIRETORIA COMERCIAL',                        label: 'Comercial' },
-    { id: '/DIRETORIA FINANCEIRA',                       label: 'Financeira' },
+    // { id: '/DIRETORIA COMERCIAL',                     label: 'Comercial' },   // vinculo prestador-Pronep
+    // { id: '/DIRETORIA FINANCEIRA',                    label: 'Financeira' },  // vinculo prestador-Pronep
     { id: '/DIRETORIA DE OPERAÇÕES',                     label: 'Operacoes' },
     { id: '/DIRETORIA DE SUPRIMENTOS E LOGÍSTICA',       label: 'Suprimentos' },
     { id: '/JURÍDICO',                                   label: 'Juridico' },
