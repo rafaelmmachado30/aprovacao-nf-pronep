@@ -1925,6 +1925,64 @@ function openModal(html) {
 function closeModal() { document.getElementById('modal-backdrop').classList.remove('active'); }
 document.getElementById('modal-backdrop').addEventListener('click', e => { if (e.target.id === 'modal-backdrop') closeModal(); });
 
+// Substituto estilizado pro confirm() nativo - retorna Promise<boolean>.
+// Uso: const ok = await confirmarAcao({ titulo, mensagem, tipo, confirmLabel, cancelLabel })
+// tipo: 'danger' (vermelho) | 'success' (verde) | 'warning' (amarelo) | 'info' (azul)
+function confirmarAcao(opts) {
+  opts = opts || {};
+  const titulo       = opts.titulo       || 'Confirmar';
+  const mensagem     = opts.mensagem     || 'Tem certeza?';
+  const tipo         = opts.tipo         || 'danger';
+  const confirmLabel = opts.confirmLabel || 'Confirmar';
+  const cancelLabel  = opts.cancelLabel  || 'Cancelar';
+  const corMap = {
+    danger:  { borda: '#FCA5A5', fundo: '#FEE2E2', icoCor: '#DC2626', btn: '#DC2626', btnTxt: '#fff', icone: '⚠' },
+    success: { borda: '#A7F3D0', fundo: '#D1FAE5', icoCor: '#10B981', btn: '#10B981', btnTxt: '#fff', icone: '✓' },
+    warning: { borda: '#FCD34D', fundo: '#FEF3C7', icoCor: '#D97706', btn: '#D97706', btnTxt: '#fff', icone: '!' },
+    info:    { borda: '#93C5FD', fundo: '#DBEAFE', icoCor: '#2563EB', btn: '#2563EB', btnTxt: '#fff', icone: 'i' }
+  };
+  const c = corMap[tipo] || corMap.danger;
+  // Escape basico HTML pra evitar quebra (mas mantem <br>, <b>, <i> simples que o caller possa querer)
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  // mensagem pode ter \n - converte pra <br>
+  const mensagemHTML = esc(mensagem).replace(/\n/g, '<br>');
+  return new Promise(function(resolve) {
+    window._confirmacaoResolve = function(valor) {
+      try { delete window._confirmacaoResolve; } catch (e) { window._confirmacaoResolve = null; }
+      closeModal();
+      resolve(!!valor);
+    };
+    const html =
+      '<div style="max-width:480px">' +
+      '  <div style="display:flex;gap:14px;align-items:flex-start;padding:18px 20px;background:' + c.fundo + ';border-left:4px solid ' + c.icoCor + ';border-radius:6px 6px 0 0">' +
+      '    <div style="width:36px;height:36px;flex-shrink:0;background:' + c.icoCor + ';color:#fff;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700">' + c.icone + '</div>' +
+      '    <div style="flex:1;min-width:0">' +
+      '      <h3 style="margin:0 0 8px;color:#1F2937;font-size:16px;font-weight:600">' + esc(titulo) + '</h3>' +
+      '      <div style="color:#374151;font-size:14px;line-height:1.5">' + mensagemHTML + '</div>' +
+      '    </div>' +
+      '  </div>' +
+      '  <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 20px;background:#fff;border-radius:0 0 6px 6px">' +
+      '    <button id="btnConfirmCancel" type="button" style="padding:8px 18px;border:1px solid #D1D5DB;background:#fff;color:#374151;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500" onclick="window._confirmacaoResolve(false)">' + esc(cancelLabel) + '</button>' +
+      '    <button id="btnConfirmOk" type="button" style="padding:8px 18px;border:none;background:' + c.btn + ';color:' + c.btnTxt + ';border-radius:6px;cursor:pointer;font-size:14px;font-weight:600" onclick="window._confirmacaoResolve(true)">' + esc(confirmLabel) + '</button>' +
+      '  </div>' +
+      '</div>';
+    openModal(html);
+    // Focus no botao OK pra acessibilidade (Enter funciona direto)
+    setTimeout(function(){
+      var btn = document.getElementById('btnConfirmOk');
+      if (btn) btn.focus();
+      // ESC fecha cancelando
+      var onKey = function(e) {
+        if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); window._confirmacaoResolve && window._confirmacaoResolve(false); }
+      };
+      document.addEventListener('keydown', onKey);
+    }, 50);
+  });
+}
+
 // ============== AUTH ==============
 function togglePersonasDemo() {
   const el = document.getElementById('personas-demo');
@@ -4289,9 +4347,19 @@ async function cancelarFornecedorClick(btn) {
   var unidade = btn.getAttribute('data-unidade');
   var fornecedor = btn.getAttribute('data-fornecedor');
   var acao = btn.getAttribute('data-acao');
-  var verbo = acao === 'cancelar' ? 'CANCELAR todos' : 'REATIVAR todos';
-  var msg = verbo + ' os contratos de "' + fornecedor + '" (' + diretoria + ' / ' + unidade + ')?\n\nEssa acao afeta TODOS os documentos da pasta.';
-  if (!confirm(msg)) return;
+  var ehCancelar = acao === 'cancelar';
+  var ok = await confirmarAcao({
+    titulo: ehCancelar ? 'Cancelar todos os contratos?' : 'Reativar todos os contratos?',
+    mensagem:
+      (ehCancelar ? 'Você vai marcar como CANCELADOS' : 'Você vai REATIVAR') + ' todos os contratos de:\n\n' +
+      '<b>' + fornecedor + '</b>\n' +
+      diretoria + ' / ' + unidade + '\n\n' +
+      'Essa ação afeta TODOS os documentos da pasta.',
+    tipo: ehCancelar ? 'danger' : 'success',
+    confirmLabel: ehCancelar ? 'Sim, cancelar todos' : 'Sim, reativar todos',
+    cancelLabel: 'Cancelar'
+  });
+  if (!ok) return;
 
   // 1. Captura estado atual da arvore (quais <details> estao abertos) pra restaurar depois
   var detsAbertos = [];
