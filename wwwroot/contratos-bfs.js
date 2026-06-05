@@ -28,7 +28,7 @@
     // { id: '/DIRETORIA COMERCIAL',                     label: 'Comercial' },   // vinculo prestador-Pronep
     // { id: '/DIRETORIA FINANCEIRA',                    label: 'Financeira' },  // vinculo prestador-Pronep
     // { id: '/DIRETORIA DE OPERAÇÕES',                  label: 'Operacoes' },   // removido pelo Rafa nesta leva
-    { id: '/DIRETORIA DE SUPRIMENTOS E LOGÍSTICA',       label: 'Suprimentos' },
+    // { id: '/DIRETORIA DE SUPRIMENTOS E LOGÍSTICA',    label: 'Suprimentos' }, // removido pelo Rafa nesta leva
     { id: '/JURÍDICO',                                   label: 'Juridico' },
     { id: '/GERÊNCIA DE PROJETOS E TI',                  label: 'Tecnologia' }
   ];
@@ -299,5 +299,104 @@
     state.cancelado = true;
   }
 
-  window.contratosBfs = { iniciar: iniciar, cancelar: cancelar };
+  // BFS pra UMA pasta especifica (ex: /GERÊNCIA DE PROJETOS E TI/SP).
+  // Quebra em sub-pastas pequenas — evita timeout do gateway pra escopos grandes.
+  async function iniciarPath(subpathRel, labelMostrar) {
+    if (!subpathRel) { alert('Informe o subpath relativo'); return; }
+    if (!confirm('Vai sincronizar via BFS:\n\n' + subpathRel + '\n\nMapeia subpastas primeiro, depois processa cada prestador em uma chamada pequena. Confirma?')) return;
+
+    state.cancelado = false;
+    state.erros = [];
+    state.errosConsecutivos = 0;
+
+    var html =
+      '<h3 style="margin-top:0">⚡ Sincronizar via BFS</h3>' +
+      '<div style="background:#FEF3C7;border-left:3px solid #F59E0B;padding:12px;border-radius:4px;margin-bottom:14px">' +
+      '<b>Escopo:</b> ' + subpathRel + '<br>' +
+      '<b>Circuit breaker:</b> ' + LIMITE_ERROS_CONSECUTIVOS + ' consecutivos / ' + LIMITE_ERROS_TOTAIS + ' totais.' +
+      '</div>' +
+      '<div id="bfs-progresso"><div class="muted small">Iniciando...</div></div>';
+    openModal(html);
+
+    var totalStart = Date.now();
+    var acumulado = { novos: 0, atualizados: 0, pulados: 0, erros: 0, batches: 0, diretorias: 0, prestadores: 0 };
+    var label = labelMostrar || subpathRel.split('/').filter(Boolean).slice(-1)[0] || 'Pasta';
+
+    // BFS pra encontrar folhas processaveis
+    var fila = [ROOT + subpathRel.normalize('NFC')];
+    var folhas = [];
+    var iteracoesMap = 0;
+
+    while (fila.length > 0 && !state.cancelado && iteracoesMap < 500) {
+      iteracoesMap++;
+      var pasta = fila.shift();
+      try {
+        var tempoSeg = Math.round((Date.now() - totalStart) / 1000);
+        renderProgresso('bfs-progresso', 0, 1, label, 'Mapeando ' + pasta.split('/').slice(-2).join('/') + ' (' + folhas.length + ' folhas)...', acumulado, tempoSeg);
+        var listagem = await listarSubpastas(pasta);
+        if (souFolhaProcessavel(listagem)) {
+          folhas.push(pasta);
+        } else {
+          for (var s = 0; s < (listagem.subpastas || []).length; s++) {
+            fila.push(listagem.subpastas[s].path);
+          }
+        }
+      } catch (e) {
+        state.erros.push({ diretoria: label, pasta: pasta, error: 'mapear: ' + e.message });
+      }
+    }
+
+    // Processa cada folha
+    for (var f = 0; f < folhas.length; f++) {
+      if (state.cancelado) break;
+      if (state.erros.length >= LIMITE_ERROS_TOTAIS) {
+        state.cancelado = true;
+        state.erros.push({ diretoria: label, error: 'CIRCUIT_BREAKER: ' + LIMITE_ERROS_TOTAIS + ' erros totais — abortando' });
+        break;
+      }
+      if (state.errosConsecutivos >= LIMITE_ERROS_CONSECUTIVOS) {
+        state.cancelado = true;
+        state.erros.push({ diretoria: label, error: 'CIRCUIT_BREAKER: ' + LIMITE_ERROS_CONSECUTIVOS + ' erros consecutivos — abortando' });
+        break;
+      }
+      var folha = folhas[f];
+      var tempoSeg2 = Math.round((Date.now() - totalStart) / 1000);
+      renderProgresso('bfs-progresso', 0, 1, label, 'Prestador ' + (f + 1) + '/' + folhas.length + ': ' + folha.split('/').slice(-2).join('/'), acumulado, tempoSeg2);
+      acumulado.batches++;
+
+      var tentativas = 0;
+      while (tentativas < 10 && !state.cancelado) {
+        tentativas++;
+        try {
+          var sub = folha.startsWith(ROOT) ? folha.slice(ROOT.length) : folha;
+          var resp = await sincronizarPasta(sub, 10);
+          var stats = resp.stats || {};
+          acumulado.novos += (stats.novos || 0);
+          acumulado.atualizados += (stats.atualizados || 0);
+          acumulado.pulados += (stats.pulados || 0);
+          acumulado.erros += (stats.erros || 0);
+          var teveErro = false;
+          for (var k = 0; k < (resp.resultados || []).length; k++) {
+            var r2 = resp.resultados[k];
+            if (r2.erro) { state.erros.push({ diretoria: label, pasta: folha, arquivo: r2.nome, erro: r2.erro }); teveErro = true; }
+          }
+          if (!teveErro && (stats.erros || 0) === 0) state.errosConsecutivos = 0;
+          else state.errosConsecutivos++;
+          if ((resp.restantes || 0) === 0) break;
+        } catch (e) {
+          acumulado.erros++;
+          state.errosConsecutivos++;
+          state.erros.push({ diretoria: label, pasta: folha, error: 'sincronizar: ' + e.message });
+          break;
+        }
+      }
+      acumulado.prestadores++;
+    }
+    acumulado.diretorias = 1;
+
+    var tempoFinal = Math.round((Date.now() - totalStart) / 1000);
+    renderFinal('bfs-progresso', acumulado, tempoFinal, state.cancelado);
+  }
+
+  window.contratosBfs = { iniciar: iniciar, iniciarPath: iniciarPath, cancelar: cancelar };
 })();

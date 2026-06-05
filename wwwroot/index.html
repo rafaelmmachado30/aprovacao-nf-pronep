@@ -4573,13 +4573,32 @@ function abrirSincronizarContratos() {
     <div style="margin-bottom:14px">
       <label><input id="syc-force" type="checkbox"> Forçar releitura (re-processa arquivos já gravados — use ao corrigir mapeamento de diretoria ou regravar todos)</label>
     </div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
+    <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-primary" onclick="executarSincronizarContratos()">Sincronizar</button>
+      <button class="btn btn-secondary" onclick="executarSincronizarContratos()" title="Chamada direta. Pode dar timeout em pastas grandes.">Sincronizar (rápido)</button>
+      <button class="btn btn-primary" onclick="executarSincronizarBFS()" title="Quebra em sub-pastas pequenas. Evita timeout em escopos grandes.">⚡ Sincronizar via BFS</button>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:#6B7280">
+      <b>Quando usar BFS?</b> Pra varrer uma diretoria/unidade inteira com muitos prestadores. Quebra em chamadas pequenas — sem timeout.
     </div>
     <div id="syc-resultado" style="margin-top:14px"></div>
   `;
   openModal(html);
+}
+
+async function executarSincronizarBFS() {
+  const pasta = document.getElementById('syc-pasta').value;
+  if (!pasta) {
+    document.getElementById('syc-resultado').innerHTML = '<div class="alert alert-error">Informe a pasta primeiro.</div>';
+    return;
+  }
+  if (!window.contratosBfs || typeof window.contratosBfs.iniciarPath !== 'function') {
+    document.getElementById('syc-resultado').innerHTML = '<div class="alert alert-error">contratos-bfs.js não carregou. Recarregue a página (Ctrl+Shift+R).</div>';
+    return;
+  }
+  // Fecha esse modal e abre o do BFS dedicado
+  closeModal();
+  window.contratosBfs.iniciarPath(pasta, pasta.split('/').filter(Boolean).slice(-1)[0] || pasta);
 }
 
 async function executarSincronizarContratos() {
