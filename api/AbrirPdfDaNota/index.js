@@ -168,28 +168,37 @@ module.exports = async function (context, req) {
       }
     }
 
-    // Acha o arquivo pelo NumeroNF. Suporta 3 padroes:
-    //   - Antigo: {numero}_{razao}_{ts}_*.pdf (numero no inicio)
-    //   - Intermediario: {data}_{012345}_..._.pdf (zero-padded, 1a versao do padrao novo)
-    //   - Atual: {data}_{12345}_..._.pdf (sem zeros a esquerda)
-    // SEGURANCA: SEM fallback "mais recente" - retorna erro se nao achar match exato.
+    // Acha o arquivo pelo NumeroNF + VALOR (desempate quando varias NFs tem mesmo numero).
+    // PADRAO atual: {data_venc}_{numero}_{FORNECEDOR}_{unidade}_{valor_com_virgula}_APROVADA_{data}.pdf
+    // Ex: 2026-06-11_1_PERELLO-SOCIEDADE-DE-ADVOGADOS_SP_4,30_APROVADA_2026-06-03.pdf
+    // SEGURANCA: SEM fallback "mais recente" — retorna erro se ambiguidade.
     let target = null;
+    const valorNum = (typeof fields.Valor === 'number' ? fields.Valor : Number(fields.Valor)) || 0;
+    const valorStr = valorNum > 0 ? valorNum.toFixed(2).replace('.', ',') : null;
     if (numero) {
       const numStr = String(numero);
       const numClean = numStr.replace(/[^A-Za-z0-9]/g, '');
       const numUnpadded = /^\d+$/.test(numClean) ? (numClean.replace(/^0+/, '') || '0') : numClean;
       const numPadded = /^\d+$/.test(numClean) ? numClean.padStart(6, '0') : numClean;
       const candidates = Array.from(new Set([numStr, numClean, numUnpadded, numPadded]));
-      // 1. Match: comeca com "{n}_" (padrao antigo)
-      for (const n of candidates) {
-        target = arquivos.find(a => a.name && a.name.startsWith(n + '_'));
-        if (target) break;
+
+      // Funcao auxiliar: dado um candidato n, retorna arquivos que batem
+      function matches(n) {
+        const out = [];
+        for (const a of arquivos) {
+          if (!a.name) continue;
+          if (a.name.startsWith(n + '_') || a.name.indexOf('_' + n + '_') >= 0) out.push(a);
+        }
+        return out;
       }
-      // 2. Match: contem "_{n}_" (padroes novos - numero no meio)
-      if (!target) {
-        for (const n of candidates) {
-          target = arquivos.find(a => a.name && a.name.indexOf('_' + n + '_') >= 0);
-          if (target) break;
+
+      for (const n of candidates) {
+        const candidatos = matches(n);
+        if (candidatos.length === 1) { target = candidatos[0]; break; }
+        if (candidatos.length > 1 && valorStr) {
+          // Desempata pelo VALOR (cada NF tem valor unico no nome do arquivo)
+          const filtrado = candidatos.filter(a => a.name.indexOf('_' + valorStr + '_') >= 0);
+          if (filtrado.length === 1) { target = filtrado[0]; break; }
         }
       }
     }
