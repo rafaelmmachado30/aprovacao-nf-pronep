@@ -161,8 +161,26 @@ module.exports = async function (context, req) {
       }
     }
 
-    // 5. Carrega TODOS os contratos (lista costuma ser pequena, 200-500 itens)
-    const resp = await client.api('/sites/' + siteId + '/lists/' + listId + '/items?expand=fields&$top=999').get();
+    // 5. Carrega TODOS os contratos com PAGINACAO (Graph limita 999 por pagina).
+    // Lista pode ter milhares de itens — sem paginar so vem os primeiros 999.
+    const todosItens = [];
+    let nextUrl = '/sites/' + siteId + '/lists/' + listId + '/items?expand=fields&$top=999';
+    let paginas = 0;
+    while (nextUrl && paginas < 50) {  // hard stop em 50 paginas (~50k itens) por seguranca
+      paginas++;
+      const pageResp = await client.api(nextUrl).get();
+      const itens = pageResp.value || [];
+      for (const it of itens) todosItens.push(it);
+      // O Graph retorna @odata.nextLink completo (URL absoluta). Extrai pra relativo.
+      const next = pageResp['@odata.nextLink'];
+      if (next) {
+        const idx = next.indexOf('/v1.0/');
+        nextUrl = idx >= 0 ? next.substring(idx + 5) : null;  // ex: /sites/.../items?...&$skiptoken=...
+      } else {
+        nextUrl = null;
+      }
+    }
+    const resp = { value: todosItens };
     const f = req.query || {};
     const filtroBusca = String(f.busca || '').toLowerCase().trim();
 
