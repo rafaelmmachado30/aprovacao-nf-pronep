@@ -29,7 +29,7 @@ const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-
 const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
 const contratosShared = require('../shared/contratos');
-const auditLog = require('../shared/auditLog');
+const { registrar: auditRegistrar } = require('../shared/auditLog');
 
 const cache = { siteId: null, listId: null, listDirId: null, colMap: null };
 
@@ -211,7 +211,7 @@ module.exports = async function (context, req) {
     }
 
     // 7. Audit log
-    auditLog.auditRegistrar(user, acao + '_fornecedor',
+    auditRegistrar(user, acao + '_fornecedor',
       { tipo: 'fornecedor', diretoria, unidade, fornecedor },
       resultados.erros.length ? 'parcial' : 'sucesso',
       { total: resultados.total, ok: resultados.ok, erros: resultados.erros.length }

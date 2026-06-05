@@ -4219,9 +4219,12 @@ function renderArvoreContratos(arvore) {
                     var contratos = forn.contratos || [];
                     var todosCancelados = contratos.length > 0 && contratos.every(function(c){ return c.status === 'Cancelado'; });
                     var corPasta = todosCancelados ? '#DC2626' : '#3B82F6';
+                    // Badge de status (mesmo estilo do card individual): Ativo verde, Cancelado vermelho
+                    var statusLabel = todosCancelados ? 'Cancelado' : 'Ativo';
+                    var corStatus = todosCancelados ? '#DC2626' : '#10B981';
                     // Acao do botao: se TODOS cancelados → Reativar, senao → Cancelar
                     var acaoBatch = todosCancelados ? 'reativar' : 'cancelar';
-                    var labelBatch = todosCancelados ? 'Reativar todos' : 'Cancelar todos';
+                    var labelBatch = todosCancelados ? '↻ Reativar todos' : '✕ Cancelar todos';
                     var corBtn = todosCancelados ? '#10B981' : '#DC2626';
                     // Encoda nome do fornecedor pra atributo HTML (escape de aspas)
                     var fEsc = String(forn.fornecedor).replace(/"/g,'&quot;').replace(/&/g,'&amp;');
@@ -4231,8 +4234,8 @@ function renderArvoreContratos(arvore) {
                       <details style="padding:0;background:#FAFAFA;border-radius:4px">
                         <summary style="padding:8px 12px;cursor:pointer;font-weight:600;color:#1F2937;list-style:none;display:flex;align-items:center;gap:6px">
                           <span style="font-size:11px;color:#6B7280;width:10px">▶</span>${iconePasta(corPasta)} ${forn.fornecedor} <span class="small muted">(${contratos.length})</span>
-                          ${todosCancelados ? '<span style="font-size:10px;background:#FEE2E2;color:#7F1D1D;padding:1px 6px;border-radius:8px;margin-left:4px">cancelado</span>' : ''}
                           <span style="flex:1"></span>
+                          <span style="background:${corStatus};color:#fff;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600">${statusLabel}</span>
                           <button type="button"
                             onclick="event.stopPropagation();event.preventDefault();cancelarFornecedorClick(this)"
                             data-diretoria="${dEsc}" data-unidade="${uEsc}" data-fornecedor="${fEsc}" data-acao="${acaoBatch}"
