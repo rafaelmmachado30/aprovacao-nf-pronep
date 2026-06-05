@@ -34,7 +34,13 @@
   // Sincronizar nela e deixa o crawler do backend resolver).
   var ESTRUTURAIS = ['CONTRATOS', 'DOCUMENTOS', 'ADITIVOS', 'PROPOSTAS', 'NDAS', 'OUTROS'];
 
-  var state = { cancelado: false, erros: [] };
+  var state = { cancelado: false, erros: [], errosConsecutivos: 0 };
+
+  // CIRCUIT BREAKER — protege contra cenarios catastroficos como
+  // "persistir is not defined" que custariam tokens em centenas de arquivos.
+  var LIMITE_ERROS_TOTAIS = 20;       // aborta tudo se passar disso
+  var LIMITE_ERROS_CONSECUTIVOS = 5;  // aborta se tiver 5 falhas em sequencia
+  var lastErrorRate = 0;
 
   function normalizeStr(s) {
     return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().trim();
@@ -123,19 +129,68 @@
       '</div>';
   }
 
+  // Pre-flight: chama Sincronizar com dryRun=true E maxArquivos=1 numa pasta CONHECIDA
+  // (TOTVS SA, ja tem dados) pra validar que o pipeline funciona ANTES de queimar tokens.
+  async function preflightCheck() {
+    try {
+      var params = new URLSearchParams();
+      params.set('pasta', '/GERÊNCIA DE PROJETOS E TI/CORPORATIVO/TOTVS SA/CONTRATOS');
+      params.set('maxArquivos', '1');
+      params.set('dryRun', 'true');
+      var r = await fetch('/api/SincronizarContratos?' + params.toString(), { credentials: 'include' });
+      if (!r.ok) {
+        var msg = 'HTTP ' + r.status;
+        try { var j = await r.json(); msg = j.error || msg; } catch (e) {}
+        return { ok: false, motivo: 'Sincronizar retornou ' + msg };
+      }
+      var data = await r.json();
+      // Resposta valida? Verifica campos esperados
+      if (!data || typeof data.totalEncontrados !== 'number') {
+        return { ok: false, motivo: 'Resposta do Sincronizar sem campos esperados (totalEncontrados)' };
+      }
+      // Algum erro no resultado individual?
+      if ((data.resultados || []).some(function(r){ return r.erro; })) {
+        var erro = (data.resultados || []).find(function(r){ return r.erro; });
+        return { ok: false, motivo: 'Sincronizar gerou erro mesmo em dry-run: ' + (erro && erro.erro) };
+      }
+      return { ok: true, exemplo: data };
+    } catch (e) {
+      return { ok: false, motivo: 'Exception no preflight: ' + e.message };
+    }
+  }
+
   async function iniciar() {
-    if (!confirm('Vai varrer as 10 diretorias da Pronep no SharePoint via BFS (subpasta por subpasta). Cada chamada é pequena pra evitar timeout. Tempo estimado 30-90 min, custo $1.50 a $4 em tokens Claude. Confirma?')) return;
+    if (!confirm('Vai varrer as 10 diretorias da Pronep no SharePoint via BFS (subpasta por subpasta). Cada chamada é pequena pra evitar timeout. Tempo estimado 30-90 min, custo $1.50 a $4 em tokens Claude.\n\nVai rodar um pre-flight check primeiro (custo ~0). Confirma?')) return;
 
     state.cancelado = false;
     state.erros = [];
+    state.errosConsecutivos = 0;
 
     var html =
       '<h3 style="margin-top:0">⚡ Sincronizar TUDO (BFS)</h3>' +
       '<div style="background:#FEF3C7;border-left:3px solid #F59E0B;padding:12px;border-radius:4px;margin-bottom:14px">' +
-      '<b>Estratégia BFS:</b> mapeia subpastas primeiro, depois processa cada pasta de prestador em uma chamada pequena. Evita timeout em diretorias grandes (Jurídico, Tecnologia).' +
+      '<b>Estratégia BFS:</b> mapeia subpastas primeiro, depois processa cada pasta de prestador em uma chamada pequena. Evita timeout em diretorias grandes (Jurídico, Tecnologia).<br>' +
+      '<b>Circuit breaker:</b> aborta automaticamente após ' + LIMITE_ERROS_CONSECUTIVOS + ' erros consecutivos ou ' + LIMITE_ERROS_TOTAIS + ' erros totais.' +
       '</div>' +
-      '<div id="bfs-progresso"></div>';
+      '<div id="bfs-progresso"><div class="muted small">Rodando pre-flight check...</div></div>';
     openModal(html);
+
+    // === PRE-FLIGHT CHECK ===
+    var preflight = await preflightCheck();
+    if (!preflight.ok) {
+      document.getElementById('bfs-progresso').innerHTML =
+        '<div class="alert alert-error" style="padding:14px;border-radius:4px">' +
+        '<b>❌ Pre-flight check FALHOU</b><br>' +
+        'O backend retornou erro no teste inicial (sem custo de tokens). NÃO vou iniciar a sincronização real.<br><br>' +
+        '<b>Motivo:</b> ' + preflight.motivo + '<br><br>' +
+        'Corrija o backend antes de tentar de novo. Comum ser deploy desatualizado ou syntax error em SincronizarContratos.' +
+        '<div style="margin-top:14px"><button class="btn btn-secondary" onclick="closeModal()">Fechar</button></div>' +
+        '</div>';
+      return;
+    }
+    // Pre-flight OK — segue
+    document.getElementById('bfs-progresso').innerHTML = '<div class="alert alert-success" style="padding:10px;border-radius:4px">✓ Pre-flight passou. Iniciando varredura...</div>';
+    await new Promise(function(r){ setTimeout(r, 800); });
 
     var totalStart = Date.now();
     var acumulado = { novos: 0, atualizados: 0, pulados: 0, erros: 0, batches: 0, diretorias: 0, prestadores: 0 };
@@ -174,6 +229,17 @@
       // Processa cada folha (chamada pequena, escopo de prestador)
       for (var f = 0; f < folhas.length; f++) {
         if (state.cancelado) break;
+        // CIRCUIT BREAKER global
+        if (state.erros.length >= LIMITE_ERROS_TOTAIS) {
+          state.cancelado = true;
+          state.erros.push({ diretoria: dir.label, error: 'CIRCUIT_BREAKER: ' + LIMITE_ERROS_TOTAIS + ' erros totais atingidos - abortando pra nao queimar tokens' });
+          break;
+        }
+        if (state.errosConsecutivos >= LIMITE_ERROS_CONSECUTIVOS) {
+          state.cancelado = true;
+          state.erros.push({ diretoria: dir.label, error: 'CIRCUIT_BREAKER: ' + LIMITE_ERROS_CONSECUTIVOS + ' erros consecutivos - algo esta errado, abortando' });
+          break;
+        }
         var folha = folhas[f];
         tempoSeg = Math.round((Date.now() - totalStart) / 1000);
         renderProgresso('bfs-progresso', i, DIRETORIAS.length, dir.label,
@@ -192,14 +258,25 @@
             acumulado.atualizados += (stats.atualizados || 0);
             acumulado.pulados += (stats.pulados || 0);
             acumulado.erros += (stats.erros || 0);
+            var teveErroIndividual = false;
             for (var k = 0; k < (resp.resultados || []).length; k++) {
               var r2 = resp.resultados[k];
-              if (r2.erro) state.erros.push({ diretoria: dir.label, pasta: folha, arquivo: r2.nome, erro: r2.erro });
+              if (r2.erro) {
+                state.erros.push({ diretoria: dir.label, pasta: folha, arquivo: r2.nome, erro: r2.erro });
+                teveErroIndividual = true;
+              }
+            }
+            // Reset consecutivos somente se nada de errado nessa chamada
+            if (!teveErroIndividual && (stats.erros || 0) === 0) {
+              state.errosConsecutivos = 0;
+            } else {
+              state.errosConsecutivos++;
             }
             var restantes = resp.restantes || 0;
             if (restantes === 0) break;
           } catch (e) {
             acumulado.erros++;
+            state.errosConsecutivos++;
             state.erros.push({ diretoria: dir.label, pasta: folha, error: 'sincronizar: ' + e.message });
             break;
           }
