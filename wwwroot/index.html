@@ -1824,6 +1824,17 @@ const menuItems = [
 
 // ============== HELPERS ==============
 function fmtBRL(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+
+// Extrai URL string de campo Hyperlink do SharePoint.
+// SP retorna Hyperlink como objeto {Url:"...", Description:"..."} via Graph,
+// mas pode tambem vir como string (quando gravado como texto). Esta funcao
+// normaliza pra string em qualquer caso. Sem isso, o front gera href="[object Object]".
+function extrairUrlHyperlink(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'object' && v.Url) return String(v.Url);
+  return '';
+}
 // Retorna data de "hoje" no fuso BRT (America/Sao_Paulo) no formato YYYY-MM-DD.
 // IMPORTANTE: NAO usar new Date().toISOString().substring(0,10) — depois das 21h no
 // Brasil ja virou o dia seguinte em UTC, e o filtro/exibicao mostra "amanha".
@@ -2372,8 +2383,8 @@ async function carregarNotasReais() {
         aprovadoEm: n.AprovadoEm ? fmtDateTimeBRT(n.AprovadoEm) : null,
         motivo: n.MotivoRejeicao || '',
         hash: (n.HashSHA256 || '').substring(0,16),
-        urlPDF: n.UrlPDF || '',
-        urlPDFAprovado: n.UrlPDFAprovado || '',
+        urlPDF: extrairUrlHyperlink(n.UrlPDF),
+        urlPDFAprovado: extrairUrlHyperlink(n.UrlPDFAprovado),
         processado: !!n.Processado
       };
     });
