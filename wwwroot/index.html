@@ -4221,12 +4221,20 @@ function renderArvoreContratos(arvore) {
                 <div style="padding:8px 6px 6px;display:flex;flex-direction:column;gap:8px">
                   ${(un.fornecedores || []).map(function(forn){
                     var contratos = forn.contratos || [];
-                    var todosCancelados = contratos.length > 0 && contratos.every(function(c){ return c.status === 'Cancelado'; });
-                    var corPasta = todosCancelados ? '#DC2626' : '#3B82F6';
-                    // Badge de status (mesmo estilo do card individual): Ativo verde, Cancelado vermelho
-                    var statusLabel = todosCancelados ? 'Cancelado' : 'Ativo';
-                    var corStatus = todosCancelados ? '#DC2626' : '#10B981';
-                    // Acao do botao: se TODOS cancelados → Reativar, senao → Cancelar
+                    var qtdCancelados = contratos.filter(function(c){ return c.status === 'Cancelado'; }).length;
+                    var qtdTotal = contratos.length;
+                    var todosCancelados = qtdTotal > 0 && qtdCancelados === qtdTotal;
+                    var parcial = qtdCancelados > 0 && qtdCancelados < qtdTotal;
+                    // Cor da pasta + badge: VERDE (todos ativos), AMARELO (parcial), VERMELHO (todos cancelados)
+                    var corPasta, statusLabel, corStatus;
+                    if (todosCancelados) {
+                      corPasta = '#DC2626'; statusLabel = 'Cancelado'; corStatus = '#DC2626';
+                    } else if (parcial) {
+                      corPasta = '#F59E0B'; statusLabel = 'Ativo Parcialmente ('+(qtdTotal-qtdCancelados)+'/'+qtdTotal+')'; corStatus = '#F59E0B';
+                    } else {
+                      corPasta = '#3B82F6'; statusLabel = 'Ativo'; corStatus = '#10B981';
+                    }
+                    // Acao do botao: se TODOS cancelados → Reativar todos. Caso contrario (ativo OU parcial) → Cancelar todos.
                     var acaoBatch = todosCancelados ? 'reativar' : 'cancelar';
                     var labelBatch = todosCancelados ? '↻ Reativar todos' : '✕ Cancelar todos';
                     var corBtn = todosCancelados ? '#10B981' : '#DC2626';
