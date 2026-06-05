@@ -358,12 +358,43 @@ const PROMPT_VIGENCIA = [
   'APENAS O JSON. SEM EXPLICACOES ADICIONAIS, SEM MARKDOWN.'
 ].join('\n');
 
+// PALAVRAS-CHAVE DE VIGENCIA (sem acentos — normalizamos o texto antes de buscar).
+// Se o texto NAO contem NENHUMA delas, eh quase certeza que nao tem clausula
+// de vigencia (documentos cadastrais, recibos). Pulamos o Claude nesses casos.
+const PALAVRAS_VIGENCIA = [
+  'vigencia', 'vigora', 'vigorara',
+  'prazo', 'validade', 'valido', 'valida',
+  'duracao',
+  'renovacao', 'renovado', 'renovar', 'renova-se',
+  'prorrogacao', 'prorrogado', 'prorrogar',
+  'indeterminado', 'determinado',
+  'rescisao', 'rescindir',
+  ' meses', ' anos',
+  'cancelamento', 'extincao',
+  'termino', 'expira'
+];
+
+function normalizarParaBusca(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function temPalavrasChaveVigencia(texto) {
+  if (!texto) return false;
+  const t = normalizarParaBusca(texto);
+  for (const p of PALAVRAS_VIGENCIA) {
+    if (t.indexOf(p) !== -1) return true;
+  }
+  return false;
+}
+
 async function extrairVigenciaIA(texto, opts) {
   opts = opts || {};
   const anthropic = getAnthropic();
-  // Limita o texto pra economizar tokens: pega comeco + fim (vigencia costuma estar nesses lugares)
-  const textoLimitado = texto.length > 20000
-    ? texto.slice(0, 12000) + '\n\n[...TRUNCADO...]\n\n' + texto.slice(-8000)
+  // Trunca pra economizar tokens. Pega comeco (preambulo + qualificacao das partes)
+  // + final (assinaturas + clausula de vigencia geralmente esta nas ultimas paginas).
+  // Era 20k chars (~8k tokens). Agora 5k chars (~2k tokens) — economia ~60%.
+  const textoLimitado = texto.length > 5000
+    ? texto.slice(0, 3500) + '\n\n[...TRUNCADO MEIO DO DOCUMENTO...]\n\n' + texto.slice(-1500)
     : texto;
 
   const modelo = opts.modelo || 'claude-haiku-4-5-20251001';
@@ -401,6 +432,18 @@ async function extrairVigenciaIA(texto, opts) {
 async function extrairVigenciaInteligente(texto) {
   if (!texto || !texto.trim()) {
     return { naoEncontrou: true, motivo: 'texto vazio (PDF scaneado sem OCR ou arquivo corrompido)', _modelo: 'none' };
+  }
+  // PRE-FILTRO: se o texto NAO tem nenhuma palavra-chave de vigencia, pula o Claude.
+  // Economia gigante em documentos cadastrais/comunicados que passaram pelo filtro de nome.
+  if (!temPalavrasChaveVigencia(texto)) {
+    return {
+      naoEncontrou: true,
+      motivo: 'pre-filtro regex: nenhuma palavra-chave de vigencia (vigencia/prazo/vigora/renovacao/etc) encontrada no texto',
+      _modelo: 'pre-filtro',
+      _tokensIn: 0,
+      _tokensOut: 0,
+      _semClaude: true
+    };
   }
   let r = await extrairVigenciaIA(texto, { modelo: 'claude-haiku-4-5-20251001' });
   if (r && r.confidence === 'baixo' && !r.naoEncontrou) {
@@ -521,15 +564,14 @@ function classificarPath(ancestors) {
 }
 
 // ============================================================================
-// FILTRO DE RELEVANCIA — economiza tokens Claude pulando arquivos que claramente
-// NAO sao contratos comerciais (docs cadastrais, certidoes, emails, etc).
+// FILTRO DE RELEVANCIA — economiza tokens Claude pulando arquivos cadastrais.
 // ============================================================================
 const PATTERNS_IGNORAR_CONTRATO = [
   /documentos[_ ]unificados/i,
-  /(^|[ _-])cnpj([_ .-]|$)/i,             // "CNPJ_", " CNPJ ", "-CNPJ.pdf"
-  /cart[aã]o[_ -]?cnpj/i,                 // "CARTÃO CNPJ" / "cartao CNPJ"
+  /(^|[ _-])cnpj([_ .-]|$)/i,
+  /cart[aã]o[_ -]?cnpj/i,
   /(^|[ _-])contrato[_ ]social/i,
-  /estatuto[_ -]?social/i,                // "estatuto e ata consolidado"
+  /estatuto[_ -]?social/i,
   /\bestatuto[_ -]?e[_ -]?ata/i,
   /inscri[cç][aã]o[_ -]?municipal/i,
   /inscri[cç][aã]o[_ -]?estadual/i,
@@ -569,6 +611,8 @@ module.exports = {
   normalizeStr,
   eRelevantePraContrato,
   PATTERNS_IGNORAR_CONTRATO,
+  PALAVRAS_VIGENCIA,
+  temPalavrasChaveVigencia,
   ROOT_FOLDER_PATH,
   LIST_CONTRATOS
 };
