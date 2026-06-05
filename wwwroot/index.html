@@ -4201,16 +4201,20 @@ function renderArvoreContratos(arvore) {
   if (!arvore || !arvore.length) {
     return '<div class="card" style="text-align:center;padding:30px"><div class="muted">Nenhum contrato encontrado com esses filtros.</div></div>';
   }
+  // ID estavel pra detalhes: serve pra preservar estado open/closed entre re-renders
+  function detId(parts) { return 'det-' + parts.join('|').replace(/[^A-Za-z0-9|]/g, '_'); }
   return arvore.map(function(dir) {
+    var idDir = detId([dir.diretoria]);
     return `
-      <details style="background:#fff;border:1px solid var(--cinza-borda);border-radius:6px;margin-bottom:10px">
+      <details id="${idDir}" data-det-key="${dir.diretoria}" style="background:#fff;border:1px solid var(--cinza-borda);border-radius:6px;margin-bottom:10px">
         <summary style="padding:12px 14px;cursor:pointer;font-weight:600;color:var(--azul-escuro);background:#F8FAFC">
           ${iconePasta('#3B82F6')} ${dir.diretoria} <span class="small muted">(${dir.total})</span>
         </summary>
         <div style="padding:8px 14px 14px">
           ${(dir.unidades || []).map(function(un){
+            var idUn = detId([dir.diretoria, un.unidade]);
             return `
-              <details style="margin-top:8px">
+              <details id="${idUn}" data-det-key="${dir.diretoria}|${un.unidade}" style="margin-top:8px">
                 <summary style="padding:6px 10px;cursor:pointer;font-weight:500;color:#374151;background:#F1F5F9;border-radius:4px">
                   ${iconePasta('#3B82F6')} ${un.unidade} <span class="small muted">(${un.total})</span>
                 </summary>
@@ -4230,8 +4234,10 @@ function renderArvoreContratos(arvore) {
                     var fEsc = String(forn.fornecedor).replace(/"/g,'&quot;').replace(/&/g,'&amp;');
                     var dEsc = String(dir.diretoria).replace(/"/g,'&quot;').replace(/&/g,'&amp;');
                     var uEsc = String(un.unidade).replace(/"/g,'&quot;').replace(/&/g,'&amp;');
+                    var idForn = detId([dir.diretoria, un.unidade, forn.fornecedor]);
+                    var fornKey = dir.diretoria + '|' + un.unidade + '|' + forn.fornecedor;
                     return `
-                      <details style="padding:0;background:#FAFAFA;border-radius:4px">
+                      <details id="${idForn}" data-det-key="${fornKey.replace(/"/g,'&quot;')}" style="padding:0;background:#FAFAFA;border-radius:4px">
                         <summary style="padding:8px 12px;cursor:pointer;font-weight:600;color:#1F2937;list-style:none;display:flex;align-items:center;gap:6px">
                           <span style="font-size:11px;color:#6B7280;width:10px">▶</span>${iconePasta(corPasta)} ${forn.fornecedor} <span class="small muted">(${contratos.length})</span>
                           <span style="flex:1"></span>
@@ -4268,6 +4274,8 @@ function iconePasta(cor) {
 
 // Cancelar/Reativar TODOS os contratos de um fornecedor de uma vez.
 // Disparado pelo botao "Cancelar todos" / "Reativar todos" no summary do fornecedor na arvore.
+// Mostra modal de progresso, preserva estado open/closed da arvore, e da scroll de volta
+// pra pasta tocada apos o reload.
 async function cancelarFornecedorClick(btn) {
   var diretoria = btn.getAttribute('data-diretoria');
   var unidade = btn.getAttribute('data-unidade');
@@ -4277,10 +4285,38 @@ async function cancelarFornecedorClick(btn) {
   var msg = verbo + ' os contratos de "' + fornecedor + '" (' + diretoria + ' / ' + unidade + ')?\n\nEssa acao afeta TODOS os documentos da pasta.';
   if (!confirm(msg)) return;
 
-  var labelOriginal = btn.textContent.trim();
-  btn.disabled = true;
-  btn.textContent = '...';
-  btn.style.opacity = '0.6';
+  // 1. Captura estado atual da arvore (quais <details> estao abertos) pra restaurar depois
+  var detsAbertos = [];
+  try {
+    var todosDets = document.querySelectorAll('details[data-det-key]');
+    for (var i = 0; i < todosDets.length; i++) {
+      if (todosDets[i].open) detsAbertos.push(todosDets[i].getAttribute('data-det-key'));
+    }
+    // Garante que o caminho ate a pasta tocada vai ficar aberto
+    var keyForn = diretoria + '|' + unidade + '|' + fornecedor;
+    var keyUn = diretoria + '|' + unidade;
+    var keyDir = diretoria;
+    if (detsAbertos.indexOf(keyForn) < 0) detsAbertos.push(keyForn);
+    if (detsAbertos.indexOf(keyUn)   < 0) detsAbertos.push(keyUn);
+    if (detsAbertos.indexOf(keyDir)  < 0) detsAbertos.push(keyDir);
+  } catch (e) { /* nao critico */ }
+
+  // 2. Modal de progresso (spinner + texto)
+  var cor = acao === 'cancelar' ? '#DC2626' : '#10B981';
+  var verboIng = acao === 'cancelar' ? 'Cancelando' : 'Reativando';
+  var html =
+    '<div style="text-align:center;padding:24px 12px">' +
+    '  <div style="margin-bottom:18px">' +
+    '    <div style="display:inline-block;width:48px;height:48px;border:5px solid #E5E7EB;border-top-color:' + cor + ';border-radius:50%;animation:spinFornecedor 0.8s linear infinite"></div>' +
+    '  </div>' +
+    '  <h3 style="margin:0 0 8px;color:' + cor + ';font-size:18px">' + verboIng + ' contratos...</h3>' +
+    '  <div style="color:#6B7280;font-size:14px;margin-bottom:4px"><b>' + fornecedor + '</b></div>' +
+    '  <div style="color:#9CA3AF;font-size:12px">' + diretoria + ' / ' + unidade + '</div>' +
+    '  <div id="cancelarFornStatus" style="margin-top:18px;padding:10px;background:#F9FAFB;border-radius:6px;font-size:13px;color:#374151">Processando lote no SharePoint...</div>' +
+    '</div>' +
+    '<style>@keyframes spinFornecedor { to { transform: rotate(360deg); } }</style>';
+  if (typeof openModal === 'function') openModal(html);
+
   try {
     var r = await fetch('/api/CancelarFornecedor', {
       method: 'POST',
@@ -4290,28 +4326,53 @@ async function cancelarFornecedorClick(btn) {
     });
     var j = await r.json();
     if (!r.ok) {
+      if (typeof closeModal === 'function') closeModal();
       alert('Erro: ' + (j.error || ('HTTP ' + r.status)));
-      btn.disabled = false;
-      btn.textContent = labelOriginal;
-      btn.style.opacity = '1';
       return;
     }
+
+    // Atualiza modal pra "concluido" antes de recarregar
+    var statusEl = document.getElementById('cancelarFornStatus');
+    if (statusEl) {
+      var msgOk = acao === 'cancelar'
+        ? ('✓ ' + j.atualizados + ' de ' + j.total + ' contratos cancelados')
+        : ('✓ ' + j.atualizados + ' de ' + j.total + ' contratos reativados');
+      statusEl.innerHTML = '<span style="color:#10B981;font-weight:600">' + msgOk + '</span><br><span style="color:#6B7280">Atualizando árvore...</span>';
+    }
+
+    // Recarrega a arvore preservando estado
+    if (typeof carregarContratosReais === 'function') {
+      await carregarContratosReais();
+    }
+
+    // 3. Re-expande os details que estavam abertos + a pasta tocada
+    try {
+      for (var k = 0; k < detsAbertos.length; k++) {
+        var dets = document.querySelectorAll('details[data-det-key="' + detsAbertos[k].replace(/"/g,'\\"') + '"]');
+        for (var d = 0; d < dets.length; d++) dets[d].open = true;
+      }
+      // Scroll suave ate a pasta tocada
+      var alvoSel = 'details[data-det-key="' + (diretoria + '|' + unidade + '|' + fornecedor).replace(/"/g,'\\"') + '"]';
+      var alvo = document.querySelector(alvoSel);
+      if (alvo) {
+        alvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Pisca a pasta tocada pra ajudar a localizar
+        alvo.style.transition = 'background-color 1.4s';
+        var corOriginal = alvo.style.backgroundColor;
+        alvo.style.backgroundColor = acao === 'cancelar' ? '#FEE2E2' : '#D1FAE5';
+        setTimeout(function(){ alvo.style.backgroundColor = corOriginal; }, 1400);
+      }
+    } catch (e) { /* nao critico */ }
+
+    if (typeof closeModal === 'function') closeModal();
     if (typeof toast === 'function') {
       toast(acao === 'cancelar'
         ? ('Cancelados ' + j.atualizados + ' de ' + j.total + ' contratos')
         : ('Reativados ' + j.atualizados + ' de ' + j.total + ' contratos'), 'sucesso');
     }
-    // Recarrega a arvore pra refletir as mudancas
-    if (typeof carregarContratosReais === 'function') {
-      await carregarContratosReais();
-    } else {
-      location.reload();
-    }
   } catch (e) {
+    if (typeof closeModal === 'function') closeModal();
     alert('Falha: ' + e.message);
-    btn.disabled = false;
-    btn.textContent = labelOriginal;
-    btn.style.opacity = '1';
   }
 }
 
