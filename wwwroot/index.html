@@ -1548,7 +1548,10 @@ window.solChat = (function() {
         '* { box-sizing: border-box; }'+
         'html, body { margin: 0; padding: 0; }'+
         'body { font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #2C3E50; line-height: 1.55; background: #fff; }'+
-        '.page { padding: 22mm 18mm 24mm; min-height: 100vh; position: relative; }'+
+        /* Flexbox no .page empurra o footer pro fundo SEM usar position:absolute (que sobrepoe conteudo) */
+        '.page { padding: 22mm 18mm 14mm; min-height: 100vh; position: relative; display: flex; flex-direction: column; }'+
+        '.page-body { flex: 1 0 auto; }'+
+        '.page > .brand-footer { margin-top: 24px; }'+
         /* Cabecalho institucional */
         '.brand-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 3px solid #1F4E79; margin-bottom: 24px; }'+
         '.brand-left img { height: 48px; width: auto; }'+
@@ -1583,8 +1586,8 @@ window.solChat = (function() {
         '.content ul, .content ol { margin: 8px 0 8px 24px; }'+
         '.content li { margin: 3px 0; }'+
         '.content b, .content strong { color: #1F4E79; }'+
-        /* Rodape institucional */
-        '.brand-footer { position: absolute; bottom: 14mm; left: 18mm; right: 18mm; padding-top: 10px; border-top: 2px solid #1F4E79; font-size: 9px; color: #647883; text-align: center; line-height: 1.5; }'+
+        /* Rodape institucional - flow normal (flex-shrink:0 garante que nao reduz) */
+        '.brand-footer { flex-shrink: 0; padding-top: 10px; border-top: 2px solid #1F4E79; font-size: 9px; color: #647883; text-align: center; line-height: 1.5; }'+
         '.brand-footer .cities { color: #1F4E79; font-weight: 600; font-size: 10px; }'+
         '.brand-footer .url { color: #27AAE1; font-weight: 600; }'+
         /* Marca dagua sutil */
@@ -1605,29 +1608,31 @@ window.solChat = (function() {
         '</div>'+
         '<div class="watermark">SAN</div>'+
         '<div class="page">'+
-          /* Cabecalho com logo Pronep */
-          '<div class="brand-header">'+
-            '<div class="brand-left"><img src="'+LOGO_URL+'" alt="Pronep Life Care"></div>'+
-            '<div class="brand-right"><b>Pronep Life Care</b>Sistema de Aprovação de Notas Fiscais<br>Documento gerado automaticamente</div>'+
-          '</div>'+
-          /* Titulo */
-          '<div class="report-title">'+
-            '<div class="subtitle">Relatório SAN</div>'+
-            '<h1>Assistente IA · Análise de Notas Fiscais</h1>'+
-          '</div>'+
-          /* Bloco identificacao */
-          '<div class="id-block">'+
-            '<div class="id-row">'+
-              '<div><b>Solicitante</b><span>'+(nomeUsuario || '—')+'</span></div>'+
-              (emailUsuario ? '<div><b>E-mail</b><span>'+emailUsuario+'</span></div>' : '')+
-              '<div><b>Data / Hora</b><span>'+dataStr+'</span></div>'+
+          '<div class="page-body">'+
+            /* Cabecalho com logo Pronep */
+            '<div class="brand-header">'+
+              '<div class="brand-left"><img src="'+LOGO_URL+'" alt="Pronep Life Care"></div>'+
+              '<div class="brand-right"><b>Pronep Life Care</b>Sistema de Aprovação de Notas Fiscais<br>Documento gerado automaticamente</div>'+
             '</div>'+
+            /* Titulo */
+            '<div class="report-title">'+
+              '<div class="subtitle">Relatório SAN</div>'+
+              '<h1>Assistente IA · Análise de Notas Fiscais</h1>'+
+            '</div>'+
+            /* Bloco identificacao */
+            '<div class="id-block">'+
+              '<div class="id-row">'+
+                '<div><b>Solicitante</b><span>'+(nomeUsuario || '—')+'</span></div>'+
+                (emailUsuario ? '<div><b>E-mail</b><span>'+emailUsuario+'</span></div>' : '')+
+                '<div><b>Data / Hora</b><span>'+dataStr+'</span></div>'+
+              '</div>'+
+            '</div>'+
+            /* Pergunta */
+            (pergunta ? '<div class="query-box"><div class="query-label">📋 Consulta realizada</div><div class="query-text">"'+pergunta.replace(/</g,'&lt;')+'"</div></div>' : '')+
+            /* Conteudo */
+            '<div class="content">'+conteudoHtml+'</div>'+
           '</div>'+
-          /* Pergunta */
-          (pergunta ? '<div class="query-box"><div class="query-label">📋 Consulta realizada</div><div class="query-text">"'+pergunta.replace(/</g,'&lt;')+'"</div></div>' : '')+
-          /* Conteudo */
-          '<div class="content">'+conteudoHtml+'</div>'+
-          /* Rodape institucional */
+          /* Rodape institucional - sempre no fundo via flexbox no .page */
           '<div class="brand-footer">'+
             '<div class="cities">Rio de Janeiro · São Paulo · Espírito Santo</div>'+
             '<div>Gerado pela SAN — assistente IA do sistema de Aprovação de NF Pronep · <span class="url">www.pronep.com.br</span></div>'+

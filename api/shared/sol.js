@@ -99,13 +99,13 @@ function getLoadErrors() {
 const VIEW_SCOPES = {
   'fila-aprovacao': {
     titulo: 'Fila de Aprovacao',
-    foco: 'analisar fila pendente, propor aprovar/rejeitar, detectar anomalias e responder duvidas sobre as NFs do usuario.',
-    tools: ['listar_fila','listar_aprovadas','detalhes_nf','agregar_por_fornecedor','detectar_anomalia','propor_aprovacao','propor_rejeicao']
+    foco: 'analisar fila pendente, propor aprovar/rejeitar, detectar anomalias e responder duvidas sobre as NFs do usuario. Tambem responde sobre CONTRATOS quando o usuario perguntar — voce tem tools de contratos disponiveis aqui.',
+    tools: ['listar_fila','listar_aprovadas','detalhes_nf','agregar_por_fornecedor','detectar_anomalia','propor_aprovacao','propor_rejeicao','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo']
   },
   'aprovadas': {
     titulo: 'Notas Aprovadas',
-    foco: 'RELATORIOS pro financeiro, agregacoes por fornecedor/periodo/diretoria, abrir PDFs de NFs aprovadas e propor marcar como processado. Aqui NAO HA aprovar/rejeitar — essas NFs ja passaram.',
-    tools: ['listar_aprovadas','detalhes_nf','agregar_por_fornecedor','abrir_nf','propor_marcar_processado']
+    foco: 'RELATORIOS pro financeiro, agregacoes por fornecedor/periodo/diretoria, abrir PDFs de NFs aprovadas e propor marcar como processado. Aqui NAO HA aprovar/rejeitar — essas NFs ja passaram. Tambem responde sobre CONTRATOS quando o usuario perguntar — voce tem tools de contratos disponiveis aqui.',
+    tools: ['listar_aprovadas','detalhes_nf','agregar_por_fornecedor','abrir_nf','propor_marcar_processado','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo']
   },
   'lancamento': {
     titulo: 'Lancamento de NF',
