@@ -1319,10 +1319,18 @@ window.solChat = (function() {
         if (Array.isArray(data.acoes_propostas) && data.acoes_propostas.length > 0) {
           var ac = data.acoes_propostas[0];
           if (ac.acao_imediata === 'abrir_pdf' && ac.id) {
-            // Abre o PDF direto em nova aba (acao nao-destrutiva)
+            // Abre o PDF da NF direto em nova aba (acao nao-destrutiva)
             setTimeout(function(){
               window.open('/api/AbrirPdfDaNota?id=' + encodeURIComponent(ac.id), '_blank');
             }, 200);
+          } else if (ac.acao_imediata === 'abrir_contrato' && ac.id) {
+            // Abre o PDF do CONTRATO direto em nova aba
+            setTimeout(function(){
+              window.open('/api/AbrirContrato?id=' + encodeURIComponent(ac.id), '_blank');
+            }, 200);
+          } else if (ac.acao_imediata && ac.url) {
+            // Generico - segue a URL retornada
+            setTimeout(function(){ window.open(ac.url, '_blank'); }, 200);
           } else {
             // Acao com confirmacao (aprovacao, rejeicao, processado): abre modal
             setTimeout(function(){ abrirModalAcao(ac); }, 350);

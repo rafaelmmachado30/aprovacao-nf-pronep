@@ -100,12 +100,12 @@ const VIEW_SCOPES = {
   'fila-aprovacao': {
     titulo: 'Fila de Aprovacao',
     foco: 'analisar fila pendente, propor aprovar/rejeitar, detectar anomalias e responder duvidas sobre as NFs do usuario. Tambem responde sobre CONTRATOS quando o usuario perguntar — voce tem tools de contratos disponiveis aqui.',
-    tools: ['listar_fila','listar_aprovadas','detalhes_nf','agregar_por_fornecedor','detectar_anomalia','propor_aprovacao','propor_rejeicao','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo']
+    tools: ['listar_fila','listar_aprovadas','detalhes_nf','agregar_por_fornecedor','detectar_anomalia','propor_aprovacao','propor_rejeicao','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
   },
   'aprovadas': {
     titulo: 'Notas Aprovadas',
     foco: 'RELATORIOS pro financeiro, agregacoes por fornecedor/periodo/diretoria, abrir PDFs de NFs aprovadas e propor marcar como processado. Aqui NAO HA aprovar/rejeitar — essas NFs ja passaram. Tambem responde sobre CONTRATOS quando o usuario perguntar — voce tem tools de contratos disponiveis aqui.',
-    tools: ['listar_aprovadas','detalhes_nf','agregar_por_fornecedor','abrir_nf','propor_marcar_processado','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo']
+    tools: ['listar_aprovadas','detalhes_nf','agregar_por_fornecedor','abrir_nf','propor_marcar_processado','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
   },
   'lancamento': {
     titulo: 'Lancamento de NF',
@@ -120,8 +120,8 @@ const VIEW_SCOPES = {
   'configuracoes': { titulo: 'Configuracoes', foco: 'apenas orientacao sobre opcoes de admin/usuario. Sem tools.', tools: [] },
   'contratos':    {
     titulo: 'Contratos',
-    foco: 'consulta da base de contratos vigentes e historicos da Pronep. Responda duvidas sobre vigencias, valores, fornecedores, vencimentos. Use as tools de contratos sempre que o usuario perguntar algo factual sobre contratos. NAO ha aprovar/rejeitar contratos aqui.',
-    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo']
+    foco: 'consulta da base de contratos vigentes e historicos da Pronep. Responda duvidas sobre vigencias, valores, fornecedores, vencimentos. Use as tools de contratos sempre que o usuario perguntar algo factual sobre contratos. NAO ha aprovar/rejeitar contratos aqui. CRITICO: quando o usuario pedir "link", "PDF", "abre" ou "me mostra" um contrato especifico, chame detalhes_contrato + abrir_contrato na mesma turn — o frontend abre automaticamente em nova aba. Resposta breve tipo "Abrindo o contrato da BMS de R$3.194,03..."',
+    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
   }
 };
 
@@ -435,6 +435,20 @@ const TOOLS = [
         properties: {
           dias: { type: 'integer', description: 'Janela em dias (default 30). Ex: 7, 30, 60, 90' },
           incluir_vencidos: { type: 'boolean', description: 'Se true, inclui tambem contratos ja vencidos (default false)' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'abrir_contrato',
+      description: 'Abre o PDF de UM contrato especifico em nova aba. Use quando o usuario pedir "me da o link do contrato X", "abre o contrato Y", "me mostra o PDF do contrato da BMS". O frontend abre automaticamente em nova aba. Sempre chame detalhes_contrato ou listar_contratos antes pra obter o id correto. NAO precisa de confirmacao — eh acao nao-destrutiva (so visualiza).',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'spListItemId do contrato (retornado por listar_contratos ou detalhes_contrato)' },
+          busca: { type: 'string', description: 'Substring pra encontrar o contrato (fornecedor ou titulo) - usa se ainda nao tem o id' }
         }
       }
     }
@@ -991,6 +1005,25 @@ async function tool_agregar_contratos(args, ctx) {
   };
 }
 
+async function tool_abrir_contrato(args, ctx) {
+  // Resolve id se vier so a busca
+  let id = args.id;
+  let fornecedor = null;
+  if (!id && args.busca) {
+    const det = await tool_detalhes_contrato({ busca: args.busca }, ctx);
+    if (det && det.erro) return det;
+    if (det && det.id) { id = det.id; fornecedor = det.fornecedor; }
+  }
+  if (!id) return { erro: 'precisa de id ou busca pra abrir o contrato' };
+  return {
+    acao_imediata: 'abrir_contrato',
+    id: id,
+    url: '/api/AbrirContrato?id=' + encodeURIComponent(id),
+    fornecedor: fornecedor,
+    confirmar_no_frontend: false
+  };
+}
+
 async function tool_contratos_vencendo(args, ctx) {
   if (!ctx.gr.listContratosId) return { erro: 'Lista PRONEP-NF-Contratos nao disponivel' };
   const dias = args.dias || 30;
@@ -1039,7 +1072,8 @@ const TOOL_IMPL = {
   listar_contratos: tool_listar_contratos,
   detalhes_contrato: tool_detalhes_contrato,
   agregar_contratos: tool_agregar_contratos,
-  contratos_vencendo: tool_contratos_vencendo
+  contratos_vencendo: tool_contratos_vencendo,
+  abrir_contrato: tool_abrir_contrato
 };
 
 // =============================================================================
