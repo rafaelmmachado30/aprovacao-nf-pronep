@@ -113,9 +113,17 @@ const VIEW_SCOPES = {
     tools: []
   },
   'fornecedores': { titulo: 'Fornecedores', foco: 'apenas orientacao sobre como usar a tela de cadastro de fornecedores. Sem tools.', tools: [] },
-  'dashboard':    { titulo: 'Dashboard',    foco: 'apenas orientacao sobre os indicadores e graficos exibidos. Sem tools.', tools: [] },
+  'dashboard':    {
+    titulo: 'Dashboard',
+    foco: 'orientacao sobre os indicadores e graficos exibidos. Tambem RESPONDE sobre NFs (fila, aprovadas, fornecedores) e CONTRATOS (vencimentos, valores, fornecedores) usando as tools disponiveis. CRITICO: NUNCA diga que contratos sao gerenciados fora do sistema - eles ESTAO no proprio sistema na view Contratos.',
+    tools: ['listar_fila','listar_aprovadas','detalhes_nf','agregar_por_fornecedor','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
+  },
   'rejeitadas':   { titulo: 'Notas Rejeitadas', foco: 'apenas orientacao sobre o que aparece aqui. Sem tools.', tools: [] },
-  'minhas-nfs':   { titulo: 'Minhas NFs', foco: 'orientacao + leitura de aprovadas. Tools de leitura ok, sem acoes.', tools: ['listar_aprovadas','detalhes_nf'] },
+  'minhas-nfs':   {
+    titulo: 'Minhas NFs',
+    foco: 'orientacao + leitura de aprovadas. Tambem RESPONDE sobre CONTRATOS quando o user perguntar (vencimentos, valores, fornecedores). Tools de leitura ok, sem acoes destrutivas.',
+    tools: ['listar_aprovadas','detalhes_nf','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
+  },
   'rejeitadas-minhas': { titulo: 'Minhas NFs Rejeitadas', foco: 'apenas orientacao. Sem tools.', tools: [] },
   'configuracoes': { titulo: 'Configuracoes', foco: 'apenas orientacao sobre opcoes de admin/usuario. Sem tools.', tools: [] },
   'contratos':    {
