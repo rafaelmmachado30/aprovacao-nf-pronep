@@ -1183,14 +1183,23 @@ window.solChat = (function() {
         return '<div class="sol-msg"><div class="sol-msg-user">Você</div><div class="sol-msg-content">'+md(m.content)+'</div></div>';
       }
       var actions = (m.actions||[]).map(renderAcao).join('');
-      // So oferece Exportar PDF se a resposta parecer um relatorio
-      // (contem tabela markdown OU eh longa OU tem lista com >2 itens)
+      // So oferece Exportar PDF quando o user PEDIU EXPLICITAMENTE (palavras-chave na pergunta anterior).
+      // Antes a heuristica era por tamanho/formato da resposta, mas mostrava botao em toda resposta longa.
+      // Agora: procura a pergunta anterior do user e checa palavras-chave de relatorio/exportar/PDF.
       var ehRelatorio = false;
       if (m.content && !m.content.startsWith('❌')) {
-        var c = m.content;
-        ehRelatorio = c.includes('|') && c.match(/\|.*\|/) ||
-                      c.length > 300 ||
-                      (c.match(/^[-*]\s+/gm) || []).length >= 3;
+        // Acha a pergunta do user imediatamente antes desta resposta da SAN
+        var revIdx = state.history.length - 1 - idx;  // idx eh do array reverso; revIdx do original
+        var perguntaAnterior = '';
+        for (var k = revIdx - 1; k >= 0; k--) {
+          if (state.history[k] && state.history[k].role === 'user') { perguntaAnterior = state.history[k].content || ''; break; }
+        }
+        var lower = String(perguntaAnterior).toLowerCase();
+        // Palavras-chave - se ALGUMA aparecer, mostra botao
+        var keywords = ['relatorio','relatório','relatorios','relatórios','reporte','report','exporta','imprim','pdf','documento','planilha','baixar','download'];
+        for (var w = 0; w < keywords.length; w++) {
+          if (lower.indexOf(keywords[w]) >= 0) { ehRelatorio = true; break; }
+        }
       }
       var exportBtn = ehRelatorio
         ? '<div class="sol-msg-actions"><button class="sol-export-btn" onclick="solChat.exportarPDF('+idx+')">📄 Exportar PDF</button></div>'
