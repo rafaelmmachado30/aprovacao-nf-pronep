@@ -701,6 +701,30 @@
   .san-fab.minimized { opacity: 0.55; transform: scale(0.78); }
   .san-fab.minimized:hover { opacity: 1; transform: scale(1); }
   .san-fab.hidden { display: none !important; }
+  /* Estado proativo: cor amarela + anel pulsando quando ha pendencias */
+  .san-fab.has-pending {
+    background: linear-gradient(135deg, #F59E0B 0%, #FBBF24 100%);
+    box-shadow: 0 6px 18px rgba(245,158,11,0.5);
+    animation: sanFabPulse 1.8s infinite;
+  }
+  .san-fab.has-pending::after { border-color: transparent transparent #FBBF24 transparent; }
+  .san-fab.has-pending:hover { box-shadow: 0 10px 28px rgba(245,158,11,0.7); }
+  .san-fab.has-pending.minimized { opacity: 0.85; }
+  @keyframes sanFabPulse {
+    0%   { box-shadow: 0 6px 18px rgba(245,158,11,0.5), 0 0 0 0   rgba(245,158,11,0.6); }
+    70%  { box-shadow: 0 6px 18px rgba(245,158,11,0.5), 0 0 0 16px rgba(245,158,11,0); }
+    100% { box-shadow: 0 6px 18px rgba(245,158,11,0.5), 0 0 0 0   rgba(245,158,11,0); }
+  }
+  /* Badge com contador de pendencias */
+  .san-fab .fab-badge {
+    position: absolute; top: -6px; right: -6px;
+    min-width: 22px; height: 22px; padding: 0 6px;
+    background: #DC2626; color: #fff; border: 2px solid #fff;
+    border-radius: 11px; font-size: 11px; font-weight: 700;
+    display: none; align-items: center; justify-content: center;
+    z-index: 1; line-height: 1;
+  }
+  .san-fab.has-pending .fab-badge { display: inline-flex; }
   /* 3 pontinhos animados */
   .san-fab .fab-dots { display: inline-flex; gap: 4px; }
   .san-fab .fab-dots span {
@@ -1285,7 +1309,62 @@ window.solChat = (function() {
       state.historicoHidratado = true;
       hidratarHistorico().catch(function(e){ console.warn('[SAN] hidratar:', e && e.message); });
     }
+    // SAN PROATIVA: ao abrir com pendencias, injeta saudacao se ainda nao injetou nessa sessao
+    if (state.open && state.pendencias && state.pendencias.count > 0 && !state.saudacaoInjetada) {
+      state.saudacaoInjetada = true;
+      var p = state.pendencias;
+      // Constroi mensagem com saudacao + sugestoes clicaveis (botoes inline no markdown)
+      var sugBtns = '';
+      if (Array.isArray(p.sugestoes) && p.sugestoes.length) {
+        sugBtns = '\n\n' + p.sugestoes.map(function(s){
+          return '<button class="san-sug-btn" data-sug="' + String(s).replace(/"/g, '&quot;') + '" onclick="solChat.sendText(this.getAttribute(\'data-sug\'))" style="background:#EFF6FF;border:1px solid #93C5FD;color:#1E3A8A;padding:6px 12px;margin:4px 4px 0 0;border-radius:14px;cursor:pointer;font-size:12px;font-weight:500">' + String(s).replace(/</g, '&lt;') + '</button>';
+        }).join('');
+      }
+      state.history.push({
+        role: 'assistant',
+        content: p.saudacao + sugBtns,
+        proativa: true
+      });
+      // Tira o pulse do FAB (notificacao foi "vista")
+      try {
+        var f = document.getElementById('san-fab');
+        if (f) f.classList.remove('has-pending');
+      } catch(e){}
+      // Marca como visto na sessao - nao mostra de novo ate a proxima janela de polling
+      try { sessionStorage.setItem('sanPendenciasVistoEm', String(Date.now())); } catch(e){}
+    }
     refresh();
+  }
+
+  // SAN PROATIVA: polling de pendencias do user.
+  // - 1a chamada: 4 segundos apos init (deixa o boot da pagina respirar)
+  // - depois: a cada 5 minutos
+  // - resultado vai pra state.pendencias e FAB ganha .has-pending quando count > 0
+  async function verificarPendencias() {
+    try {
+      var r = await fetch('/api/SanNotificacoesPendentes', { credentials: 'include' });
+      if (!r.ok) return;
+      var data = await r.json();
+      state.pendencias = data;
+      var fab = document.getElementById('san-fab');
+      var badge = document.getElementById('san-fab-badge');
+      if (!fab) return;
+      if (data && data.count > 0) {
+        // Nao pulsa se o usuario ja viu a saudacao nessa sessao
+        var vistoEm = 0;
+        try { vistoEm = parseInt(sessionStorage.getItem('sanPendenciasVistoEm') || '0', 10); } catch(e){}
+        var minutosDesdeVisto = (Date.now() - vistoEm) / 60000;
+        // Re-pulsa apos 60 min mesmo na mesma sessao
+        if (!vistoEm || minutosDesdeVisto > 60) {
+          fab.classList.add('has-pending');
+          state.saudacaoInjetada = false;  // permite re-injetar saudacao
+        }
+        if (badge) badge.textContent = data.count > 99 ? '99+' : String(data.count);
+      } else {
+        fab.classList.remove('has-pending');
+        if (badge) badge.textContent = '0';
+      }
+    } catch (e) { /* silencia - polling e best-effort */ }
   }
 
   async function send() {
@@ -1402,7 +1481,7 @@ window.solChat = (function() {
     fab.id = 'san-fab';
     fab.className = 'san-fab';
     fab.title = 'Abrir SAN';
-    fab.innerHTML = '<span class="fab-label">SAN</span><div class="fab-dots"><span></span><span></span><span></span></div>';
+    fab.innerHTML = '<span class="fab-label">SAN</span><div class="fab-dots"><span></span><span></span><span></span></div><span class="fab-badge" id="san-fab-badge">0</span>';
     fab.title = 'SAN — clique pra abrir · arraste pra mover';
 
     // === Drag-to-move ===
@@ -1493,6 +1572,10 @@ window.solChat = (function() {
     // NOTA: hidratarHistorico NAO eh chamado aqui no boot — apenas quando o
     // usuario abre o chat pela primeira vez (via toggle). Evita fetch no boot
     // que pode atrasar/quebrar o loading inicial pra usuarios novos.
+
+    // SAN PROATIVA: 1a verificacao apos 4s + polling a cada 5min
+    setTimeout(function(){ verificarPendencias(); }, 4000);
+    setInterval(function(){ verificarPendencias(); }, 5 * 60 * 1000);
   }
 
   async function hidratarHistorico() {
@@ -1813,7 +1896,7 @@ window.solChat = (function() {
     fecharModal();
   }
 
-  return { mount: mount, init: init, setView: setView, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar, abrirModalAcao: abrirModalAcao, fecharModal: fecharModal, confirmarAcaoModal: confirmarAcaoModal, limparHistorico: limparHistorico, hidratarHistorico: hidratarHistorico };
+  return { mount: mount, init: init, setView: setView, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar, abrirModalAcao: abrirModalAcao, fecharModal: fecharModal, confirmarAcaoModal: confirmarAcaoModal, limparHistorico: limparHistorico, hidratarHistorico: hidratarHistorico, verificarPendencias: verificarPendencias };
 })();
 
 
