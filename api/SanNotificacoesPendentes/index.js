@@ -64,6 +64,37 @@ async function resolveSiteEListas(client) {
   return _cache;
 }
 
+// MESMA logica do AlertaContratosDiario - pra que a SAN proativa nao alerte
+// sobre contratos que ja foram notificados nessa janela (via email ou via SAN antes).
+// Retorna a janela aplicavel (30|60|90) OU null se ja foi vista OU fora do range.
+const JANELAS = [30, 60, 90];
+function escolherJanelaAplicavelContrato(diasFalta, observacoes) {
+  if (diasFalta == null || diasFalta < 0) return null;
+  if (diasFalta > 90) return null;
+  const obs = String(observacoes || '');
+  const ja = {
+    30: /_alerta_30=/.test(obs),
+    60: /_alerta_60=/.test(obs),
+    90: /_alerta_90=/.test(obs)
+  };
+  for (const j of JANELAS) {  // mais urgente primeiro
+    if (diasFalta <= j && !ja[j]) return j;
+  }
+  return null;
+}
+// Pra contratos vencidos, alerta a primeira vez e depois espera 30 dias
+function aplicavelParaContratoVencido(diasFalta, observacoes) {
+  if (diasFalta == null || diasFalta >= 0) return false;
+  const obs = String(observacoes || '');
+  const m = obs.match(/_alerta_vencido=(\d{4}-\d{2}-\d{2})/);
+  if (!m) return true;  // nunca alertou
+  // Re-alerta a cada 30 dias se nao foi resolvido
+  const ultimo = new Date(m[1] + 'T00:00:00Z');
+  const hoje = new Date(new Date().getTime() - 3*60*60*1000);
+  const diasDesde = Math.round((hoje.getTime() - ultimo.getTime()) / (24*60*60*1000));
+  return diasDesde >= 30;
+}
+
 function diasParaVencer(dataFim) {
   if (!dataFim) return null;
   const hoje = new Date(new Date().getTime() - 3*60*60*1000);
@@ -206,6 +237,10 @@ module.exports = async function (context, req) {
       nfs_pendentes_total: 0, nfs_d5: 0, nfs_rejeitadas: 0
     };
     const itensContratos = [];
+    // Pra cada contrato com pendencia ainda nao notificada nessa janela, registra
+    // o "marcador" que o front vai gravar quando o gestor abrir a SAN.
+    // Cada item: { id, janela: 30|60|90|'vencido' }
+    const marcadores = [];
     if (listContratosId && (isAdmin || minhasDiretorias.length)) {
       const all = await paginar(client, '/sites/' + siteId + '/lists/' + listContratosId + '/items?expand=fields&$top=999');
       for (const it of all) {
@@ -216,17 +251,20 @@ module.exports = async function (context, req) {
         const dias = diasParaVencer(c.DataFim);
         if (dias == null) continue;
         if (dias < 0) {
+          // Vencido: alerta primeira vez OU re-alerta a cada 30 dias
+          if (!aplicavelParaContratoVencido(dias, c.Observacoes)) continue;
           breakdown.contratos_vencidos++;
           itensContratos.push({ id: c._id, fornecedor: c.Fornecedor, dias: dias, diretoria: c.Diretoria, tipo: 'vencido' });
-        } else if (dias <= 30) {
-          breakdown.contratos_30++;
-          itensContratos.push({ id: c._id, fornecedor: c.Fornecedor, dias: dias, diretoria: c.Diretoria, tipo: 'venc_30' });
-        } else if (dias <= 60) {
-          breakdown.contratos_60++;
-          itensContratos.push({ id: c._id, fornecedor: c.Fornecedor, dias: dias, diretoria: c.Diretoria, tipo: 'venc_60' });
-        } else if (dias <= 90) {
-          breakdown.contratos_90++;
-          itensContratos.push({ id: c._id, fornecedor: c.Fornecedor, dias: dias, diretoria: c.Diretoria, tipo: 'venc_90' });
+          marcadores.push({ id: c._id, janela: 'vencido' });
+        } else {
+          // Dedup por janela: se a janela aplicavel ja foi vista (em email ou SAN), pula
+          const janela = escolherJanelaAplicavelContrato(dias, c.Observacoes);
+          if (!janela) continue;  // ja viu essa janela OU >90d
+          if (janela === 30) breakdown.contratos_30++;
+          else if (janela === 60) breakdown.contratos_60++;
+          else if (janela === 90) breakdown.contratos_90++;
+          itensContratos.push({ id: c._id, fornecedor: c.Fornecedor, dias: dias, diretoria: c.Diretoria, tipo: 'venc_' + janela });
+          marcadores.push({ id: c._id, janela: janela });
         }
       }
     }
@@ -278,6 +316,8 @@ module.exports = async function (context, req) {
           itensContratos.sort((a, b) => a.dias - b.dias).slice(0, 5),
           itensNFs.slice(0, 5)
         ),
+        // Marcadores que o front vai chamar POST pra marcar como visto apos exibir
+        marcadoresContratos: marcadores,
         user: { nome, email: emailLow, isAdmin, isGestor, diretorias: minhasDiretorias }
       }
     };

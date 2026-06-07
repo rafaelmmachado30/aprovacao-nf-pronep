@@ -1330,6 +1330,19 @@ window.solChat = (function() {
         var f = document.getElementById('san-fab');
         if (f) f.classList.remove('has-pending');
       } catch(e){}
+      // PERSISTE notificacao vista pra contratos:
+      // grava _alerta_<janela>=hoje nos contratos listados. NFs nao precisam dedup persistente.
+      // Fire-and-forget - nao bloqueia a UI.
+      if (Array.isArray(p.marcadoresContratos) && p.marcadoresContratos.length > 0) {
+        try {
+          fetch('/api/MarcarContratosNotificados', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ marcadores: p.marcadoresContratos })
+          }).catch(function(){ /* silencia - best-effort */ });
+        } catch(e){}
+      }
       // Marca como visto na sessao - nao mostra de novo ate a proxima janela de polling
       try { sessionStorage.setItem('sanPendenciasVistoEm', String(Date.now())); } catch(e){}
     }
