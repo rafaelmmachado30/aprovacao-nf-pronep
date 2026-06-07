@@ -1178,7 +1178,9 @@ window.solChat = (function() {
     var sugestoes = viewAtual === 'aprovadas'
       ? ['Quanto liberei este mês?', 'Aprovadas hoje', 'Top 5 fornecedores aprovados']
       : ['Lista minha fila por vencimento', 'NFs vencendo em D+5', 'Detecte anomalias na minha fila'];
-    var msgsHtml = state.history.slice().reverse().map(function(m, idx){
+    var msgsHtml = state.history.slice().reverse().map(function(m, idxRev){
+      // Converte idx do array reverso pra idx do array ORIGINAL pra exportarPDF nao pegar mensagem errada
+      var idx = state.history.length - 1 - idxRev;
       if (m.role === 'user') {
         return '<div class="sol-msg"><div class="sol-msg-user">Você</div><div class="sol-msg-content">'+md(m.content)+'</div></div>';
       }
@@ -1189,9 +1191,9 @@ window.solChat = (function() {
       var ehRelatorio = false;
       if (m.content && !m.content.startsWith('❌')) {
         // Acha a pergunta do user imediatamente antes desta resposta da SAN
-        var revIdx = state.history.length - 1 - idx;  // idx eh do array reverso; revIdx do original
+        // idx ja eh o indice no array ORIGINAL (convertido de idxRev acima)
         var perguntaAnterior = '';
-        for (var k = revIdx - 1; k >= 0; k--) {
+        for (var k = idx - 1; k >= 0; k--) {
           if (state.history[k] && state.history[k].role === 'user') { perguntaAnterior = state.history[k].content || ''; break; }
         }
         var lower = String(perguntaAnterior).toLowerCase();
