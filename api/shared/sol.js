@@ -100,12 +100,12 @@ const VIEW_SCOPES = {
   'fila-aprovacao': {
     titulo: 'Fila de Aprovacao',
     foco: 'analisar fila pendente, propor aprovar/rejeitar, detectar anomalias e responder duvidas sobre as NFs do usuario. Tambem responde sobre CONTRATOS quando o usuario perguntar — voce tem tools de contratos disponiveis aqui.',
-    tools: ['listar_fila','listar_aprovadas','detalhes_nf','agregar_por_fornecedor','detectar_anomalia','propor_aprovacao','propor_rejeicao','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
+    tools: ['listar_fila','listar_aprovadas','listar_rejeitadas','detalhes_nf','agregar_por_fornecedor','detectar_anomalia','propor_aprovacao','propor_rejeicao','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
   },
   'aprovadas': {
     titulo: 'Notas Aprovadas',
     foco: 'RELATORIOS pro financeiro, agregacoes por fornecedor/periodo/diretoria, abrir PDFs de NFs aprovadas e propor marcar como processado. Aqui NAO HA aprovar/rejeitar — essas NFs ja passaram. Tambem responde sobre CONTRATOS quando o usuario perguntar — voce tem tools de contratos disponiveis aqui.',
-    tools: ['listar_aprovadas','detalhes_nf','agregar_por_fornecedor','abrir_nf','propor_marcar_processado','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
+    tools: ['listar_aprovadas','listar_rejeitadas','detalhes_nf','agregar_por_fornecedor','abrir_nf','propor_marcar_processado','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
   },
   'lancamento': {
     titulo: 'Lancamento de NF',
@@ -115,16 +115,24 @@ const VIEW_SCOPES = {
   'fornecedores': { titulo: 'Fornecedores', foco: 'apenas orientacao sobre como usar a tela de cadastro de fornecedores. Sem tools.', tools: [] },
   'dashboard':    {
     titulo: 'Dashboard',
-    foco: 'orientacao sobre os indicadores e graficos exibidos. Tambem RESPONDE sobre NFs (fila, aprovadas, fornecedores) e CONTRATOS (vencimentos, valores, fornecedores) usando as tools disponiveis. CRITICO: NUNCA diga que contratos sao gerenciados fora do sistema - eles ESTAO no proprio sistema na view Contratos.',
-    tools: ['listar_fila','listar_aprovadas','detalhes_nf','agregar_por_fornecedor','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
+    foco: 'orientacao sobre os indicadores e graficos exibidos. Tambem RESPONDE sobre NFs (fila, aprovadas, REJEITADAS, fornecedores) e CONTRATOS (vencimentos, valores, fornecedores) usando as tools disponiveis. CRITICO: NUNCA diga que contratos sao gerenciados fora do sistema - eles ESTAO no proprio sistema na view Contratos.',
+    tools: ['listar_fila','listar_aprovadas','listar_rejeitadas','detalhes_nf','agregar_por_fornecedor','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
   },
-  'rejeitadas':   { titulo: 'Notas Rejeitadas', foco: 'apenas orientacao sobre o que aparece aqui. Sem tools.', tools: [] },
+  'rejeitadas':   {
+    titulo: 'Notas Rejeitadas',
+    foco: 'consulta de NFs rejeitadas. Use listar_rejeitadas pra mostrar a lista. Por padrao retorna so as NFs que o user submeteu.',
+    tools: ['listar_rejeitadas','detalhes_nf']
+  },
   'minhas-nfs':   {
     titulo: 'Minhas NFs',
-    foco: 'orientacao + leitura de aprovadas. Tambem RESPONDE sobre CONTRATOS quando o user perguntar (vencimentos, valores, fornecedores). Tools de leitura ok, sem acoes destrutivas.',
-    tools: ['listar_aprovadas','detalhes_nf','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
+    foco: 'orientacao + leitura de aprovadas/REJEITADAS. Tambem RESPONDE sobre CONTRATOS quando o user perguntar (vencimentos, valores, fornecedores). Tools de leitura ok, sem acoes destrutivas.',
+    tools: ['listar_aprovadas','listar_rejeitadas','detalhes_nf','listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
   },
-  'rejeitadas-minhas': { titulo: 'Minhas NFs Rejeitadas', foco: 'apenas orientacao. Sem tools.', tools: [] },
+  'rejeitadas-minhas': {
+    titulo: 'Minhas NFs Rejeitadas',
+    foco: 'consulta das NFs rejeitadas DO USER. Use listar_rejeitadas com escopo=minhas (padrao).',
+    tools: ['listar_rejeitadas','detalhes_nf']
+  },
   'configuracoes': { titulo: 'Configuracoes', foco: 'apenas orientacao sobre opcoes de admin/usuario. Sem tools.', tools: [] },
   'contratos':    {
     titulo: 'Contratos',
@@ -182,6 +190,7 @@ function buildSystemPrompt(user, viewAtual) {
     '  5. Tabelas markdown compactas pra listar NFs.',
     '  6. Se nao tem dados pra responder, fale direto. NAO INVENTE.',
     '  7. Se o usuario pedir algo fora do dominio do sistema (NF, fornecedor, aprovacao), recuse educadamente.',
+    '  8. PDF/RELATORIO: voce NUNCA gera PDF diretamente nem precisa. Quando o user pedir "relatorio", "exportar", "imprimir", "PDF", "documento": APENAS LISTE OS DADOS normalmente (tabela markdown). O frontend exibe AUTOMATICAMENTE um botao "Exportar PDF" abaixo da sua resposta quando detecta essas palavras. NUNCA diga "nao consigo gerar PDF", "nao tenho como exportar", "use Ctrl+P" - eh FALSO. Apenas responda a pergunta normalmente, com tabela bem organizada.',
     '',
     'BASE DE CONHECIMENTO (do manual oficial do sistema):',
     getManualForView(viewAtual),
@@ -443,6 +452,19 @@ const TOOLS = [
         properties: {
           dias: { type: 'integer', description: 'Janela em dias (default 30). Ex: 7, 30, 60, 90' },
           incluir_vencidos: { type: 'boolean', description: 'Se true, inclui tambem contratos ja vencidos (default false)' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'listar_rejeitadas',
+      description: 'Lista NFs rejeitadas. Por padrao retorna SOMENTE as que o usuario atual submeteu (LancadoPor = email do user). Admin/Financeiro pode pedir todas com escopo=todas. Use quando o user perguntar "minhas NFs rejeitadas", "quais NFs foram rejeitadas", "rejeicoes do mes". Retorna numero, fornecedor, valor, motivo da rejeicao, data e quem submeteu.',
+      parameters: {
+        type: 'object',
+        properties: {
+          escopo: { type: 'string', enum: ['minhas','todas'], description: 'Default minhas (LancadoPor=email). Admin pode usar todas.' }
         }
       }
     }
@@ -1013,6 +1035,37 @@ async function tool_agregar_contratos(args, ctx) {
   };
 }
 
+async function tool_listar_rejeitadas(args, ctx) {
+  const { client, siteId, listNotasId, invColMap } = ctx.gr;
+  const escopo = args.escopo || 'minhas';
+  const resp = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=2000').get();
+  let notas = (resp.value || []).map(it => normalizeItem(it, invColMap));
+  notas = notas.filter(n => String(n.Status || '') === 'Rejeitada');
+  // RBAC: nao-admin so ve as suas mesmo pedindo "todas"
+  if (escopo === 'minhas' || !ctx.isAdmin) {
+    const emailLow = String(ctx.user.email).toLowerCase();
+    notas = notas.filter(n => String(n.LancadoPor || '').toLowerCase() === emailLow);
+  }
+  // Ordena: mais recentes primeiro (RejeitadoEm ou LancadoEm)
+  notas.sort((a, b) => String(b.RejeitadoEm || b.LancadoEm || '').localeCompare(String(a.RejeitadoEm || a.LancadoEm || '')));
+  notas = notas.slice(0, 50);
+  return {
+    total: notas.length,
+    escopo: (escopo === 'todas' && ctx.isAdmin) ? 'todas' : 'minhas',
+    notas: notas.map(n => ({
+      id: n._id,
+      numero: n.NumeroNF,
+      fornecedor: n.Fornecedor,
+      valor: Number(n.ValorTotal || n.Valor || 0),
+      vencimento: String(n.Vencimento || '').substring(0, 10),
+      rejeitadoEm: String(n.RejeitadoEm || '').substring(0, 10),
+      motivoRejeicao: n.MotivoRejeicao || '(sem motivo registrado)',
+      lancadoPor: n.LancadoPor,
+      lancadoEm: String(n.LancadoEm || '').substring(0, 10)
+    }))
+  };
+}
+
 async function tool_abrir_contrato(args, ctx) {
   // Resolve id se vier so a busca
   let id = args.id;
@@ -1081,7 +1134,8 @@ const TOOL_IMPL = {
   detalhes_contrato: tool_detalhes_contrato,
   agregar_contratos: tool_agregar_contratos,
   contratos_vencendo: tool_contratos_vencendo,
-  abrir_contrato: tool_abrir_contrato
+  abrir_contrato: tool_abrir_contrato,
+  listar_rejeitadas: tool_listar_rejeitadas
 };
 
 // =============================================================================

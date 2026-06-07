@@ -1373,8 +1373,7 @@ window.solChat = (function() {
         var f = document.getElementById('san-fab');
         if (f) f.classList.remove('has-pending');
       } catch(e){}
-      // PERSISTE notificacao vista pra contratos:
-      // grava _alerta_<janela>=hoje nos contratos listados. NFs nao precisam dedup persistente.
+      // PERSISTE notificacao vista pra contratos: grava _alerta_<janela>=hoje nos contratos listados.
       // Fire-and-forget - nao bloqueia a UI.
       if (Array.isArray(p.marcadoresContratos) && p.marcadoresContratos.length > 0) {
         try {
@@ -1384,6 +1383,19 @@ window.solChat = (function() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ marcadores: p.marcadoresContratos })
           }).catch(function(){ /* silencia - best-effort */ });
+        } catch(e){}
+      }
+      // PERSISTE notificacao vista pra NFs rejeitadas: grava _visto_rejeicao_<email>=hoje na Observacao.
+      // Nao volta a alertar essa NF rejeitada pro user na proxima vez que abrir a SAN.
+      if (Array.isArray(p.marcadoresNFsRejeitadas) && p.marcadoresNFsRejeitadas.length > 0) {
+        var idsNF = p.marcadoresNFsRejeitadas.map(function(x){ return x.id; });
+        try {
+          fetch('/api/MarcarNFsRejeitadasVistas', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: idsNF })
+          }).catch(function(){ /* silencia */ });
         } catch(e){}
       }
       // Marca como visto na sessao - nao mostra de novo ate a proxima janela de polling

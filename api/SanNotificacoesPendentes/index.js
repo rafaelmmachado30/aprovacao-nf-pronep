@@ -270,7 +270,10 @@ module.exports = async function (context, req) {
     }
 
     // Carrega NFs (pendentes onde sou aprovador + rejeitadas que eu submeti)
+    // NFs rejeitadas: dedup persistente via tag em Observacao - se ja vi essa rejeicao, nao mostra mais
     const itensNFs = [];
+    const marcadoresNFs = [];  // ids de NFs rejeitadas que vou marcar como vistas quando user abrir SAN
+    const tagVistoRejeicao = '_visto_rejeicao_' + emailLow + '=';
     if (listNotasId) {
       const all = await paginar(client, '/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=999');
       const hojeStr = new Date(new Date().getTime() - 3*60*60*1000).toISOString().substring(0,10);
@@ -279,7 +282,7 @@ module.exports = async function (context, req) {
         const status = String(n.Status || '');
         const aprovador = String(n.AprovadorAtual || '').toLowerCase();
         const lancadoPor = String(n.LancadoPor || '').toLowerCase();
-        // NFs pendentes onde EU sou o aprovador atual
+        // NFs pendentes onde EU sou o aprovador atual (SEM dedup - urgencia imediata)
         if (aprovador === emailLow && ['Lancada','EmAprovacao','Pendente'].includes(status)) {
           breakdown.nfs_pendentes_total++;
           const venc = String(n.DataVencimento || n.Vencimento || '').substring(0,10);
@@ -288,10 +291,13 @@ module.exports = async function (context, req) {
           if (ehD5) breakdown.nfs_d5++;
           itensNFs.push({ id: n._id, numero: n.NumeroNF, fornecedor: n.Fornecedor, vencimento: venc, ehD5: ehD5, tipo: 'pendente' });
         }
-        // NFs rejeitadas que EU submeti
+        // NFs rejeitadas que EU submeti — com dedup por user em Observacao
         if (lancadoPor === emailLow && status === 'Rejeitada') {
+          const obs = String(n.Observacao || '');
+          if (obs.indexOf(tagVistoRejeicao) >= 0) continue;  // ja visto, pula
           breakdown.nfs_rejeitadas++;
           itensNFs.push({ id: n._id, numero: n.NumeroNF, fornecedor: n.Fornecedor, motivo: n.MotivoRejeicao, tipo: 'rejeitada' });
+          marcadoresNFs.push({ id: n._id, tipo: 'rejeitada' });
         }
       }
     }
@@ -318,6 +324,7 @@ module.exports = async function (context, req) {
         ),
         // Marcadores que o front vai chamar POST pra marcar como visto apos exibir
         marcadoresContratos: marcadores,
+        marcadoresNFsRejeitadas: marcadoresNFs,
         user: { nome, email: emailLow, isAdmin, isGestor, diretorias: minhasDiretorias }
       }
     };
