@@ -1195,7 +1195,20 @@ window.solChat = (function() {
       var exportBtn = ehRelatorio
         ? '<div class="sol-msg-actions"><button class="sol-export-btn" onclick="solChat.exportarPDF('+idx+')">📄 Exportar PDF</button></div>'
         : '';
-      return '<div class="sol-msg"><div class="sol-msg-sol">SAN</div><div class="sol-msg-content">'+md(m.content)+actions+exportBtn+'</div></div>';
+      // Sugestoes proativas (chips clicaveis renderizados fora do md/escape)
+      var sugProat = '';
+      if (m.proativa && Array.isArray(m.sugestoesProativas) && m.sugestoesProativas.length) {
+        sugProat = '<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px">' +
+          m.sugestoesProativas.map(function(s){
+            var sEsc = String(s).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            var sTxt = String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            return '<button class="san-sug-btn" onclick="solChat.sendText(\'' + sEsc + '\')" ' +
+              'style="background:#EFF6FF;border:1px solid #93C5FD;color:#1E3A8A;padding:6px 12px;border-radius:14px;cursor:pointer;font-size:12px;font-weight:500">' +
+              sTxt + '</button>';
+          }).join('') +
+          '</div>';
+      }
+      return '<div class="sol-msg"><div class="sol-msg-sol">SAN</div><div class="sol-msg-content">'+md(m.content)+sugProat+actions+exportBtn+'</div></div>';
     }).join('');
     var loading = state.busy ? '<div class="sol-loading">SAN está pensando...</div>' : '';
     var sugHtml = state.history.length === 0
@@ -1313,17 +1326,13 @@ window.solChat = (function() {
     if (state.open && state.pendencias && state.pendencias.count > 0 && !state.saudacaoInjetada) {
       state.saudacaoInjetada = true;
       var p = state.pendencias;
-      // Constroi mensagem com saudacao + sugestoes clicaveis (botoes inline no markdown)
-      var sugBtns = '';
-      if (Array.isArray(p.sugestoes) && p.sugestoes.length) {
-        sugBtns = '\n\n' + p.sugestoes.map(function(s){
-          return '<button class="san-sug-btn" data-sug="' + String(s).replace(/"/g, '&quot;') + '" onclick="solChat.sendText(this.getAttribute(\'data-sug\'))" style="background:#EFF6FF;border:1px solid #93C5FD;color:#1E3A8A;padding:6px 12px;margin:4px 4px 0 0;border-radius:14px;cursor:pointer;font-size:12px;font-weight:500">' + String(s).replace(/</g, '&lt;') + '</button>';
-        }).join('');
-      }
+      // Conteudo da mensagem em MARKDOWN puro (md() renderiza **bold**).
+      // Sugestoes vao em campo SEPARADO pra serem renderizadas como botoes (fora do escape).
       state.history.push({
         role: 'assistant',
-        content: p.saudacao + sugBtns,
-        proativa: true
+        content: p.saudacao,
+        proativa: true,
+        sugestoesProativas: Array.isArray(p.sugestoes) ? p.sugestoes : []
       });
       // Tira o pulse do FAB (notificacao foi "vista")
       try {

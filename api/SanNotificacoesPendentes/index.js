@@ -168,23 +168,23 @@ function primeiroNome(user) {
 function montarSaudacaoTemplate(nome, breakdown) {
   const partes = [];
   if (breakdown.nfs_pendentes_total > 0) {
-    const d5 = breakdown.nfs_d5 > 0 ? ' (<b>' + breakdown.nfs_d5 + '</b> com vencimento em ≤5 dias)' : '';
-    partes.push('📬 <b>' + breakdown.nfs_pendentes_total + ' NF' + (breakdown.nfs_pendentes_total === 1 ? '' : 's') + '</b> aguardando sua aprovação' + d5);
+    const d5 = breakdown.nfs_d5 > 0 ? ' (**' + breakdown.nfs_d5 + '** com vencimento em ≤5 dias)' : '';
+    partes.push('📬 **' + breakdown.nfs_pendentes_total + ' NF' + (breakdown.nfs_pendentes_total === 1 ? '' : 's') + '** aguardando sua aprovação' + d5);
   }
   if (breakdown.contratos_30 > 0) {
-    partes.push('🚨 <b>' + breakdown.contratos_30 + ' contrato' + (breakdown.contratos_30 === 1 ? '' : 's') + '</b> vencendo em até 30 dias');
+    partes.push('🚨 **' + breakdown.contratos_30 + ' contrato' + (breakdown.contratos_30 === 1 ? '' : 's') + '** vencendo em até 30 dias');
   }
   if (breakdown.contratos_60 > 0) {
-    partes.push('⚠ <b>' + breakdown.contratos_60 + ' contrato' + (breakdown.contratos_60 === 1 ? '' : 's') + '</b> vencendo entre 31 e 60 dias');
+    partes.push('⚠ **' + breakdown.contratos_60 + ' contrato' + (breakdown.contratos_60 === 1 ? '' : 's') + '** vencendo entre 31 e 60 dias');
   }
   if (breakdown.contratos_90 > 0) {
-    partes.push('⏰ <b>' + breakdown.contratos_90 + ' contrato' + (breakdown.contratos_90 === 1 ? '' : 's') + '</b> vencendo entre 61 e 90 dias');
+    partes.push('⏰ **' + breakdown.contratos_90 + ' contrato' + (breakdown.contratos_90 === 1 ? '' : 's') + '** vencendo entre 61 e 90 dias');
   }
   if (breakdown.contratos_vencidos > 0) {
-    partes.push('❗ <b>' + breakdown.contratos_vencidos + ' contrato' + (breakdown.contratos_vencidos === 1 ? '' : 's') + '</b> já vencido' + (breakdown.contratos_vencidos === 1 ? '' : 's') + ' sem renegociação registrada');
+    partes.push('❗ **' + breakdown.contratos_vencidos + ' contrato' + (breakdown.contratos_vencidos === 1 ? '' : 's') + '** já vencido' + (breakdown.contratos_vencidos === 1 ? '' : 's') + ' sem renegociação registrada');
   }
   if (breakdown.nfs_rejeitadas > 0) {
-    partes.push('↩ <b>' + breakdown.nfs_rejeitadas + ' NF' + (breakdown.nfs_rejeitadas === 1 ? '' : 's') + '</b> sua' + (breakdown.nfs_rejeitadas === 1 ? '' : 's') + ' foi/foram rejeitada' + (breakdown.nfs_rejeitadas === 1 ? '' : 's') + ' — aguarda correção e reenvio');
+    partes.push('↩ **' + breakdown.nfs_rejeitadas + ' NF' + (breakdown.nfs_rejeitadas === 1 ? '' : 's') + '** sua' + (breakdown.nfs_rejeitadas === 1 ? '' : 's') + ' foi/foram rejeitada' + (breakdown.nfs_rejeitadas === 1 ? '' : 's') + ' — aguarda correção e reenvio');
   }
 
   if (partes.length === 0) {
