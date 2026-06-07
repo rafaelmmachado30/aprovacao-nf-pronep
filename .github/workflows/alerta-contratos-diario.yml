@@ -1,0 +1,50 @@
+name: Contratos — Alertas diários de vencimento
+
+# Dispara o endpoint /api/AlertaContratosDiario uma vez por dia útil às 8h BRT (11h UTC).
+# Varre contratos vencendo em 30/60/90 dias e envia email + push pro gestor da diretoria.
+#
+# Pré-requisitos:
+#   - Repository Secret: ALERTA_CONTRATOS_SECRET (opcional, mesmo valor da App Setting no Azure)
+#     Se não configurado no Azure, o endpoint aceita sem secret.
+
+on:
+  schedule:
+    # 8h BRT (11h UTC) seg-sex
+    - cron: '0 11 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: 'Dry-run (não envia email, apenas simula)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  alertar-contratos:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar /api/AlertaContratosDiario
+        env:
+          SECRET: ${{ secrets.ALERTA_CONTRATOS_SECRET }}
+          DRY_RUN: ${{ github.event.inputs.dryRun || 'false' }}
+        run: |
+          BASE="https://purple-forest-09588fe10.7.azurestaticapps.net/api/AlertaContratosDiario"
+          URL="$BASE?dryRun=$DRY_RUN"
+          if [ -n "$SECRET" ]; then
+            URL="$URL&secret=$SECRET"
+          fi
+          echo "Disparando AlertaContratosDiario (dryRun=$DRY_RUN)"
+          HTTP_CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+            -H "Accept: application/json" \
+            --max-time 290 \
+            "$URL")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/resp.json | head -c 3000
+          echo ""
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Endpoint retornou HTTP $HTTP_CODE"
+            exit 1
+          fi
