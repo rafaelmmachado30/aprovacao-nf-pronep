@@ -38,9 +38,12 @@ const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
 const SISTEMA_URL = 'https://purple-forest-09588fe10.7.azurestaticapps.net/';
 const DEFAULT_FROM = 'datanalytics@pronep.com.br';
 
-// Janelas de alerta em dias (do MAIOR pro MENOR - prioriza mais urgente)
+// Janelas de alerta em dias (do MENOR pro MAIOR - prioriza mais urgente)
+// Logica: o alerta dispara quando o contrato entra DENTRO da janela (dias <= janela).
+// Cada janela so dispara UMA vez (controlado por dedup em Observacoes).
+// Ex: contrato com 85 dias → alerta_90 hoje. Em 25 dias (60 dias restantes) → alerta_60.
+// Em mais 30 (30 restantes) → alerta_30.
 const JANELAS = [30, 60, 90];
-const TOLERANCIA_DIAS = 2;
 
 function getGraphClient() {
   const credential = new ClientSecretCredential(
@@ -76,24 +79,21 @@ function escapeHtml(s) {
 }
 
 // Identifica a JANELA aplicavel pra um contrato baseado em diasParaVencer + dedup em Observacoes
+// Logica: pega a MAIS ESPECIFICA (menor janela) que se aplica E que ainda nao foi enviada.
+// Ex: contrato com 25 dias e ja foi enviado alerta_30: nao envia nada (proxima seria so apos vencer).
+// Ex: contrato com 25 dias sem nenhum alerta: envia alerta_30 (a mais urgente aplicavel).
 function escolherJanelaAplicavel(diasFalta, observacoes) {
-  // 30d é o mais urgente. So envia se ainda nao mandou alerta_30
-  // 60d só envia se ainda nao mandou alerta_60 nem alerta_30
-  // 90d só envia se ainda nao mandou nenhum
+  if (diasFalta == null || diasFalta < 0) return null;  // vencido nao alerta (ou alerta separado)
+  if (diasFalta > 90) return null;                       // longe demais da janela
   const obs = String(observacoes || '');
   const ja = {
     30: /_alerta_30=/.test(obs),
     60: /_alerta_60=/.test(obs),
     90: /_alerta_90=/.test(obs)
   };
-  // Match com tolerancia
+  // Pega a janela mais urgente APLICAVEL (dias <= janela) e ainda nao enviada
   for (const j of JANELAS) {  // [30, 60, 90] - mais urgente primeiro
-    if (Math.abs(diasFalta - j) <= TOLERANCIA_DIAS && !ja[j]) {
-      // Mas tambem checa: se for janela 90 e ja mandou 30 ou 60, faz nada (escalou rapido)
-      if (j === 90 && (ja[30] || ja[60])) continue;
-      if (j === 60 && ja[30]) continue;
-      return j;
-    }
+    if (diasFalta <= j && !ja[j]) return j;
   }
   return null;
 }
@@ -308,18 +308,31 @@ module.exports = async function (context, req) {
     const contratos = await carregarContratos(client, siteId, listContratosId, invColMap);
     const gestores = await carregarGestoresPorDiretoria(client, siteId, listDirId);
 
-    const stats = { totalContratos: contratos.length, candidatos: 0, enviados: 0, semGestor: 0, jaAlertados: 0, foraDeJanela: 0, erros: 0 };
+    const stats = {
+      totalContratos: contratos.length, candidatos: 0, enviados: 0, semGestor: 0,
+      jaAlertados: 0, foraDeJanela: 0, vencidos: 0, semDataFim: 0, cancelados: 0, erros: 0,
+      breakdown: { dentro_30: 0, dentro_60: 0, dentro_90: 0, alem_90: 0 }
+    };
     const enviados = [];
     const erros = [];
     const semGestor = [];
 
     for (const c of contratos) {
-      if (c.status === 'Cancelado') continue;
+      if (c.status === 'Cancelado') { stats.cancelados++; continue; }
       const dias = diasParaVencer(c.dataFim);
-      if (dias == null) continue;
+      if (dias == null) { stats.semDataFim++; continue; }
+      if (dias < 0) { stats.vencidos++; continue; }
+      // Breakdown de distribuicao
+      if (dias <= 30) stats.breakdown.dentro_30++;
+      else if (dias <= 60) stats.breakdown.dentro_60++;
+      else if (dias <= 90) stats.breakdown.dentro_90++;
+      else stats.breakdown.alem_90++;
+
       const janela = escolherJanelaAplicavel(dias, c.observacoes);
       if (!janela) {
-        stats.foraDeJanela++;
+        // Pode ser fora de janela (>90d) OU ja foi alertado (todas as janelas do nivel ja enviadas)
+        if (dias > 90) stats.foraDeJanela++;
+        else stats.jaAlertados++;
         continue;
       }
       stats.candidatos++;
