@@ -152,7 +152,36 @@ function getToolsForView(viewAtual) {
   return TOOLS.filter(function(t){ return allowed.indexOf(t.function.name) >= 0; });
 }
 
-function buildSystemPrompt(user, viewAtual) {
+// Resolve o ESCOPO do usuario na lista PRONEP-NF-Diretorias.
+// Retorna { diretorias: ['Tecnologia','RH'], unidades: ['SP','RJ'], pares: ['SP|Tecnologia',...] }
+// Pares 'Unidade|Diretoria' eh o granular - o user pode ser gestor de Tec/SP mas nao Tec/RJ.
+async function resolveEscopoUsuario(client, siteId, listDirId, userEmail) {
+  const out = { diretorias: [], unidades: [], pares: [] };
+  if (!listDirId || !userEmail) return out;
+  try {
+    const r = await client.api('/sites/' + siteId + '/lists/' + listDirId + '/items?expand=fields&$top=300').get();
+    const emailLow = String(userEmail).toLowerCase().trim();
+    const setDir = new Set(), setUni = new Set(), setPar = new Set();
+    for (const it of (r.value || [])) {
+      const f = it.fields || {};
+      const emailDir = String(f.field_3 || '').toLowerCase().trim();
+      if (emailDir !== emailLow) continue;
+      const titulo = String(f.Title || '');
+      const partes = titulo.split('|');
+      const uni = (partes[0] || '').trim();
+      const dir = (partes[1] || '').trim();
+      if (dir) setDir.add(dir);
+      if (uni) setUni.add(uni);
+      if (uni && dir) setPar.add(uni + '|' + dir);
+    }
+    out.diretorias = Array.from(setDir);
+    out.unidades = Array.from(setUni);
+    out.pares = Array.from(setPar);
+  } catch (e) { /* lista pode nao existir - tudo vazio */ }
+  return out;
+}
+
+function buildSystemPrompt(user, viewAtual, escopo, perfil) {
   const hoje = new Date();
   const brt = new Date(hoje.getTime() - 3 * 60 * 60 * 1000);
   const dataHoje = brt.getUTCFullYear() + '-' + String(brt.getUTCMonth()+1).padStart(2,'0') + '-' + String(brt.getUTCDate()).padStart(2,'0');
@@ -181,6 +210,26 @@ function buildSystemPrompt(user, viewAtual) {
     '  - Data de hoje (BRT): ' + dataHoje,
     '  - Tela atual: ' + scope.titulo + ' (id: ' + (viewAtual || 'fila-aprovacao') + ')',
     '  - Foco nesta tela: ' + scope.foco,
+    '',
+    'PERFIL E ESCOPO DO USUARIO (use sempre que precisar filtrar dados pelo escopo dele):',
+    (function() {
+      var p = perfil || {};
+      var e = escopo || { diretorias: [], unidades: [], pares: [] };
+      var linhas = [];
+      if (p.isAdmin) linhas.push('  - Perfil: ADMIN (ve tudo, qualquer diretoria/unidade)');
+      else if (p.isFinanceiro) linhas.push('  - Perfil: FINANCEIRO (ve tudo, qualquer diretoria/unidade)');
+      else if (e.diretorias.length > 0) linhas.push('  - Perfil: GESTOR de aprovacao de NFs');
+      else linhas.push('  - Perfil: USUARIO comum (so ve as proprias NFs lancadas e as que aprova)');
+      if (e.diretorias.length > 0) linhas.push('  - Diretorias que o gestor cobre: ' + e.diretorias.join(', '));
+      if (e.unidades.length > 0)   linhas.push('  - Unidades que o gestor cobre: ' + e.unidades.join(', '));
+      if (e.pares.length > 0)      linhas.push('  - Mapeamento granular (Unidade|Diretoria): ' + e.pares.join(' ; '));
+      if (!p.isAdmin && !p.isFinanceiro && e.diretorias.length === 0) {
+        linhas.push('  - SEM mapeamento como gestor na lista PRONEP-NF-Diretorias - so ve dados proprios');
+      }
+      linhas.push('  - USE esse escopo pra responder perguntas tipo "estes contratos sao do meu escopo?", "qual o meu escopo?", "minhas diretorias", "que pastas eu sou responsavel".');
+      linhas.push('  - Quando o user perguntar se um contrato/NF eh do escopo dele, COMPARE a diretoria do item com a lista acima e responda direto SIM/NAO, sem pedir pra ele "verificar no sistema".');
+      return linhas.join('\n');
+    })(),
     '',
     'REGRAS UNIVERSAIS:',
     '  1. Se NAO encontrar dado pedido, responda de forma amigavel usando o primeiro nome: \'Oi ' + firstName + ', nao encontrei...\'. NUNCA seja seca.',
@@ -1174,9 +1223,12 @@ async function runSol(history, userMessage, user, opts) {
 
   const client = await getGraphClient();
   const cacheResolved = await resolveSiteAndLists(client);
-  const { siteId, listNotasId, invColMap, listContratosId, colMapContratos, invColMapContratos } = cacheResolved;
-  const ctx = { user, isAdmin, isFinanceiro, gr: { client, siteId, listNotasId, invColMap, listContratosId, colMapContratos, invColMapContratos } };
-  const systemPrompt = buildSystemPrompt(user, viewAtual);
+  const { siteId, listNotasId, invColMap, listContratosId, colMapContratos, invColMapContratos, listDirId } = cacheResolved;
+  const ctx = { user, isAdmin, isFinanceiro, gr: { client, siteId, listNotasId, invColMap, listContratosId, colMapContratos, invColMapContratos, listDirId } };
+  // Resolve escopo do user (gestor de quais diretorias/unidades) pra passar pro prompt
+  const escopo = await resolveEscopoUsuario(client, siteId, listDirId, user.email);
+  const perfil = { isAdmin, isFinanceiro };
+  const systemPrompt = buildSystemPrompt(user, viewAtual, escopo, perfil);
 
   // Tenta Anthropic primeiro
   const anthropic = getAnthropic();
