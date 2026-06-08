@@ -221,12 +221,15 @@ module.exports = async function (context, req) {
     let roles = [];
     try { roles = await getUserRoles(user); } catch (e) {}
     const isAdmin = roles.includes('administrador') || roles.includes('admin');
-    const isGestor = roles.includes('gestor');
+    // Juridico tem acesso TOTAL ao acervo de contratos (mesmo tratamento de admin nessa view)
+    const isJuridicoFullAccess = roles.includes('gestor_juridica');
+    const veTodosContratos = isAdmin || isJuridicoFullAccess;
+    const isGestor = roles.includes('gestor') || roles.some(function(r){ return /^gestor_/.test(r); });
 
     // Diretorias que o user gerencia
     const minhasDiretorias = await diretoriasDoGestor(client, siteId, listDirId, emailLow);
     const filtraPorDiretoria = function(diretoriaItem) {
-      if (isAdmin) return true;  // admin ve tudo
+      if (veTodosContratos) return true;  // admin OU juridico ve tudo
       if (!minhasDiretorias.length) return false;
       return minhasDiretorias.includes(diretoriaItem);
     };
@@ -241,7 +244,7 @@ module.exports = async function (context, req) {
     // o "marcador" que o front vai gravar quando o gestor abrir a SAN.
     // Cada item: { id, janela: 30|60|90|'vencido' }
     const marcadores = [];
-    if (listContratosId && (isAdmin || minhasDiretorias.length)) {
+    if (listContratosId && (veTodosContratos || minhasDiretorias.length)) {
       const all = await paginar(client, '/sites/' + siteId + '/lists/' + listContratosId + '/items?expand=fields&$top=999');
       for (const it of all) {
         const c = normalize(it, invColContratos);
@@ -325,7 +328,7 @@ module.exports = async function (context, req) {
         // Marcadores que o front vai chamar POST pra marcar como visto apos exibir
         marcadoresContratos: marcadores,
         marcadoresNFsRejeitadas: marcadoresNFs,
-        user: { nome, email: emailLow, isAdmin, isGestor, diretorias: minhasDiretorias }
+        user: { nome, email: emailLow, isAdmin, isJuridicoFullAccess, isGestor, diretorias: minhasDiretorias }
       }
     };
   } catch (err) {

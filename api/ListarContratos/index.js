@@ -116,9 +116,13 @@ module.exports = async function (context, req) {
     const userRoles = await getUserRoles(user);
     const allRoles = Array.from(new Set([].concat(claimsRoles, userRoles || [])));
     const isAdmin = allRoles.includes('administrador') || allRoles.includes('admin');
-    const isGestor = allRoles.includes('gestor');
-    if (!isAdmin && !isGestor) {
-      context.res = { status: 403, body: { error: 'Acesso negado. Restrito a Gestores e Admins.' } };
+    // Juridico (gestor_juridica) ve TUDO em Contratos - mas no resto do sistema segue o RBAC dele.
+    // Decisao Rafa 07/06/2026: Admin + Juridico tem acesso total ao acervo de contratos.
+    const isJuridicoFullAccess = allRoles.includes('gestor_juridica');
+    const veTodosContratos = isAdmin || isJuridicoFullAccess;
+    const isGestor = allRoles.includes('gestor') || allRoles.some(function(r){ return /^gestor_/.test(r); });
+    if (!veTodosContratos && !isGestor) {
+      context.res = { status: 403, body: { error: 'Acesso negado. Restrito a Gestores, Juridico e Admins.' } };
       return;
     }
 
@@ -141,8 +145,9 @@ module.exports = async function (context, req) {
     const colMap = await getColMap(client, siteId, listId);
 
     // 4. Define escopo de diretorias
-    let scopeDiretorias = null; // null = sem filtro (admin)
-    if (!isAdmin && isGestor) {
+    // null = sem filtro (admin OU juridico - ambos veem tudo no acervo de contratos)
+    let scopeDiretorias = null;
+    if (!veTodosContratos && isGestor) {
       scopeDiretorias = await diretoriasDoGestor(client, siteId, listDirId, user.email);
       if (!scopeDiretorias.length) {
         // Gestor sem mapeamento — retorna vazio
@@ -264,7 +269,7 @@ module.exports = async function (context, req) {
       headers: { 'Content-Type': 'application/json' },
       body: {
         ok: true,
-        userScope: { roles: allRoles, isAdmin, isGestor, diretoriasGestorOf: scopeDiretorias || 'TODAS' },
+        userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor, diretoriasGestorOf: scopeDiretorias || 'TODAS' },
         stats,
         total: filtrados.length,
         formato,

@@ -37,6 +37,9 @@ const LIST_CONTRATOS = 'PRONEP-NF-Contratos';
 const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
 const SISTEMA_URL = 'https://purple-forest-09588fe10.7.azurestaticapps.net/';
 const DEFAULT_FROM = 'datanalytics@pronep.com.br';
+// OID do grupo AAD que tem acesso total a contratos (membros recebem TODOS os alertas).
+// Mantem sincronizado com shared/userRoles.js GROUP_TO_ROLE pra role 'gestor_juridica'.
+const GRUPO_JURIDICO_OID = '5aa9fc6b-900d-40eb-861d-8bbf72499da1';
 
 // Janelas de alerta em dias (do MENOR pro MAIOR - prioriza mais urgente)
 // Logica: o alerta dispara quando o contrato entra DENTRO da janela (dias <= janela).
@@ -247,6 +250,24 @@ async function carregarContratos(client, siteId, listContratosId, invColMap) {
   return todos;
 }
 
+// Resolve emails dos membros do grupo Juridico (acesso total a contratos).
+// Esses emails sao adicionados como destinatarios extras em TODOS os alertas.
+async function obterEmailsJuridico(client) {
+  try {
+    const resp = await client.api('/groups/' + GRUPO_JURIDICO_OID + '/members')
+      .select('mail,userPrincipalName,displayName').top(100).get();
+    const emails = [];
+    for (const m of (resp.value || [])) {
+      const email = (m.mail || m.userPrincipalName || '').toLowerCase().trim();
+      if (email && email.indexOf('@') >= 0 && emails.indexOf(email) < 0) emails.push(email);
+    }
+    return emails;
+  } catch (e) {
+    // Falha silenciosa - Juridico nao recebe extras nessa execucao mas o resto roda
+    return [];
+  }
+}
+
 async function carregarGestoresPorDiretoria(client, siteId, listDirId) {
   const map = {};
   if (!listDirId) return map;
@@ -304,9 +325,10 @@ module.exports = async function (context, req) {
     for (const c of (colsResp.value || [])) {
       if (c.displayName && c.name) { colMap[c.displayName] = c.name; invColMap[c.name] = c.displayName; }
     }
-    // Contratos + gestores
+    // Contratos + gestores + emails do Juridico (recebem TODOS os alertas)
     const contratos = await carregarContratos(client, siteId, listContratosId, invColMap);
     const gestores = await carregarGestoresPorDiretoria(client, siteId, listDirId);
+    const emailsJuridico = await obterEmailsJuridico(client);
 
     const stats = {
       totalContratos: contratos.length, candidatos: 0, enviados: 0, semGestor: 0,
@@ -336,8 +358,12 @@ module.exports = async function (context, req) {
         continue;
       }
       stats.candidatos++;
-      // Resolve gestor da diretoria
-      const destinatarios = gestores[c.diretoria] || [];
+      // Resolve gestor da diretoria + adiciona Juridico (acesso total) em TODOS os alertas.
+      // Dedup pra evitar enviar duplicado se Juridico tambem for gestor da diretoria.
+      const gestoresDir = gestores[c.diretoria] || [];
+      const destinatarios = [];
+      for (const e of gestoresDir) if (destinatarios.indexOf(e) < 0) destinatarios.push(e);
+      for (const e of emailsJuridico) if (destinatarios.indexOf(e) < 0) destinatarios.push(e);
       if (!destinatarios.length) {
         stats.semGestor++;
         semGestor.push({ contratoId: c.id, fornecedor: c.fornecedor, diretoria: c.diretoria });
