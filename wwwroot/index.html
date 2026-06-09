@@ -4107,11 +4107,11 @@ const views = {
       <!-- Versao desktop: tabela -->
       <div class="card data-table-desktop">
         <table class="data">
-          <thead><tr><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Status</th><th>Motivo</th><th>Solicitante</th></tr></thead>
+          <thead><tr><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Status</th><th>Motivo</th><th>Solicitante</th><th>Rejeitado por</th><th class="center">Ação</th></tr></thead>
           <tbody>
             ${rj.map(n => `
               <tr>
-                <td><b>${n.id}</b></td>
+                <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero||''}</span></td>
                 <td>${fornecedorOf(n).razao}</td>
                 <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
                 <td>${n.diretoria}</td>
@@ -4119,8 +4119,12 @@ const views = {
                 <td>${statusPill(n.status, n)}</td>
                 <td>${n.motivo || '—'}</td>
                 <td>${n.lancadoPor}<br><span class="small muted">${n.lancadoEm}</span></td>
+                <td>${n.aprovadoPor||'—'}<br><span class="small muted">${n.aprovadoEm||'—'}</span></td>
+                <td class="center" style="white-space:nowrap">
+                  <button class="icon-btn" onclick="abrirPdfRejeitado('${n.spId || n.id}')" title="Ver PDF rejeitado">📄 Ver</button>
+                </td>
               </tr>
-            `).join('') || '<tr><td colspan="8" class="muted center">Sem rejeições recentes.</td></tr>'}
+            `).join('') || '<tr><td colspan="10" class="muted center">Sem rejeições recentes.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -4141,8 +4145,17 @@ const views = {
       <h2>Minhas Notas Rejeitadas</h2>
       <div class="view-sub">NFs suas que precisam ser revisadas e reenviadas.</div>
       ${rj.length === 0 ? '<div class="alert alert-success"><span class="ico">✓</span><div>Você não tem NFs rejeitadas pendentes de correção.</div></div>' :
-        '<div class="card"><table class="data"><thead><tr><th>NF</th><th>Fornecedor</th><th class="num">Valor</th><th>Motivo da rejeição</th><th class="center">Ação</th></tr></thead><tbody>' +
-        rj.map(n => `<tr><td><b>${n.id}</b></td><td>${fornecedorOf(n).razao}</td><td class="num">${fmtBRL(n.valor)}</td><td>${n.motivo}</td><td class="center"><button class="icon-btn" onclick="toast(\'Funcionalidade: relançar com correção\')">Reenviar</button></td></tr>`).join('') +
+        '<div class="card"><table class="data"><thead><tr><th>NF</th><th>Fornecedor</th><th class="num">Valor</th><th>Motivo da rejeição</th><th>Rejeitado por</th><th class="center">Ações</th></tr></thead><tbody>' +
+        rj.map(n => `<tr>
+          <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero||''}</span></td>
+          <td>${fornecedorOf(n).razao}</td>
+          <td class="num">${fmtBRL(n.valor)}</td>
+          <td>${n.motivo||'—'}</td>
+          <td>${n.aprovadoPor||'—'}<br><span class="small muted">${n.aprovadoEm||'—'}</span></td>
+          <td class="center" style="white-space:nowrap">
+            <button class="icon-btn" onclick="abrirPdfRejeitado('${n.spId || n.id}')" title="Ver PDF rejeitado">📄 Ver</button>
+          </td>
+        </tr>`).join('') +
         '</tbody></table></div>'
       }
     `;
@@ -7680,6 +7693,16 @@ async function rejeitarAprovada(id, numero, fornecedor, valor) {
   } catch (e) {
     alert('❌ Erro de rede: ' + (e.message || e));
   }
+}
+
+// Abre o PDF de NF rejeitada em nova aba.
+// O endpoint AbrirPdfDaNota detecta status='Rejeitada' e busca em Notas Fiscais/Rejeitadas.
+function abrirPdfRejeitado(spId) {
+  if (!spId) { toast('NF sem ID do SharePoint', 'error'); return; }
+  // Remove prefixo NF- se vier do id local
+  var idLimpo = String(spId).replace(/^NF-/, '');
+  if (!idLimpo || isNaN(parseInt(idLimpo))) { toast('ID invalido pra abrir o PDF', 'error'); return; }
+  window.open('/api/AbrirPdfDaNota?id=' + encodeURIComponent(idLimpo), '_blank', 'noopener');
 }
 
 function openApprovedPdf(id) {

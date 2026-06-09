@@ -260,7 +260,9 @@ module.exports = async function (context, req) {
     // Se rejeicao normal: busca em "Notas Fiscais/Pendentes/{Unidade}/Diretoria {Diretoria}".
     const folderPendente = `Notas Fiscais/Pendentes/${f.Unidade}/Diretoria ${f.Diretoria}`;
     const folderAprovada = `Notas Aprovadas`;
-    const folderRejeitada = `Notas Fiscais/Rejeitadas`;
+    // CORRECAO: estrutura de subpastas por Unidade+Diretoria igual Pendentes (antes salvava plano).
+    // O AbrirPdfDaNota tem fallback pra pasta raiz pra NFs rejeitadas antes desta correcao.
+    const folderRejeitada = `Notas Fiscais/Rejeitadas/${f.Unidade}/Diretoria ${f.Diretoria}`;
     const folderOrigem = ehEstorno ? folderAprovada : folderPendente;
     diag.folderOrigem = folderOrigem;
     let pdfTarget = null;

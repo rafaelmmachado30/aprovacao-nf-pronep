@@ -122,7 +122,11 @@ module.exports = async function (context, req) {
       // Sem data de aprovacao - fallback: lista todas as subpastas (mais lento)
       folder = `Notas Fiscais/Notas Aprovadas/${unidade}`;
     } else if (status === 'Rejeitada') {
-      folder = `Notas Fiscais/Rejeitadas`;
+      // Estrutura nova (post-correcao): Notas Fiscais/Rejeitadas/{Unidade}/Diretoria {Diretoria}
+      // Se nao achar, o catch abaixo faz fallback pra pasta raiz (estrutura antiga).
+      folder = unidade && diretoria
+        ? `Notas Fiscais/Rejeitadas/${unidade}/Diretoria ${diretoria}`
+        : `Notas Fiscais/Rejeitadas`;
     } else {
       folder = `Notas Fiscais/Pendentes/${unidade}/Diretoria ${diretoria}`;
     }
@@ -145,8 +149,20 @@ module.exports = async function (context, req) {
         arquivos = (resp.value || []).filter(x => x.file);
       }
     } catch (e) {
-      // Pasta nao encontrada - se Aprovada com data, tenta sem data (NF pode ter sido aprovada em outra data)
-      if (status === 'Aprovada' && dataAprovada) {
+      // Pasta nao encontrada - se for Rejeitada, tenta fallback pra estrutura ANTIGA (pasta raiz).
+      // Nfs rejeitadas antes da correcao ficaram em "Notas Fiscais/Rejeitadas" sem subpastas.
+      if (status === 'Rejeitada') {
+        try {
+          const fallbackRejeitada = `Notas Fiscais/Rejeitadas`;
+          const resp = await client.api(`/sites/${siteId}/drive/root:/${fallbackRejeitada}:/children`).get();
+          arquivos = (resp.value || []).filter(x => x.file);
+          folder = fallbackRejeitada + ' (legacy raiz)';
+        } catch (e2) {
+          context.res = { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' },
+            body: htmlErro('Pasta nao encontrada', `Nao encontrei a pasta da NF rejeitada: <span style="font-family:monospace">${folder}</span>`, (e.message || '') + ' | fallback raiz: ' + (e2.message || '')) };
+          return;
+        }
+      } else if (status === 'Aprovada' && dataAprovada) {
         const fallbackFolder = `Notas Fiscais/Notas Aprovadas/${unidade}`;
         try {
           const subRespUnidade = await client.api(`/sites/${siteId}/drive/root:/${fallbackFolder}:/children`).get();
