@@ -2621,7 +2621,11 @@ async function carregarNotasReais() {
         hash: (n.HashSHA256 || '').substring(0,16),
         urlPDF: extrairUrlHyperlink(n.UrlPDFStr) || extrairUrlHyperlink(n.UrlPDF),
         urlPDFAprovado: extrairUrlHyperlink(n.UrlPDFAprovadoStr) || extrairUrlHyperlink(n.UrlPDFAprovado),
-        processado: !!n.Processado
+        processado: !!n.Processado,
+        // Compliance: registro de alinhamento financeiro em aprovacoes fora do prazo D+5
+        alinhouFinanceiro: (n.AlinhouFinanceiro === true || n.AlinhouFinanceiro === 'Sim' || n.AlinhouFinanceiro === 'true'),
+        alinhouFinanceiroRaw: n.AlinhouFinanceiro,
+        gestorFinanceiroAlinhado: n.GestorFinanceiroAlinhado || ''
       };
     });
     window._dadosCarregados.notas = true;
@@ -6239,7 +6243,20 @@ function renderAprovadasTable() {
                 <td>${n.diretoria||'—'}</td>
                 <td class="num"><b>${fmtBRL(n.valor)}</b></td>
                 <td><b>${n.lancadoPor||''}</b><br><span class="small muted">${n.lancadoEm||''}</span></td>
-                <td>${n.aprovadoPor||'—'}</td>
+                <td>
+                  ${n.aprovadoPor||'—'}
+                  ${(function(){
+                    // Badge de compliance: aprovacao fora do prazo D+5
+                    var raw = n.alinhouFinanceiroRaw;
+                    if (raw === undefined || raw === null || raw === '') return '';
+                    if (n.alinhouFinanceiro) {
+                      var quem = (n.gestorFinanceiroAlinhado || '').split('@')[0] || 'Financeiro';
+                      return '<br><span title="Aprovada fora do prazo D+5 com alinhamento previo" style="display:inline-block;background:#D1FAE5;color:#065F46;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;margin-top:2px">✓ Alinhado: ' + quem + '</span>';
+                    } else {
+                      return '<br><span title="Aprovada fora do prazo D+5 SEM alinhamento com Financeiro" style="display:inline-block;background:#FEE2E2;color:#7F1D1D;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600;margin-top:2px">⚠ Sem alinhamento</span>';
+                    }
+                  })()}
+                </td>
                 <td>${n.aprovadoEm||'—'}</td>
                 <td>${diasAteVenc !== null
                     ? (vencForaPrazo
@@ -7275,26 +7292,63 @@ function confirmApprove(id) {
   const now = new Date();
   const stamp = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
   const emailPrefix = currentPersona.name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ /g,'.');
-  openModal(`
-    <span class="close-x" onclick="closeModal()">×</span>
-    <h3>Aprovação da ${id}</h3>
-    <p>Ao confirmar, o backend aplicará a marca d'água abaixo (3 linhas, azul, transparência 70% — idêntica ao PA atual via PDF Blocks) e moverá o arquivo para
-    <span class="mono">SharePoint/Notas Aprovadas/${n.unidade}/${hojeBRT()}/</span>.</p>
-    <div class="modal-pdf-preview" style="min-height:280px">
-      [ Preview do PDF da NF ]
-      <div class="watermark-overlay">
-        <div>
-          <div class="l1">APROVADO</div>
-          <div>${stamp}</div>
-          <div>Por: ${emailPrefix}</div>
-        </div>
-      </div>
-    </div>
-    <div class="btn-row">
-      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-      <button class="btn btn-success" onclick="doApprove('${id}')">✓ Confirmar aprovação</button>
-    </div>
-  `);
+
+  // Checa se vencimento esta em < D+5 (mesmo criterio do lancamento)
+  var vencRaw = n.vencimento || n.Vencimento || '';
+  var diasParaVenc = null;
+  var foraPrazo = false;
+  if (vencRaw) {
+    try {
+      var dVenc = new Date(String(vencRaw).substring(0,10) + 'T00:00:00');
+      diasParaVenc = diasEntre(HOJE, dVenc);
+      foraPrazo = diasParaVenc != null && diasParaVenc < 5;
+    } catch(e){}
+  }
+
+  // Bloco extra de alinhamento financeiro (so quando fora do prazo)
+  var blocoAlinhamento = '';
+  if (foraPrazo) {
+    var membros = (gruposEntraID && gruposEntraID['PRONEP-Financeiro-Gestao'] && gruposEntraID['PRONEP-Financeiro-Gestao'].membros) || [];
+    var opcoesGestor = '<option value="">— Selecione o gestor —</option>' +
+      membros.map(function(m){
+        return '<option value="' + m.email + '">' + m.nome + ' (' + (m.cargo || '') + ')</option>';
+      }).join('');
+    blocoAlinhamento =
+      '<div class="alert alert-warning" style="margin:14px 0;padding:12px;border-radius:6px;background:#FEF3C7;border-left:4px solid #F59E0B">' +
+      '  <div style="font-weight:600;color:#92400E;margin-bottom:8px">⚠ Vencimento em ' + diasParaVenc + ' dia(s) — fora do prazo D+5</div>' +
+      '  <div style="font-size:13px;color:#78350F;margin-bottom:10px">Compliance: voce alinhou esta aprovacao com o Financeiro?</div>' +
+      '  <div style="display:flex;gap:14px;margin-bottom:10px">' +
+      '    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px"><input type="radio" name="aprov-alinhou" value="sim" onchange="document.getElementById(\'aprov-gestor-row\').style.display=\'block\'">Sim, alinhei</label>' +
+      '    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px"><input type="radio" name="aprov-alinhou" value="nao" onchange="document.getElementById(\'aprov-gestor-row\').style.display=\'none\'">Não alinhei (vou registrar)</label>' +
+      '  </div>' +
+      '  <div id="aprov-gestor-row" style="display:none">' +
+      '    <label style="display:block;font-size:12px;font-weight:600;color:#78350F;margin-bottom:4px">Com qual gestor financeiro?</label>' +
+      '    <select id="aprov-gestor-financeiro" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:14px;background:#fff">' + opcoesGestor + '</select>' +
+      '  </div>' +
+      '</div>';
+  }
+
+  openModal(
+    '<span class="close-x" onclick="closeModal()">×</span>' +
+    '<h3>Aprovação da ' + id + '</h3>' +
+    '<p>Ao confirmar, o backend aplicará a marca d\'água abaixo (3 linhas, azul, transparência 70% — idêntica ao PA atual via PDF Blocks) e moverá o arquivo para ' +
+    '<span class="mono">SharePoint/Notas Aprovadas/' + n.unidade + '/' + hojeBRT() + '/</span>.</p>' +
+    blocoAlinhamento +
+    '<div class="modal-pdf-preview" style="min-height:200px">' +
+    '  [ Preview do PDF da NF ]' +
+    '  <div class="watermark-overlay">' +
+    '    <div>' +
+    '      <div class="l1">APROVADO</div>' +
+    '      <div>' + stamp + '</div>' +
+    '      <div>Por: ' + emailPrefix + '</div>' +
+    '    </div>' +
+    '  </div>' +
+    '</div>' +
+    '<div class="btn-row">' +
+    '  <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>' +
+    '  <button class="btn btn-success" onclick="doApprove(\'' + id + '\')">✓ Confirmar aprovação</button>' +
+    '</div>'
+  );
 }
 
 async function doApprove(id) {
@@ -7305,6 +7359,27 @@ async function doApprove(id) {
   if (!spId || isNaN(parseInt(spId))) {
     toast('NF nao tem ID do SharePoint — provavelmente eh um mock antigo', 'error');
     return;
+  }
+
+  // VALIDA ALINHAMENTO FINANCEIRO se o modal mostrou o bloco (vencimento < D+5)
+  var alinhouFinanceiro = null;
+  var gestorFinanceiroAlinhado = '';
+  var blocoAlinhamentoExiste = document.querySelector('input[name="aprov-alinhou"]');
+  if (blocoAlinhamentoExiste) {
+    var radio = document.querySelector('input[name="aprov-alinhou"]:checked');
+    if (!radio) {
+      toast('Por favor, responda se voce alinhou com o Financeiro antes de aprovar', 'error');
+      return;
+    }
+    alinhouFinanceiro = radio.value === 'sim';
+    if (alinhouFinanceiro) {
+      var sel = document.getElementById('aprov-gestor-financeiro');
+      gestorFinanceiroAlinhado = sel && sel.value ? sel.value : '';
+      if (!gestorFinanceiroAlinhado) {
+        toast('Selecione qual gestor financeiro voce alinhou', 'error');
+        return;
+      }
+    }
   }
   // Substitui o botao por loading
   const modalBody = document.getElementById('modal-content');
@@ -7319,7 +7394,12 @@ async function doApprove(id) {
     const r = await fetch('/api/AprovarNota', {
       method: 'POST',
       credentials: 'include',
-      body: JSON.stringify({ id: spId })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: spId,
+        alinhouFinanceiro: alinhouFinanceiro,
+        gestorFinanceiroAlinhado: gestorFinanceiroAlinhado
+      })
     });
     const data = await r.json().catch(() => ({}));
 

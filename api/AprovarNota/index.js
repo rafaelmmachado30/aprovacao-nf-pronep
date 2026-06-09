@@ -250,6 +250,11 @@ module.exports = async function (context, req) {
       return;
     }
     diag.itemId = itemId;
+    // Campos opcionais de compliance (so vem populados quando NF vencendo em < D+5)
+    const alinhouFinanceiro = body.alinhouFinanceiro === true || body.alinhouFinanceiro === 'true';
+    const naoAlinhou = body.alinhouFinanceiro === false || body.alinhouFinanceiro === 'false';
+    const compliancePresente = alinhouFinanceiro || naoAlinhou;
+    const gestorFinanceiroAlinhado = String(body.gestorFinanceiroAlinhado || '').trim();
 
     diag.step = 'principal';
     const user = await getUser(req);
@@ -433,10 +438,17 @@ module.exports = async function (context, req) {
     diag.step = 'update_list';
     // QUIRK Graph API: hyperlinks misturados com outros campos no mesmo PATCH as vezes
     // dao 400. Separa em 2 PATCHes: primeiro campos base, depois hyperlinks.
-    const basePayload = buildPatchPayload({
+    const camposBase = {
       Status: 'Aprovada',
       AprovadoEm: new Date().toISOString()
-    }, colMap, colTypes);
+    };
+    // Compliance: aprovacao de NF vencendo em < D+5 - registra se alinhou com Financeiro
+    if (compliancePresente) {
+      camposBase.AlinhouFinanceiro = alinhouFinanceiro;
+      camposBase.GestorFinanceiroAlinhado = alinhouFinanceiro ? gestorFinanceiroAlinhado : 'NAO_ALINHADO_SEGUIU_MESMO_ASSIM';
+      diag.compliance = { alinhou: alinhouFinanceiro, gestor: camposBase.GestorFinanceiroAlinhado };
+    }
+    const basePayload = buildPatchPayload(camposBase, colMap, colTypes);
     await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(basePayload);
 
     // FIX: grava URL como STRING na coluna UrlPDFAprovadoStr (text-multiline criada via Graph).
