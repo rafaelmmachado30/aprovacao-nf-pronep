@@ -525,10 +525,11 @@ module.exports = async function (context, req) {
     diag.webUrl = uploadResp.webUrl;
 
     diag.step = 'create_list_item';
-    // Title pra NF autogerada inclui descricao pra distinguir visualmente.
-    // Ex: "NF auto 00001 - Reembolso Joao" ou "NF 12345" (manual)
+    // Title pra NF autogerada inclui descricao (ou observacao como fallback) pra distinguir visualmente.
+    // Ex: "NF auto 00001 - Reembolso passagem SP" ou "NF 12345" (manual)
+    const descritivoFallback = (descricao || observacao || '').toString().trim().slice(0, 60);
     const title = foiAutogerado
-      ? (`NF auto ${numeroFinal}` + (descricao ? ' - ' + descricao : '')).slice(0, 80)
+      ? (`NF auto ${numeroFinal}` + (descritivoFallback ? ' - ' + descritivoFallback : '')).slice(0, 80)
       : `NF ${numeroFinal}`;
     // Constroi o objeto com displayNames; buildFieldsObject converte pra internalNames
     // Formata datas como ISO completo (DataVencimento precisa de hora pra SharePoint Date+Time)

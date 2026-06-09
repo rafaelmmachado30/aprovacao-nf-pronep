@@ -7022,8 +7022,10 @@ async function submitNF() {
     msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>Campos obrigatorios faltando.</b> Verifique fornecedor, valor, vencimento e o anexo PDF.</div></div>';
     return;
   }
-  if (!numero && !descricao.trim()) {
-    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>NF sem numero precisa de descricao.</b> Como nao informou o numero (reembolso, rescisao, etc.), preencha o campo Descricao explicando o lancamento.</div></div>';
+  // NF sem numero precisa de algum descritivo: aceita Descricao OU Observacao preenchidos
+  var observacaoVal = ((document.getElementById('frm-observacao') || {}).value || '').trim();
+  if (!numero && !descricao.trim() && !observacaoVal) {
+    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>NF sem numero precisa de descricao ou observacao.</b> Como nao informou o numero (reembolso, rescisao, etc.), preencha o campo Descricao OU Observacao explicando o lancamento.</div></div>';
     return;
   }
 
