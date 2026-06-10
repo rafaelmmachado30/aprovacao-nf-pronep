@@ -643,7 +643,7 @@ async function tool_listar_fila(args, ctx) {
   if (args.apenas_d5) {
     const hoje = new Date(new Date().getTime() - 3*60*60*1000);
     const d5 = new Date(hoje.getTime() + 5*24*60*60*1000).toISOString().substring(0,10);
-    notas = notas.filter(n => String(n.Vencimento || '').substring(0,10) <= d5);
+    notas = notas.filter(n => String(n.DataVencimento || n.Vencimento || '').substring(0,10) <= d5);
   }
   // Limita resposta pra nao estourar contexto
   notas = notas.slice(0, 50);
@@ -655,7 +655,7 @@ async function tool_listar_fila(args, ctx) {
       fornecedor: n.Fornecedor,
       cnpj: n.FornecedorCNPJ,
       valor: Number(n.ValorTotal || n.Valor || 0),
-      vencimento: String(n.Vencimento || '').substring(0,10),
+      vencimento: String(n.DataVencimento || n.Vencimento || '').substring(0,10),
       unidade: n.Unidade,
       diretoria: n.Diretoria,
       status: n.Status,
@@ -708,7 +708,7 @@ async function tool_listar_aprovadas(args, ctx) {
       numero: n.NumeroNF,
       fornecedor: n.Fornecedor,
       valor: Number(n.ValorTotal || n.Valor || 0),
-      vencimento: String(n.Vencimento || '').substring(0,10),
+      vencimento: String(n.DataVencimento || n.Vencimento || '').substring(0,10),
       aprovadoEm: String(n.AprovadoEm || '').substring(0,10),
       unidade: n.Unidade
     }))
@@ -1106,7 +1106,7 @@ async function tool_listar_rejeitadas(args, ctx) {
       numero: n.NumeroNF,
       fornecedor: n.Fornecedor,
       valor: Number(n.ValorTotal || n.Valor || 0),
-      vencimento: String(n.Vencimento || '').substring(0, 10),
+      vencimento: String(n.DataVencimento || n.Vencimento || '').substring(0, 10),
       rejeitadoEm: String(n.RejeitadoEm || '').substring(0, 10),
       motivoRejeicao: n.MotivoRejeicao || '(sem motivo registrado)',
       lancadoPor: n.LancadoPor,

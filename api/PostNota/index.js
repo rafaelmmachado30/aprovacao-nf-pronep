@@ -423,11 +423,21 @@ module.exports = async function (context, req) {
       // OID sintetico pra audit log nao silenciar (precisa de oid pra gravar)
       user = { oid: 'body-' + Date.now(), email: submitterEmail, name: submitterEmail };
     } else {
-      submitterEmail = 'desconhecido@pronep.com.br';
-      submitterSource = 'desconhecido';
-      // OID sintetico pra audit log nao silenciar - sem isso o caso "desconhecido"
-      // some da Trilha de Auditoria e cega o diagnostico (guard em auditLog.js linha 80).
-      user = { oid: 'anon-' + Date.now(), email: submitterEmail, name: submitterEmail };
+      // MUDANCA CRITICA (10/06/2026): NAO gravar como "desconhecido". Rejeita o lancamento
+      // forcando o user a fazer relogin. Antes do fix, NFs vinham como desconhecido@pronep.com.br
+      // toda vez que a sessao expirava no momento do submit, exigindo intervencao manual no SP.
+      return ctxErr(context, 401, 'Sessao expirada — nao conseguimos identificar voce. Por favor, recarregue a pagina (Ctrl+Shift+R) e faca login novamente antes de lancar a NF.', {
+        step: 'auth_failed',
+        sessao_expirada: true,
+        debug: {
+          getUserOk: !!(usr && usr.email),
+          principalEmailOk: !!validEmail(principalEmail),
+          bodyEmailOk: !!validEmail(solicitanteEmail),
+          bodyEmailRaw: typeof solicitanteEmail === 'string' ? String(solicitanteEmail).slice(0, 80) : null,
+          hasEasyAuthHeader: !!(req.headers && (req.headers['x-ms-client-principal'] || req.headers['X-MS-CLIENT-PRINCIPAL'])),
+          hasTeamsToken: !!(req.headers && (req.headers['x-teams-token'] || req.headers['X-Teams-Token']))
+        }
+      });
     }
     diag.submitter = submitterEmail;
     diag.submitterSource = submitterSource;

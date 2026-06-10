@@ -7156,6 +7156,34 @@ async function submitNF() {
       fileName:        file.name
     };
 
+    // PRE-FLIGHT: valida sessao ANTES de submeter o arquivo grande
+    // Evita lancar como "desconhecido" quando o cookie expirou silenciosamente
+    try {
+      const sessRes = await fetch('/.auth/me', { credentials: 'include', cache: 'no-store' });
+      if (sessRes.ok) {
+        const sessData = await sessRes.json().catch(() => ({}));
+        const principal = (sessData && sessData.clientPrincipal) || (Array.isArray(sessData) && sessData[0]) || null;
+        const sessaoOk = !!(principal && (principal.userId || principal.userDetails || principal.user_id));
+        if (!sessaoOk) {
+          msgs.innerHTML = '';
+          openModal(
+            '<div style="text-align:center;padding:24px 12px">' +
+            '<div style="font-size:48px;margin-bottom:12px">🔒</div>' +
+            '<h3 style="color:#DC2626;margin:0 0 12px">Sessão expirada</h3>' +
+            '<p style="color:#374151;margin-bottom:8px"><b>Sua autenticação não está ativa.</b></p>' +
+            '<p style="color:#6B7280;font-size:14px;margin-bottom:20px">Pra evitar lançar a NF como "desconhecido", precisamos que você faça login novamente.</p>' +
+            '<div class="btn-row" style="justify-content:center">' +
+              '<button class="btn btn-primary" onclick="window.location.reload(true)" style="background:#1F4E79">🔄 Recarregar + Relogar</button>' +
+            '</div>' +
+            '</div>'
+          );
+          btn.disabled = false;
+          btn.textContent = labelOriginal;
+          return;
+        }
+      }
+    } catch (e) { /* se a checagem falhar, segue - backend ainda valida e retorna 401 se cair */ }
+
     const resp = await fetch('/api/PostNota', {
       method: 'POST',
       credentials: 'include',
@@ -7170,6 +7198,33 @@ async function submitNF() {
       const motivoLabel = data.motivo === 'chave_acesso' ? 'mesma chave de acesso (44 dígitos) — NF já lançada' : (data.motivo === 'hash' ? 'arquivo PDF idêntico' : (data.motivo === 'cnpj_numero' ? 'mesmo CNPJ + número da NF' : (data.motivo || '—')));
       const statusBadge = data.status ? `<b>${data.status}</b>` : '<b>—</b>';
       msgs.innerHTML = `<div class="alert alert-error"><span class="ico">⚠</span><div><b>Duplicidade detectada.</b> Esta NF ja foi lancada anteriormente.<br>Motivo: <b>${motivoLabel}</b> · Status atual: ${statusBadge}.<br>O lancamento foi bloqueado e o arquivo NAO foi gravado no SharePoint.<br><span class="small muted">Obs: NFs rejeitadas nao bloqueiam — voce pode reenviar a NF corrigida.</span></div></div>`;
+      return;
+    }
+
+    // Sessao expirada - bloqueia gravacao como "desconhecido"
+    if (resp.status === 401 && data.sessao_expirada) {
+      msgs.innerHTML = '';
+      openModal(
+        '<div style="text-align:center;padding:24px 12px">' +
+        '<div style="font-size:48px;margin-bottom:12px">🔒</div>' +
+        '<h3 style="color:#DC2626;margin:0 0 12px">Sessão expirada</h3>' +
+        '<p style="color:#374151;margin-bottom:8px"><b>Sua autenticação caiu no momento do lançamento.</b></p>' +
+        '<p style="color:#6B7280;font-size:14px;margin-bottom:20px">A NF NÃO foi gravada. Pra evitar lançar como "desconhecido", precisamos confirmar quem você é antes de continuar.</p>' +
+        '<div style="background:#FEF3C7;border-left:4px solid #F59E0B;padding:12px;border-radius:4px;text-align:left;margin-bottom:20px">' +
+          '<b style="color:#92400E;font-size:13px">⚠ O que fazer:</b>' +
+          '<ol style="margin:8px 0 0 20px;padding:0;color:#78350F;font-size:13px;line-height:1.6">' +
+            '<li>Clique em <b>Recarregar + Relogar</b> abaixo</li>' +
+            '<li>Faça login de novo com sua conta Pronep</li>' +
+            '<li>Volte para Lançar NF e tente de novo</li>' +
+          '</ol>' +
+        '</div>' +
+        '<div class="btn-row" style="justify-content:center">' +
+          '<button class="btn btn-primary" onclick="window.location.reload(true)" style="background:#1F4E79">🔄 Recarregar + Relogar</button>' +
+        '</div>' +
+        '</div>'
+      );
+      btn.disabled = false;
+      btn.textContent = labelOriginal;
       return;
     }
 
