@@ -624,13 +624,29 @@ function filtraRBAC(notas, user, isAdmin, isFinanceiro) {
   });
 }
 
+// A6: le TODOS os itens da lista seguindo @odata.nextLink. Antes varias tools faziam
+// um unico GET ($top=500/2000) e o Graph trunca a pagina em ~999 -> NFs sumiam
+// silenciosamente da fila/relatorios/anomalia da SAN.
+async function lerTodosItensSol(client, siteId, listId, maxPaginas) {
+  const all = [];
+  let url = '/sites/' + siteId + '/lists/' + listId + '/items?expand=fields&$top=500';
+  let pages = 0;
+  const lim = maxPaginas || 40;
+  while (url && pages < lim) {
+    const resp = await client.api(url).get();
+    all.push(...(resp.value || []));
+    pages++;
+    url = resp['@odata.nextLink']
+      ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '')
+      : null;
+  }
+  return all;
+}
+
 async function tool_listar_fila(args, ctx) {
   const { client, siteId, listNotasId, invColMap } = ctx.gr;
-  const top = 500;
   // Status pendente = "Lancada" ou em fluxo de aprovacao
-  let url = '/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=' + top;
-  const resp = await client.api(url).get();
-  let notas = (resp.value || []).map(it => normalizeItem(it, invColMap));
+  let notas = (await lerTodosItensSol(client, siteId, listNotasId)).map(it => normalizeItem(it, invColMap));
   // Filtra: status Lancada (pendente) ou EmAprovacao
   notas = notas.filter(n => ['Lancada','EmAprovacao','Pendente'].includes(String(n.Status || '')));
   // Filtra RBAC (admin/financeiro veem tudo, resto so o seu)
@@ -676,8 +692,7 @@ async function tool_listar_fila(args, ctx) {
 async function tool_listar_aprovadas(args, ctx) {
   const { client, siteId, listNotasId, invColMap } = ctx.gr;
   const periodo = args.periodo || 'este_mes';
-  const resp = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=2000').get();
-  let notas = (resp.value || []).map(it => normalizeItem(it, invColMap));
+  let notas = (await lerTodosItensSol(client, siteId, listNotasId)).map(it => normalizeItem(it, invColMap));
   notas = notas.filter(n => String(n.Status || '') === 'Aprovada');
   // Periodo
   const agora = new Date(new Date().getTime() - 3*60*60*1000);
@@ -864,8 +879,7 @@ async function tool_detectar_anomalia(args, ctx) {
   if (detalhe.erro) return detalhe;
   // Pega historico do mesmo fornecedor (CNPJ)
   const { client, siteId, listNotasId, invColMap } = ctx.gr;
-  const resp = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=2000').get();
-  let historico = (resp.value || []).map(it => normalizeItem(it, invColMap));
+  let historico = (await lerTodosItensSol(client, siteId, listNotasId)).map(it => normalizeItem(it, invColMap));
   historico = historico.filter(n => {
     const cnpj1 = String(n.CNPJFornecedor || '').replace(/\D/g, '');
     const cnpj2 = String(detalhe.cnpj || '').replace(/\D/g, '');
@@ -1095,11 +1109,10 @@ async function tool_agregar_contratos(args, ctx) {
 async function tool_listar_rejeitadas(args, ctx) {
   const { client, siteId, listNotasId, invColMap } = ctx.gr;
   const escopo = args.escopo || 'minhas';
-  const resp = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=2000').get();
-  let notas = (resp.value || []).map(it => normalizeItem(it, invColMap));
+  let notas = (await lerTodosItensSol(client, siteId, listNotasId)).map(it => normalizeItem(it, invColMap));
   notas = notas.filter(n => String(n.Status || '') === 'Rejeitada');
-  // RBAC: nao-admin so ve as suas mesmo pedindo "todas"
-  if (escopo === 'minhas' || !ctx.isAdmin) {
+  // RBAC: admin E financeiro podem ver todas; demais so as que lancaram.
+  if (escopo === 'minhas' || (!ctx.isAdmin && !ctx.isFinanceiro)) {
     const emailLow = String(ctx.user.email).toLowerCase();
     notas = notas.filter(n => String(n.LancadoPor || '').toLowerCase() === emailLow);
   }

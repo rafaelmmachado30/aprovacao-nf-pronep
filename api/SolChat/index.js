@@ -23,18 +23,13 @@ const { getUserRoles } = require('../shared/userRoles');
 const { runSol } = require('../shared/sol');
 const { salvar: salvarHistorico } = require('../shared/solHistorico');
 
-// Detecta se o usuario tem perfil admin/financeiro (ve tudo) pelos grupos Entra ID
-// Replica logica de MeusGrupos — verifica se o oid eh membro de grupos privilegiados.
-// Pra simplicidade, no MVP: se o email termina em uma whitelist OU o usuario tem
-// claim de grupo admin, considera admin. Em prod, melhor consultar Graph.
-function detectAdminFromHeaders(req, user) {
-  // Header X-Sol-Admin: 'true' setado pelo frontend depois de checar MeusGrupos
-  const headerAdmin = req.headers && (req.headers['x-sol-admin'] || req.headers['X-Sol-Admin']);
-  if (String(headerAdmin || '').toLowerCase() === 'true') return true;
-  // Fallback: emails admin hardcoded (mesma logica do front)
+// A12: admin NAO vem mais do header x-sol-admin (era enviado pelo frontend e
+// trivialmente forjavel -> escalonamento pra ver dados de todas as diretorias).
+// Agora a fonte de verdade eh o Graph (grupo Entra 'administrador'), com fallback
+// opcional pra whitelist server-side SOL_ADMIN_EMAILS (env, nao manipulavel pelo cliente).
+function detectAdminFromEnv(user) {
   const adminEmails = (process.env.SOL_ADMIN_EMAILS || '').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
-  if (adminEmails.includes((user.email || '').toLowerCase())) return true;
-  return false;
+  return adminEmails.includes((user.email || '').toLowerCase());
 }
 
 module.exports = async function (context, req) {
@@ -59,11 +54,11 @@ module.exports = async function (context, req) {
 
     const history = Array.isArray(body.history) ? body.history.slice(-20) : []; // ultima 20 msgs
     const viewAtual = String(body.view || 'fila-aprovacao');
-    // Detecta admin/financeiro via grupos AAD (Graph) + fallbacks legacy
-    const adminFromHeader = detectAdminFromHeaders(req, user);
+    // Detecta admin/financeiro via grupos AAD (Graph) — fonte de verdade server-side.
+    const adminFromEnv = detectAdminFromEnv(user);
     let graphRoles = [];
     try { graphRoles = await getUserRoles(user); } catch (e) {}
-    const isAdmin = adminFromHeader || graphRoles.includes('administrador');
+    const isAdmin = adminFromEnv || graphRoles.includes('administrador');
     const isFinanceiro = graphRoles.includes('financeiro_nf');
 
     if (!process.env.OPENAI_API_KEY) {

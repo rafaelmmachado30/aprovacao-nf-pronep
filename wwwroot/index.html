@@ -4266,9 +4266,10 @@ const views = {
   },
 
   'mapa-aprovadores': () => {
-    // Calcular estatísticas
+    // Calcular estatísticas (A8: usa o mapa dinamico da API, fallback pro hardcoded)
+    const mapaAp = mapaAprovadoresAtivo();
     const aprovadores = {};
-    Object.entries(aprovadoresReais).forEach(([k, v]) => {
+    Object.entries(mapaAp).forEach(([k, v]) => {
       const [unidade, diretoria] = k.split('|');
       if (!aprovadores[v.email]) aprovadores[v.email] = { nome: v.nome, combos: [] };
       aprovadores[v.email].combos.push({ unidade, diretoria });
@@ -4281,7 +4282,7 @@ const views = {
     diretorias.forEach(d => {
       matriz += `<tr><td><b>${d}</b></td>`;
       unidades.forEach(u => {
-        const ap = aprovadoresReais[`${u}|${d}`];
+        const ap = mapaAp[`${u}|${d}`];
         if (ap) {
           const prefix = ap.email.split('@')[0];
           matriz += `<td class="center"><div style="font-weight:600;color:var(--azul-escuro);font-size:12px">${ap.nome.split(' ')[0]}</div><div class="small muted mono" style="font-size:10px">${prefix}</div></td>`;
@@ -4308,7 +4309,7 @@ const views = {
       <h2>Mapa de Aprovadores</h2>
       <div class="view-sub">
         Roteamento extraído diretamente do Power Automate atual.
-        <b>${Object.keys(aprovadores).length} aprovadores</b> cobrem as <b>${Object.keys(aprovadoresReais).length}</b> combinações
+        <b>${Object.keys(aprovadores).length} aprovadores</b> cobrem as <b>${Object.keys(mapaAp).length}</b> combinações
         de Unidade × Diretoria. Useful para validar lacunas e sobreposições.
       </div>
 
@@ -4320,7 +4321,7 @@ const views = {
       </div></div>
 
       <div class="card">
-        <h3>Matriz Unidade × Diretoria <span class="pill">${Object.keys(aprovadoresReais).length} combinações ativas</span></h3>
+        <h3>Matriz Unidade × Diretoria <span class="pill">${Object.keys(mapaAp).length} combinações ativas</span></h3>
         ${matriz}
       </div>
 
@@ -4365,12 +4366,20 @@ const views = {
   }
 };
 
+// A8: retorna o mapa de aprovadores ATIVO — prefere o dinamico carregado da API
+// (/api/ListarDiretorias = matriz real do SharePoint) e cai pro hardcoded so se a
+// API ainda nao respondeu. Antes os callers liam direto a const hardcoded, entao
+// se a matriz real divergisse do codigo o gestor via/aprovava o escopo errado.
+function mapaAprovadoresAtivo() {
+  return window._aprovadoresReaisAtuais || aprovadoresReaisDinamico || aprovadoresReais;
+}
+
 // Dado um e-mail de gestor, retorna a lista de combinações Unidade × Diretoria que ele aprova
-// (extraído da matriz real do Power Automate)
 function escopoDoGestor(email) {
   const escopo = [];
-  Object.entries(aprovadoresReais).forEach(([key, val]) => {
-    if (val.email === email) {
+  const alvo = (email || '').toLowerCase();
+  Object.entries(mapaAprovadoresAtivo()).forEach(([key, val]) => {
+    if (val && String(val.email || '').toLowerCase() === alvo) {
       const [unidade, diretoria] = key.split('|');
       escopo.push({ unidade, diretoria });
     }
