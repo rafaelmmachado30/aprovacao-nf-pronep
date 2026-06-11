@@ -109,10 +109,10 @@ const VIEW_SCOPES = {
   },
   'lancamento': {
     titulo: 'Lancamento de NF',
-    foco: 'APENAS ORIENTAR o usuario sobre como preencher o formulario de lancamento de NF. Voce NAO tem acesso a dados aqui — sem tools. Explica campos, mascaras, validacoes, upload de PDF.',
+    foco: 'Orientar o usuario sobre como preencher o formulario de lancamento de NF (campos, mascaras, validacoes, upload de PDF) — esse eh o FOCO. Mas voce TAMBEM pode consultar qualquer dado do sistema (NFs em fila/aprovadas/rejeitadas, fornecedores, contratos) se o usuario perguntar.',
     tools: []
   },
-  'fornecedores': { titulo: 'Fornecedores', foco: 'apenas orientacao sobre como usar a tela de cadastro de fornecedores. Sem tools.', tools: [] },
+  'fornecedores': { titulo: 'Fornecedores', foco: 'orientacao sobre a tela de cadastro de fornecedores. Tambem pode consultar qualquer dado do sistema (NFs, contratos) se o usuario perguntar.', tools: [] },
   'dashboard':    {
     titulo: 'Dashboard',
     foco: 'orientacao sobre os indicadores e graficos exibidos. Tambem RESPONDE sobre NFs (fila, aprovadas, REJEITADAS, fornecedores) e CONTRATOS (vencimentos, valores, fornecedores) usando as tools disponiveis. CRITICO: NUNCA diga que contratos sao gerenciados fora do sistema - eles ESTAO no proprio sistema na view Contratos.',
@@ -133,7 +133,7 @@ const VIEW_SCOPES = {
     foco: 'consulta das NFs rejeitadas DO USER. Use listar_rejeitadas com escopo=minhas (padrao).',
     tools: ['listar_rejeitadas','detalhes_nf']
   },
-  'configuracoes': { titulo: 'Configuracoes', foco: 'apenas orientacao sobre opcoes de admin/usuario. Sem tools.', tools: [] },
+  'configuracoes': { titulo: 'Configuracoes', foco: 'orientacao sobre opcoes de admin/usuario. Tambem pode consultar qualquer dado do sistema (NFs, contratos) se o usuario perguntar.', tools: [] },
   'contratos':    {
     titulo: 'Contratos',
     foco: 'consulta da base de contratos vigentes e historicos da Pronep. Responda duvidas sobre vigencias, valores, fornecedores, vencimentos. Use as tools de contratos sempre que o usuario perguntar algo factual sobre contratos. NAO ha aprovar/rejeitar contratos aqui. CRITICO: quando o usuario pedir "link", "PDF", "abre" ou "me mostra" um contrato especifico, chame detalhes_contrato + abrir_contrato na mesma turn — o frontend abre automaticamente em nova aba. Resposta breve tipo "Abrindo o contrato da BMS de R$3.194,03..."',
@@ -145,11 +145,22 @@ function getViewScope(viewAtual) {
   return VIEW_SCOPES[viewAtual || 'fila-aprovacao'] || VIEW_SCOPES['fila-aprovacao'];
 }
 
+// Tools de LEITURA disponiveis em TODAS as telas — a SAN responde qualquer consulta
+// factual do sistema (NFs e contratos) independente de onde o usuario esteja. As tools
+// de ACAO (propor_aprovacao/rejeicao/marcar_processado) seguem contextuais por view.
+const READ_TOOLS_UNIVERSAIS = [
+  'listar_fila', 'listar_aprovadas', 'listar_rejeitadas', 'detalhes_nf',
+  'agregar_por_fornecedor', 'detectar_anomalia', 'abrir_nf',
+  'listar_contratos', 'detalhes_contrato', 'agregar_contratos', 'contratos_vencendo', 'abrir_contrato'
+];
+
 function getToolsForView(viewAtual) {
   var scope = getViewScope(viewAtual);
   var allowed = scope.tools || [];
-  if (allowed.length === 0) return [];
-  return TOOLS.filter(function(t){ return allowed.indexOf(t.function.name) >= 0; });
+  // Une as tools de leitura universais com as tools especificas (acoes) da view.
+  var union = [];
+  READ_TOOLS_UNIVERSAIS.concat(allowed).forEach(function(n){ if (union.indexOf(n) < 0) union.push(n); });
+  return TOOLS.filter(function(t){ return union.indexOf(t.function.name) >= 0; });
 }
 
 // Resolve o ESCOPO do usuario na lista PRONEP-NF-Diretorias.
@@ -240,6 +251,7 @@ function buildSystemPrompt(user, viewAtual, escopo, perfil) {
     '  6. Se nao tem dados pra responder, fale direto. NAO INVENTE.',
     '  7. Se o usuario pedir algo fora do dominio do sistema (NF, fornecedor, aprovacao), recuse educadamente.',
     '  8. PDF/RELATORIO: voce NUNCA gera PDF diretamente nem precisa. Quando o user pedir "relatorio", "exportar", "imprimir", "PDF", "documento": APENAS LISTE OS DADOS normalmente (tabela markdown). O frontend exibe AUTOMATICAMENTE um botao "Exportar PDF" abaixo da sua resposta quando detecta essas palavras. NUNCA diga "nao consigo gerar PDF", "nao tenho como exportar", "use Ctrl+P" - eh FALSO. Apenas responda a pergunta normalmente, com tabela bem organizada.',
+    '  9. ACESSO TOTAL DE LEITURA: voce tem ferramentas pra consultar TODOS os dados do sistema — NFs em fila, aprovadas, rejeitadas, agregacoes por fornecedor, deteccao de anomalia E contratos (vigencias, vencimentos, valores) — INDEPENDENTE da tela atual. Se o usuario perguntar qualquer coisa factual (ex: "NFs aprovadas hoje na minha diretoria", "quanto aprovei esse mes", "contratos vencendo"), USE a tool correspondente e responda. NUNCA diga que "nao tem ferramenta pra isso", que "so tem tools de contratos" ou que "so tem tools de NF" — voce tem TODAS. A tela atual define apenas o seu FOCO, NAO limita o que voce pode consultar. So recuse se for assunto totalmente fora do sistema (NF/fornecedor/contrato/aprovacao).',
     '',
     'BASE DE CONHECIMENTO (do manual oficial do sistema):',
     getManualForView(viewAtual),
@@ -299,14 +311,14 @@ function buildSystemPrompt(user, viewAtual, escopo, perfil) {
       '    * Duplicidade: o sistema checa chave de acesso (44 digitos) e numero+fornecedor. Se ja existe e nao foi rejeitada, BLOQUEIA o envio.',
       '    * Vencimento vencido: alerta se a data ja passou.',
       '    * Fornecedor incompleto: precisa ter CNPJ ou CPF antes de aceitar a NF.',
-      '  - Se o usuario pedir pra abrir/aprovar/listar NFs, oriente educadamente que essa tela so faz lancamento — pra acoes ou consultas, ir pra Fila de Aprovacao ou Notas Aprovadas.'
+      '  - CONSULTAS (listar NFs/aprovadas/rejeitadas/contratos, agregacoes) voce RESPONDE normalmente usando as tools, mesmo nesta tela. Apenas ACOES que modificam NF (aprovar/rejeitar) e que devem ser feitas na Fila de Aprovacao — pra essas, oriente o usuario a ir pra la.'
     ];
   } else if (semTools) {
     specific = [
       '',
       'REGRAS DESTA TELA (' + scope.titulo + '):',
-      '  - Voce NAO TEM TOOLS aqui. Apenas tira duvidas de NAVEGACAO e USABILIDADE do sistema.',
-      '  - Se o usuario pedir uma acao especifica em NF (aprovar, abrir, ver), oriente a ir pra Fila de Aprovacao ou Notas Aprovadas.'
+      '  - O FOCO desta tela eh orientacao/usabilidade, mas voce PODE consultar qualquer dado do sistema (NFs e contratos) usando suas tools de leitura se o usuario perguntar.',
+      '  - Acoes que MODIFICAM NF (aprovar/rejeitar/marcar processado) nao sao feitas aqui — oriente a ir pra Fila de Aprovacao ou Notas Aprovadas pra isso.'
     ];
   }
 
