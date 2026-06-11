@@ -15,6 +15,9 @@ const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 
 module.exports = async function (context, req) {
+  // C5: diagnostico de lista — restrito a admin.
+  const { requireAdmin } = require('../shared/authz');
+  if (!(await requireAdmin(context, req))) return;
   const out = { timestamp: new Date().toISOString() };
   try {
     const credential = new ClientSecretCredential(

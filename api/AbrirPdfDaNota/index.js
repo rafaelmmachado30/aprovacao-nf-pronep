@@ -8,6 +8,7 @@
  */
 
 require('isomorphic-fetch');
+const { resolveAuthz } = require('../shared/authz');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -56,6 +57,14 @@ h1{color:#C62828;margin:0 0 12px}.extra{background:#F4F8FB;padding:12px;border-r
 
 module.exports = async function (context, req) {
   try {
+    // C3: exige autenticacao (defesa em profundidade; o SWA ja exige sessao na rota).
+    const authz = await resolveAuthz(req);
+    if (!authz) {
+      context.res = { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        body: htmlErro('Nao autenticado', 'Faca login para abrir o PDF da nota.') };
+      return;
+    }
+
     const itemId = req.query.id;
     if (!itemId) {
       context.res = { status: 400, headers: { 'Content-Type': 'text/html; charset=utf-8' },
@@ -78,6 +87,20 @@ module.exports = async function (context, req) {
     const unidade = fields.Unidade || '';
     const diretoria = fields.Diretoria || '';
     const numero = String(fields.NumeroNF || '');
+
+    // C3: RBAC por escopo — mesmo criterio do ListarNotas. Evita IDOR (enumerar ?id=
+    // e baixar PDF de NF de qualquer diretoria). Admin/financeiro veem tudo; gestor
+    // so onde e o aprovador; demais so o que lancaram.
+    const lancadoPor = (fields.LancadoPor || '').toLowerCase();
+    const aprovadorAtual = (fields.AprovadorAtual || '').toLowerCase();
+    const podeVer = authz.isAdmin || authz.isFinanceiro
+      || (authz.isGestor && aprovadorAtual === authz.email)
+      || (lancadoPor === authz.email);
+    if (!podeVer) {
+      context.res = { status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8' },
+        body: htmlErro('Acesso negado', 'Voce nao tem permissao para abrir o PDF desta nota fiscal.') };
+      return;
+    }
 
     // FIX CRITICO: usa URLs ESPECIFICAS gravadas na NF como FONTE DA VERDADE.
     // Antes o sistema fazia busca por NOME do arquivo (NumeroNF) na pasta, o que

@@ -8,6 +8,7 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
+const { resolveAuthz } = require('../shared/authz');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
@@ -86,11 +87,18 @@ function validarConfig(c) {
 
 module.exports = async function (context, req) {
   try {
-    const user = await getUser(req);
-    if (!user) {
+    // C4: exige role de admin (antes aceitava qualquer autenticado — config global
+    // controla roteamento de aprovacao de 2o nivel e valorLimite).
+    const authz = await resolveAuthz(req);
+    if (!authz) {
       context.res = { status: 401, body: { error: 'Nao autenticado' } };
       return;
     }
+    if (!authz.isAdmin) {
+      context.res = { status: 403, body: { error: 'Acesso restrito a administradores' } };
+      return;
+    }
+    const user = authz.user;
 
     const body = req.body || {};
     const config = body.config;
@@ -99,11 +107,6 @@ module.exports = async function (context, req) {
       context.res = { status: 400, body: { error: erro } };
       return;
     }
-
-    // Validacao admin: usa o role 'administrador' do MeusGrupos
-    // Se nao consultarmos via Graph aqui, confiamos no front (Easy Auth ja autenticou).
-    // Em producao real, validar role aqui consultando memberOf do user.
-    // Por enquanto: aceita qualquer usuario autenticado (frontend filtra a UI).
 
     const client = await getGraphClient();
     const { siteId, listId } = await resolveSiteAndList(client);

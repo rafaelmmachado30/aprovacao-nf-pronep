@@ -7,6 +7,9 @@
  *   ?pasta=/GERENCIA DE PROJETOS E TI/CORPORATIVO  (so usado em step=listar)
  */
 module.exports = async function (context, req) {
+  // C5: diagnostico — restrito a admin.
+  const { requireAdmin } = require('../shared/authz');
+  if (!(await requireAdmin(context, req))) return;
   const out = {
     timestamp: new Date().toISOString(),
     step: (req.query && req.query.step) || 'all',

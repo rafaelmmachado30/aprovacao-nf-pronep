@@ -9,6 +9,9 @@
  */
 
 module.exports = async function (context, req) {
+  // C5: diagnostico — restrito a admin (expunha prefixos de chaves de IA).
+  const { requireAdmin } = require('../shared/authz');
+  if (!(await requireAdmin(context, req))) return;
   const out = {
     timestamp: new Date().toISOString(),
     env: {

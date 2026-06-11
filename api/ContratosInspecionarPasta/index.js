@@ -10,6 +10,9 @@
  *   - children: id+name+listItem.fields de cada filho (pra comparar)
  */
 module.exports = async function (context, req) {
+  // C5: dump arbitrario de pasta do SharePoint — restrito a admin.
+  const { requireAdmin } = require('../shared/authz');
+  if (!(await requireAdmin(context, req))) return;
   try {
     const pasta = (req.query && req.query.path) || '';
     if (!pasta) {

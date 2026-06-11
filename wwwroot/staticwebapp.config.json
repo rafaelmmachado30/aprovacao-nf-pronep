@@ -11,106 +11,49 @@
     }
   },
   "routes": [
-    {
-      "route": "/login",
-      "rewrite": "/.auth/login/aad"
-    },
-    {
-      "route": "/logout",
-      "redirect": "/.auth/logout"
-    },
-    {
-      "route": "/sem-acesso",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
-    },
-    {
-      "route": "/sem-acesso.html",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
-    },
-    {
-      "route": "/teams-login.html",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
-    },
-    {
-      "route": "/teams-auth-callback.html",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
-    },
-    {
-      "route": "/vendor/*",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
-    },
+    { "route": "/login", "rewrite": "/.auth/login/aad" },
+    { "route": "/logout", "redirect": "/.auth/logout" },
+    { "route": "/sem-acesso", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/sem-acesso.html", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/teams-login.html", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/teams-auth-callback.html", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/vendor/*", "allowedRoles": ["anonymous", "authenticated"] },
     {
       "route": "/manifest.webmanifest",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ],
-      "headers": {
-        "Content-Type": "application/manifest+json",
-        "Cache-Control": "no-cache"
-      }
+      "allowedRoles": ["anonymous", "authenticated"],
+      "headers": { "Content-Type": "application/manifest+json", "Cache-Control": "no-cache" }
     },
     {
       "route": "/sw.js",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ],
-      "headers": {
-        "Content-Type": "application/javascript",
-        "Cache-Control": "no-cache",
-        "Service-Worker-Allowed": "/"
-      }
+      "allowedRoles": ["anonymous", "authenticated"],
+      "headers": { "Content-Type": "application/javascript", "Cache-Control": "no-cache", "Service-Worker-Allowed": "/" }
+    },
+    { "route": "/offline.html", "allowedRoles": ["anonymous", "authenticated"] },
+    { "route": "/icon-*.png", "allowedRoles": ["anonymous", "authenticated"] },
+    {
+      "comment": "Cron do GitHub Actions: autenticado por secret no proprio endpoint (X-Alerta-Secret).",
+      "route": "/api/AlertaDiario",
+      "allowedRoles": ["anonymous", "authenticated"]
     },
     {
-      "route": "/offline.html",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
+      "comment": "Cron do GitHub Actions: autenticado por secret no proprio endpoint.",
+      "route": "/api/AlertaContratosDiario",
+      "allowedRoles": ["anonymous", "authenticated"]
     },
     {
-      "route": "/icon-*.png",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
+      "comment": "Link de aprovacao por e-mail: autenticado por JWT no token da query.",
+      "route": "/api/AprovacaoViaLink",
+      "allowedRoles": ["anonymous", "authenticated"]
     },
     {
+      "comment": "Demais endpoints exigem sessao Entra ID. Fecha spoofing de x-ms-client-principal (C2).",
       "route": "/api/*",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
+      "allowedRoles": ["authenticated"]
     },
-    {
-      "route": "/*",
-      "allowedRoles": [
-        "anonymous",
-        "authenticated"
-      ]
-    }
+    { "route": "/*", "allowedRoles": ["anonymous", "authenticated"] }
   ],
   "responseOverrides": {
-    "403": {
-      "rewrite": "/sem-acesso.html",
-      "statusCode": 403
-    }
+    "403": { "rewrite": "/sem-acesso.html", "statusCode": 403 }
   },
   "globalHeaders": {
     "Content-Security-Policy": "frame-ancestors 'self' https://teams.microsoft.com https://*.teams.microsoft.com https://teams.cloud.microsoft https://*.teams.cloud.microsoft https://teams.live.com https://*.teams.live.com https://*.skype.com https://*.microsoftonline.com https://*.office.com",
