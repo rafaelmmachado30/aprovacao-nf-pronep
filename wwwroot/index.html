@@ -1090,6 +1090,30 @@ const ICONS = {
   configuracoes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
 };
 
+// ============== Helpers de seguranca (XSS) — C6 ==============
+// Escape central. Use SEMPRE que inserir dado vindo da API (fornecedor, descricao,
+// motivo, resposta da SAN, etc.) via innerHTML/template string.
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+var escAttr = escHtml; // mesma cobertura (inclui aspas) — seguro p/ atributos
+// Escapa string p/ literal JS dentro de onclick (combinar com escAttr no atributo)
+function jsStr(s) {
+  return String(s == null ? '' : s)
+    .replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n').replace(/\r/g, '');
+}
+// So deixa passar http(s), mailto e caminhos relativos. Bloqueia javascript:, data:, etc.
+function safeUrl(u) {
+  var s = String(u == null ? '' : u).trim();
+  if (/^(https?:|mailto:)/i.test(s)) return s;
+  if (/^\//.test(s) || /^\.\//.test(s)) return s;
+  return '#';
+}
+try { window.escHtml = escHtml; window.escAttr = escAttr; window.jsStr = jsStr; window.safeUrl = safeUrl; } catch(e) {}
+
 // ============== SOL — Assistente IA ==============
 window.solChat = (function() {
   var state = { open: false, busy: false, history: [] };
@@ -1101,7 +1125,9 @@ window.solChat = (function() {
     h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
     h = h.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
     h = h.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<i>$2</i>');
-    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_m, txt, url) {
+      return '<a href="' + escAttr(safeUrl(url)) + '" target="_blank" rel="noopener">' + txt + '</a>';
+    });
     var lines = h.split('\n');
     var out = [], i = 0;
     while (i < lines.length) {
@@ -1144,22 +1170,22 @@ window.solChat = (function() {
     var vencFmt = d.vencimento ? d.vencimento.split('-').reverse().join('/') : '—';
     var tipo = acao.tipo || acao.acao_proposta;
     if (tipo === 'aprovacao') {
-      return '<div class="sol-acao-card" data-acao-id="'+acao.id+'">'+
+      return '<div class="sol-acao-card" data-acao-id="'+escAttr(acao.id)+'">'+
         '<h5>⚠️ Confirmar APROVAÇÃO</h5>'+
-        '<div class="acao-dados">NF <b>'+(d.numero||'—')+'</b> · Fornecedor: <b>'+(d.fornecedor||'—')+'</b><br>Valor: <b>'+valor+'</b> · Vencimento: <b>'+vencFmt+'</b> · Unidade: <b>'+(d.unidade||'—')+'</b></div>'+
+        '<div class="acao-dados">NF <b>'+escHtml(d.numero||'—')+'</b> · Fornecedor: <b>'+escHtml(d.fornecedor||'—')+'</b><br>Valor: <b>'+valor+'</b> · Vencimento: <b>'+vencFmt+'</b> · Unidade: <b>'+escHtml(d.unidade||'—')+'</b></div>'+
         '<div class="acao-botoes">'+
-          '<button class="sol-btn-confirm" onclick="solChat.confirmarAcao(\''+acao.id+'\',\'aprovacao\')">Aprovar</button>'+
-          '<button class="sol-btn-cancel" onclick="solChat.cancelarAcao(\''+acao.id+'\')">Cancelar</button>'+
+          '<button class="sol-btn-confirm" onclick="solChat.confirmarAcao(\''+escAttr(jsStr(acao.id))+'\',\'aprovacao\')">Aprovar</button>'+
+          '<button class="sol-btn-cancel" onclick="solChat.cancelarAcao(\''+escAttr(jsStr(acao.id))+'\')">Cancelar</button>'+
         '</div></div>';
     }
     if (tipo === 'rejeicao') {
-      var motivoEsc = (acao.motivo||'').replace(/'/g,"\\'");
-      return '<div class="sol-acao-card" data-acao-id="'+acao.id+'">'+
+      // C6: motivo vai por data-attribute (escapado) em vez de inline no onclick.
+      return '<div class="sol-acao-card" data-acao-id="'+escAttr(acao.id)+'" data-acao-motivo="'+escAttr(acao.motivo||'')+'">'+
         '<h5>⚠️ Confirmar REJEIÇÃO</h5>'+
-        '<div class="acao-dados">NF <b>'+(d.numero||'—')+'</b> · Fornecedor: <b>'+(d.fornecedor||'—')+'</b><br>Valor: <b>'+valor+'</b> · Motivo: <i>'+(acao.motivo||'—')+'</i></div>'+
+        '<div class="acao-dados">NF <b>'+escHtml(d.numero||'—')+'</b> · Fornecedor: <b>'+escHtml(d.fornecedor||'—')+'</b><br>Valor: <b>'+valor+'</b> · Motivo: <i>'+escHtml(acao.motivo||'—')+'</i></div>'+
         '<div class="acao-botoes">'+
-          '<button class="sol-btn-confirm" style="background:#C62828" onclick="solChat.confirmarAcao(\''+acao.id+'\',\'rejeicao\',\''+motivoEsc+'\')">Rejeitar</button>'+
-          '<button class="sol-btn-cancel" onclick="solChat.cancelarAcao(\''+acao.id+'\')">Cancelar</button>'+
+          '<button class="sol-btn-confirm" style="background:#C62828" onclick="solChat.confirmarAcao(\''+escAttr(jsStr(acao.id))+'\',\'rejeicao\')">Rejeitar</button>'+
+          '<button class="sol-btn-cancel" onclick="solChat.cancelarAcao(\''+escAttr(jsStr(acao.id))+'\')">Cancelar</button>'+
         '</div></div>';
     }
     return '';
@@ -1211,8 +1237,8 @@ window.solChat = (function() {
       if (m.proativa && Array.isArray(m.sugestoesProativas) && m.sugestoesProativas.length) {
         sugProat = '<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px">' +
           m.sugestoesProativas.map(function(s){
-            var sEsc = String(s).replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            var sTxt = String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            var sEsc = escAttr(jsStr(s));
+            var sTxt = escHtml(s);
             return '<button class="san-sug-btn" onclick="solChat.sendText(\'' + sEsc + '\')" ' +
               'style="background:#EFF6FF;border:1px solid #93C5FD;color:#1E3A8A;padding:6px 12px;border-radius:14px;cursor:pointer;font-size:12px;font-weight:500">' +
               sTxt + '</button>';
@@ -1311,8 +1337,8 @@ window.solChat = (function() {
       if (m.proativa && Array.isArray(m.sugestoesProativas) && m.sugestoesProativas.length) {
         sugProat = '<div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px">' +
           m.sugestoesProativas.map(function(s){
-            var sEsc = String(s).replace(/'/g, "\\'").replace(/"/g, '&quot;');
-            var sTxt = String(s).replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            var sEsc = escAttr(jsStr(s));
+            var sTxt = escHtml(s);
             return '<button class="san-sug-btn" onclick="solChat.sendText(\'' + sEsc + '\')" ' +
               'style="background:#EFF6FF;border:1px solid #93C5FD;color:#1E3A8A;padding:6px 12px;border-radius:14px;cursor:pointer;font-size:12px;font-weight:500">' +
               sTxt + '</button>';
@@ -1504,7 +1530,9 @@ window.solChat = (function() {
       if (tipo === 'aprovacao') {
         url = '/api/AprovarNota'; body = { id: id }; okMsg = '✓ NF aprovada';
       } else if (tipo === 'rejeicao') {
-        url = '/api/RejeitarNota'; body = { id: id, motivo: motivo || 'Rejeitada via SAN' }; okMsg = '✓ NF rejeitada';
+        // C6: se motivo nao veio por parametro, le do data-attribute do card.
+        var mot = (motivo != null) ? motivo : (card && card.dataset ? card.dataset.acaoMotivo : '');
+        url = '/api/RejeitarNota'; body = { id: id, motivo: mot || 'Rejeitada via SAN' }; okMsg = '✓ NF rejeitada';
       } else if (tipo === 'processado') {
         url = '/api/MarcarProcessado'; body = { id: id, processado: true }; okMsg = '✓ NF marcada como processada';
       } else {
@@ -1910,12 +1938,12 @@ window.solChat = (function() {
           : 'Posso seguir com a rejeição da NF ' + (d.numero || '—') + '?');
     var motivoLinha = '';
     if (ehRejeicao && acao.motivo) {
-      motivoLinha = '<br><b>Motivo:</b> <i>' + String(acao.motivo).replace(/</g,'&lt;') + '</i>';
+      motivoLinha = '<br><b>Motivo:</b> <i>' + escHtml(acao.motivo) + '</i>';
     }
     var headerIcon = ehAprovacao ? '✓' : (ehProcessado ? '✓' : '✕');
     var btnClass = ehAprovacao ? '' : (ehProcessado ? 'processado' : 'rejeitar');
     var btnLabel = ehAprovacao ? 'Sim, aprovar' : (ehProcessado ? 'Sim, marcar como processada' : 'Sim, rejeitar');
-    var motivoArg = acao.motivo ? acao.motivo.replace(/'/g,"\\'") : '';
+    var motivoArg = escAttr(jsStr(acao.motivo || ''));
 
     var modal = document.createElement('div');
     modal.className = 'sol-modal-overlay';
@@ -1924,19 +1952,19 @@ window.solChat = (function() {
       '<div class="sol-modal" onclick="event.stopPropagation()">'+
         '<div class="sol-modal-header"><h3><span style="font-size:18px">'+headerIcon+'</span> SAN — Confirmação necessária</h3></div>'+
         '<div class="sol-modal-body">'+
-          '<p class="sol-modal-pergunta">'+pergunta+'</p>'+
+          '<p class="sol-modal-pergunta">'+escHtml(pergunta)+'</p>'+
           '<div class="sol-modal-dados">'+
-            '<b>NF:</b> ' + (d.numero || '—') + '<br>'+
-            '<b>Fornecedor:</b> ' + (d.fornecedor || '—') + '<br>'+
+            '<b>NF:</b> ' + escHtml(d.numero || '—') + '<br>'+
+            '<b>Fornecedor:</b> ' + escHtml(d.fornecedor || '—') + '<br>'+
             '<b>Valor:</b> ' + valor + '<br>'+
             '<b>Vencimento:</b> ' + vencFmt + '<br>'+
-            '<b>Unidade · Diretoria:</b> ' + (d.unidade || '—') + ' · ' + (d.diretoria || '—') +
+            '<b>Unidade · Diretoria:</b> ' + escHtml(d.unidade || '—') + ' · ' + escHtml(d.diretoria || '—') +
             motivoLinha +
           '</div>'+
         '</div>'+
         '<div class="sol-modal-footer">'+
-          '<button class="sol-modal-cancelar" onclick="solChat.fecharModal();solChat.cancelarAcao(\''+acao.id+'\')">Não, cancelar</button>'+
-          '<button class="sol-modal-confirmar '+btnClass+'" onclick="solChat.confirmarAcaoModal(\''+acao.id+'\',\''+tipo+'\',\''+motivoArg+'\')">'+btnLabel+'</button>'+
+          '<button class="sol-modal-cancelar" onclick="solChat.fecharModal();solChat.cancelarAcao(\''+escAttr(jsStr(acao.id))+'\')">Não, cancelar</button>'+
+          '<button class="sol-modal-confirmar '+btnClass+'" onclick="solChat.confirmarAcaoModal(\''+escAttr(jsStr(acao.id))+'\',\''+escAttr(jsStr(tipo))+'\',\''+motivoArg+'\')">'+btnLabel+'</button>'+
         '</div>'+
       '</div>';
     // Fecha ao clicar fora
@@ -3063,18 +3091,18 @@ function renderAuditRow(ev) {
     if (typeof det === 'object') {
       const partes = [];
       if (det.valor) partes.push('R$ ' + Number(det.valor).toLocaleString('pt-BR', {minimumFractionDigits:2,maximumFractionDigits:2}));
-      if (det.fornecedor) partes.push('Forn: ' + String(det.fornecedor).slice(0,30));
-      if (det.motivo) partes.push('Motivo: ' + String(det.motivo).slice(0,40));
+      if (det.fornecedor) partes.push('Forn: ' + escHtml(String(det.fornecedor).slice(0,30)));
+      if (det.motivo) partes.push('Motivo: ' + escHtml(String(det.motivo).slice(0,40)));
       detHtml = partes.join(' · ') || '<span style="color:#647883">—</span>';
     } else {
-      detHtml = String(det).slice(0,80);
+      detHtml = escHtml(String(det).slice(0,80));
     }
   }
   return '<tr>'+
     '<td style="font-size:12px;white-space:nowrap">' + qdo + '</td>'+
-    '<td style="font-size:12px">' + (ev.userEmail || '—') + '</td>'+
+    '<td style="font-size:12px">' + escHtml(ev.userEmail || '—') + '</td>'+
     '<td style="font-size:11px;font-weight:600;color:#1F4E79">' + acaoLabel + '</td>'+
-    '<td style="font-size:12px">' + objetoLabel + '</td>'+
+    '<td style="font-size:12px">' + escHtml(objetoLabel) + '</td>'+
     '<td>' + resultadoPill + '</td>'+
     '<td style="font-size:11px;color:#37474F">' + detHtml + '</td>'+
     '</tr>';
@@ -3922,11 +3950,11 @@ const views = {
             ${minhas.map(n => `
               <tr>
                 <td><b>${n.id}</b></td>
-                <td>${fornecedorOf(n).razao}</td>
+                <td>${escHtml(fornecedorOf(n).razao)}</td>
                 <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span> · ${n.diretoria}</td>
                 <td>${fmtDate(n.vencimento)}</td>
                 <td class="num"><b>${fmtBRL(n.valor)}</b></td>
-                <td>${statusPill(n.status, n)}${n.motivo ? `<br><span class="small muted">${n.motivo}</span>` : ''}</td>
+                <td>${statusPill(n.status, n)}${n.motivo ? `<br><span class="small muted">${escHtml(n.motivo)}</span>` : ''}</td>
                 <td>${n.lancadoEm}</td>
               </tr>
             `).join('') || '<tr><td colspan="7" class="muted center">Você ainda não lançou nenhuma NF.</td></tr>'}
@@ -4112,12 +4140,12 @@ const views = {
             ${rj.map(n => `
               <tr>
                 <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero||''}</span></td>
-                <td>${fornecedorOf(n).razao}</td>
+                <td>${escHtml(fornecedorOf(n).razao)}</td>
                 <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
                 <td>${n.diretoria}</td>
                 <td class="num"><b>${fmtBRL(n.valor)}</b></td>
                 <td>${statusPill(n.status, n)}</td>
-                <td>${n.motivo || '—'}</td>
+                <td>${escHtml(n.motivo || '—')}</td>
                 <td>${n.lancadoPor}<br><span class="small muted">${n.lancadoEm}</span></td>
                 <td>${n.aprovadoPor||'—'}<br><span class="small muted">${n.aprovadoEm||'—'}</span></td>
                 <td class="center" style="white-space:nowrap">
@@ -4148,9 +4176,9 @@ const views = {
         '<div class="card"><table class="data"><thead><tr><th>NF</th><th>Fornecedor</th><th class="num">Valor</th><th>Motivo da rejeição</th><th>Rejeitado por</th><th class="center">Ações</th></tr></thead><tbody>' +
         rj.map(n => `<tr>
           <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero||''}</span></td>
-          <td>${fornecedorOf(n).razao}</td>
+          <td>${escHtml(fornecedorOf(n).razao)}</td>
           <td class="num">${fmtBRL(n.valor)}</td>
-          <td>${n.motivo||'—'}</td>
+          <td>${escHtml(n.motivo||'—')}</td>
           <td>${n.aprovadoPor||'—'}<br><span class="small muted">${n.aprovadoEm||'—'}</span></td>
           <td class="center" style="white-space:nowrap">
             <button class="icon-btn" onclick="abrirPdfRejeitado('${n.spId || n.id}')" title="Ver PDF rejeitado">📄 Ver</button>
@@ -4500,7 +4528,7 @@ function renderArvoreContratos(arvore) {
                     return `
                       <details id="${idForn}" data-det-key="${fornKey.replace(/"/g,'&quot;')}" style="padding:0;background:#FAFAFA;border-radius:4px">
                         <summary style="padding:8px 12px;cursor:pointer;font-weight:600;color:#1F2937;list-style:none;display:flex;align-items:center;gap:6px">
-                          <span style="font-size:11px;color:#6B7280;width:10px">▶</span>${iconePasta(corPasta)} ${forn.fornecedor} <span class="small muted">(${contratos.length})</span>
+                          <span style="font-size:11px;color:#6B7280;width:10px">▶</span>${iconePasta(corPasta)} ${escHtml(forn.fornecedor)} <span class="small muted">(${contratos.length})</span>
                           <span style="flex:1"></span>
                           <span style="background:${corStatus};color:#fff;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600">${statusLabel}</span>
                           <button type="button"
@@ -4674,13 +4702,13 @@ function renderCardContrato(c) {
     <div style="padding:10px;background:#fff;border:1px solid #E5E7EB;border-left:4px solid ${cor};border-radius:4px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap">
         <div style="flex:1;min-width:240px">
-          <div style="font-weight:600;color:#1F2937">${c.title || c.nomeArquivo || 'Sem nome'}</div>
+          <div style="font-weight:600;color:#1F2937">${escHtml(c.title || c.nomeArquivo || 'Sem nome')}</div>
           <div class="small muted" style="margin-top:4px">${vigenciaStr}${diasTxt}${valor}</div>
         </div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <span style="background:${cor};color:#fff;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600">${c.status || 'SemVigencia'}</span>
           <button class="btn btn-ghost" onclick="abrirContratoPDF('${c.id}')" title="Ver PDF" style="padding:4px 8px;font-size:12px">📄 PDF</button>
-          <button class="btn btn-ghost" onclick='editarVigenciaContrato(${JSON.stringify({id:c.id, title:c.title||c.nomeArquivo, dataInicio:c.dataInicio, dataFim:c.dataFim, valor:c.valor, observacoes:c.observacoes||"", status:c.status})})' title="Editar vigência" style="padding:4px 8px;font-size:12px">✎ Editar</button>
+          <button class="btn btn-ghost" onclick='editarVigenciaContrato(${escAttr(JSON.stringify({id:c.id, title:c.title||c.nomeArquivo, dataInicio:c.dataInicio, dataFim:c.dataFim, valor:c.valor, observacoes:c.observacoes||"", status:c.status}))})' title="Editar vigência" style="padding:4px 8px;font-size:12px">✎ Editar</button>
           ${isCancelado
             ? '<button class="btn btn-ghost" onclick="alterarStatusContrato(\'' + c.id + '\', \'Ativo\')" style="padding:4px 8px;font-size:12px">↻ Reativar</button>'
             : '<button class="btn btn-ghost" onclick="alterarStatusContrato(\'' + c.id + '\', \'Cancelado\')" style="padding:4px 8px;font-size:12px;color:#DC2626">✕ Cancelar</button>'
@@ -5112,8 +5140,8 @@ function renderFornecedoresTable() {
           lista.slice(0, 500).map((x,i) => `
             <tr>
               <td class="mono">${formatarCNPJ(x.cnpj || x.documento)}</td>
-              <td>${x.razao || ''}</td>
-              <td>${x.nomeFantasia || '—'}</td>
+              <td>${escHtml(x.razao || '')}</td>
+              <td>${escHtml(x.nomeFantasia || '—')}</td>
               <td>${(x.unidade||x.uf) ? `<span class="tag tag-${(x.unidade||x.uf||'').toLowerCase()}">${x.unidade||x.uf}</span>` : '—'}</td>
               <td>${x.diretoria || '—'}</td>
               <td>${x.categoria || '—'}</td>
@@ -5181,11 +5209,11 @@ function abrirModalFornecedor(idx) {
       <div id="frn-cnpj-msg" class="small muted" style="grid-column:1/-1;margin-top:-8px;min-height:16px"></div>
       <div class="form-row" style="grid-column:1/-1">
         <label id="frn-razao-label">Razão Social *</label>
-        <input id="frn-razao" value="${x.razao}" placeholder="Ex.: Olá Tecnologia em Saúde">
+        <input id="frn-razao" value="${escAttr(x.razao)}" placeholder="Ex.: Olá Tecnologia em Saúde">
       </div>
       <div class="form-row" style="grid-column:1/-1">
         <label>Nome Fantasia</label>
-        <input id="frn-fantasia" value="${x.nomeFantasia||''}" placeholder="Opcional">
+        <input id="frn-fantasia" value="${escAttr(x.nomeFantasia||'')}" placeholder="Opcional">
       </div>
       <div class="form-row">
         <label>Categoria *</label>
@@ -5195,7 +5223,7 @@ function abrirModalFornecedor(idx) {
       </div>
       <div class="form-row" id="frn-descricao-outros-row" style="grid-column:1/-1;display:${x.categoria==='Outros'?'':'none'}">
         <label>Descrição da atividade/serviço * <span class="small muted" style="font-weight:400">(obrigatório quando categoria é "Outros")</span></label>
-        <input id="frn-descricao-outros" value="${x.descricaoOutros || ''}" placeholder="DESCREVA A ATIVIDADE OU O SERVIÇO"
+        <input id="frn-descricao-outros" value="${escAttr(x.descricaoOutros || '')}" placeholder="DESCREVA A ATIVIDADE OU O SERVIÇO"
                style="text-transform:uppercase" oninput="this.value = this.value.toUpperCase()" maxlength="200">
         <div class="small muted" style="margin-top:4px;color:#C62828">
           Atenção: categorias <b>Outros, Reembolso, Pensão, Benefício, Férias, Décimo Terceiro e Rescisão</b> são exclusivas pra Pessoa Física (CPF). Pra cadastrar empresa (CNPJ), use Serviços, Materiais, Locação ou Medicamentos.
@@ -5678,7 +5706,7 @@ function _renderPreviewImportacao(file, linhas) {
     <tr style="background:${l.ok ? 'var(--verde-bg)' : 'var(--vermelho-bg)'}">
       <td>${l.ok ? 'OK' : 'X'}</td>
       <td>${l.linha}</td>
-      <td>${l.razao || '-'}</td>
+      <td>${escHtml(l.razao || '-')}</td>
       <td class="mono">${l.cnpj || '-'}</td>
       <td>${l.uf || '-'}</td>
       <td>${l.diretoria || '-'}</td>
@@ -5830,8 +5858,8 @@ function buildNFCard(n, contexto) {
 
   const bodyHtml = `
     <div class="nf-card-body">
-      <div class="nf-card-fornecedor">${forn.razao || n.fornecedorRazao || '—'}</div>
-      ${n.observacao ? `<div style="font-size:12px;color:#6D4C00;background:#FFF9E5;padding:6px 10px;border-left:3px solid #F2C94C;border-radius:4px;margin-top:6px"><b>Obs:</b> ${String(n.observacao).slice(0,140).replace(/</g,'&lt;')}${String(n.observacao).length > 140 ? '...' : ''}</div>` : ''}
+      <div class="nf-card-fornecedor">${escHtml(forn.razao || n.fornecedorRazao || '—')}</div>
+      ${n.observacao ? `<div style="font-size:12px;color:#6D4C00;background:#FFF9E5;padding:6px 10px;border-left:3px solid #F2C94C;border-radius:4px;margin-top:6px"><b>Obs:</b> ${escHtml(String(n.observacao).slice(0,140))}${String(n.observacao).length > 140 ? '...' : ''}</div>` : ''}
       <div class="nf-card-meta">${metaHtml}</div>
       ${vencHtml}
     </div>
@@ -5844,7 +5872,7 @@ function buildNFCard(n, contexto) {
   if (contexto !== 'fila') detailRows.push(['Vencimento', fmtDate(n.vencimento)]);
   detailRows.push(['Solicitante', '<b>' + (n.lancadoPor || '—') + '</b>']);
   detailRows.push(['Lançada em', n.lancadoEm || '—']);
-  if (n.descricao) detailRows.push(['Descrição', n.descricao]);
+  if (n.descricao) detailRows.push(['Descrição', escHtml(n.descricao)]);
   if (contexto === 'aprovadas' || contexto === 'rejeitadas') {
     detailRows.push(['Status', statusPill(n.status, n)]);
   }
@@ -5854,7 +5882,7 @@ function buildNFCard(n, contexto) {
     detailRows.push(['Processado', n.processado ? '✓ Sim' : 'Não']);
   }
   if (contexto === 'rejeitadas' && n.motivo) {
-    detailRows.push(['Motivo', '<span style="color:#C62828">' + n.motivo + '</span>']);
+    detailRows.push(['Motivo', '<span style="color:#C62828">' + escHtml(n.motivo) + '</span>']);
   }
 
   const detailGridHtml = detailRows.map(r =>
@@ -5980,7 +6008,7 @@ function renderFilaAprovacaoView() {
         <div class="label">Fornecedor</div>
         <select id="ffl-fornecedor" onchange="aplicaFiltroFila()">
           <option value="TODOS"${f.fornecedor==='TODOS'?' selected':''}>Todos</option>
-          ${fornecedoresDoEscopo.map(fr => `<option value="${fr.cnpj}"${f.fornecedor===fr.cnpj?' selected':''}>${fr.razao}</option>`).join('')}
+          ${fornecedoresDoEscopo.map(fr => `<option value="${escAttr(fr.cnpj)}"${f.fornecedor===fr.cnpj?' selected':''}>${escHtml(fr.razao)}</option>`).join('')}
         </select>
       </div>
       <div>
@@ -6036,7 +6064,7 @@ function renderFilaAprovacaoView() {
             return `
             <tr style="${trStyle}">
               <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero || ''}${n.serie ? '/' + n.serie : ''}</span></td>
-              <td>${fornecedorOf(n).razao}<br><span class="small muted mono">${formatarCNPJ(fornecedorOf(n).cnpj)}</span></td>
+              <td>${escHtml(fornecedorOf(n).razao)}<br><span class="small muted mono">${formatarCNPJ(fornecedorOf(n).cnpj)}</span></td>
               <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
               <td>${n.diretoria}</td>
               <td>${venceForaPrazo
@@ -6249,7 +6277,7 @@ function renderAprovadasTable() {
                 <td class="center"><input type="checkbox" class="chk-processado" ${n.processado?'checked':''} onclick="toggleProcessado('${n.id}', this.checked, this)" title="Marcar como processado (NF liberada pra integracao)"></td>
                 <td><b>${n.id||''}</b><br><span class="small muted">Nº ${n.numero||''}</span></td>
                 <td>
-                  <b>${(fornecedorOf(n)||{}).razao || '—'}</b>
+                  <b>${escHtml((fornecedorOf(n)||{}).razao || '—')}</b>
                   <br><span class="small muted mono">${formatarCNPJ((fornecedorOf(n)||{}).cnpj || (fornecedorOf(n)||{}).documento || n.fornecedorCnpj)}</span>
                 </td>
                 <td>${n.unidade ? `<span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span>` : '—'}</td>
@@ -6285,8 +6313,8 @@ function renderAprovadasTable() {
                 <td class="center" style="white-space:nowrap">
                   <button class="icon-btn" onclick="openApprovedPdf('${n.id}')" title="Ver PDF">Ver</button>
                   ${(currentPersona && (currentPersona.roleKey === 'admin' || currentPersona.roleKey === 'financeiro')) ? `
-                    ${!n.integradoOmie ? `<button class="icon-btn" onclick="integrarOmie('${n.spId || n.id}','${(n.numero||'').replace(/'/g,"\\'")}','${((fornecedorOf(n)||{}).razao||'').replace(/'/g,"\\'").slice(0,30)}','${n.unidade||''}')" style="margin-left:4px;background:#E3F2FD;color:#1976D2;border-color:#BBDEFB" title="Integrar com Omie ${n.unidade||''}">🔗 Omie</button>` : ''}
-                    ${!n.integradoOmie ? `<button class="icon-btn" onclick="rejeitarAprovada('${n.spId || n.id}','${(n.numero||'').replace(/'/g,"\\'")}','${((fornecedorOf(n)||{}).razao||'').replace(/'/g,"\\'").slice(0,30)}',${Number(n.valor||0)})" style="margin-left:4px;background:#FFEBEE;color:#C62828;border-color:#FFCDD2" title="Estornar (rejeitar pos-aprovacao)">Rejeitar</button>` : ''}
+                    ${!n.integradoOmie ? `<button class="icon-btn" onclick="integrarOmie('${escAttr(jsStr(n.spId || n.id))}','${escAttr(jsStr(n.numero||''))}','${escAttr(jsStr(((fornecedorOf(n)||{}).razao||'').slice(0,30)))}','${escAttr(jsStr(n.unidade||''))}')" style="margin-left:4px;background:#E3F2FD;color:#1976D2;border-color:#BBDEFB" title="Integrar com Omie ${n.unidade||''}">🔗 Omie</button>` : ''}
+                    ${!n.integradoOmie ? `<button class="icon-btn" onclick="rejeitarAprovada('${escAttr(jsStr(n.spId || n.id))}','${escAttr(jsStr(n.numero||''))}','${escAttr(jsStr(((fornecedorOf(n)||{}).razao||'').slice(0,30)))}',${Number(n.valor||0)})" style="margin-left:4px;background:#FFEBEE;color:#C62828;border-color:#FFCDD2" title="Estornar (rejeitar pos-aprovacao)">Rejeitar</button>` : ''}
                   ` : ''}
                 </td>
               </tr>
@@ -6374,7 +6402,7 @@ function analyticsTable(rows) {
   return `<table class="data">
     <thead><tr><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Solicitante</th><th>Aprovador</th><th>Aprovado em</th></tr></thead>
     <tbody>${rows.map(n => `
-      <tr><td>${n.id}</td><td>${fornecedorOf(n).razao}</td><td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td><td>${n.diretoria}</td><td class="num">${fmtBRL(n.valor)}</td><td>${n.lancadoPor}</td><td>${n.aprovadoPor || '—'}</td><td>${n.aprovadoEm || '—'}</td></tr>
+      <tr><td>${n.id}</td><td>${escHtml(fornecedorOf(n).razao)}</td><td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td><td>${n.diretoria}</td><td class="num">${fmtBRL(n.valor)}</td><td>${n.lancadoPor}</td><td>${n.aprovadoPor || '—'}</td><td>${n.aprovadoEm || '—'}</td></tr>
     `).join('')}</tbody>
   </table>`;
 }
@@ -6550,7 +6578,7 @@ function filtrarFornecedoresLancamento() {
       const unid = f.unidade || f.uf || '';
       const dir = f.diretoria || '';
       return '<div class="dropdown-item" onmousedown="selecionarFornecedorLancamento(' + idx + ')">' +
-        '<div class="name">' + (f.razao || '(sem razao)') + '</div>' +
+        '<div class="name">' + escHtml(f.razao || '(sem razao)') + '</div>' +
         '<div class="meta">' + tipo + ': ' + (f.documento || f.cnpj || '—') +
           (unid ? ' · ' + unid : '') + (dir ? ' · ' + dir : '') + '</div>' +
         '</div>';
@@ -6748,7 +6776,7 @@ function mostrarAvisoFornecedorIncompleto(f, faltam) {
         <div style="flex:1">
           <div style="font-weight:600;font-size:14px;margin-bottom:4px">Cadastro do fornecedor incompleto</div>
           <div style="font-size:13px;line-height:1.5">
-            O fornecedor <b>${f.razao || '(sem nome)'}</b> não tem ${faltam.map(x => '<b>'+x+'</b>').join(' nem ')} preenchido(s) no cadastro.<br>
+            O fornecedor <b>${escHtml(f.razao || '(sem nome)')}</b> não tem ${faltam.map(x => '<b>'+escHtml(x)+'</b>').join(' nem ')} preenchido(s) no cadastro.<br>
             <b>O lançamento foi bloqueado.</b> Atualize o fornecedor na lista do SharePoint e tente novamente.
           </div>
           <div style="margin-top:10px">
@@ -7324,7 +7352,7 @@ function openNFDetail(id) {
   const f = fornecedorOf(n);
   openModal(`
     <span class="close-x" onclick="closeModal()">×</span>
-    <h3>${n.id} · ${f.razao}</h3>
+    <h3>${escHtml(n.id)} · ${escHtml(f.razao)}</h3>
     <table class="data" style="margin-bottom:14px">
       <tr><th>${n.serie ? 'Número/Série' : 'Número'}</th><td>${n.numero || ''}${n.serie ? ' / ' + n.serie : ''}</td></tr>
       <tr><th>CNPJ</th><td class="mono">${f.cnpj}</td></tr>

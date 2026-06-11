@@ -14,6 +14,13 @@
 (function() {
   'use strict';
 
+  // C6: escape local (este arquivo carrega antes do escHtml global do index.html)
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   var ROOT = '/CONTRATOS/CONTRATOS E DOCUMENTOS - PRESTADORES';
 
   // Diretorias VARRIDAS pelo BFS — somente as que têm contratos de PRESTADORES (custos pagos).
@@ -107,7 +114,7 @@
     var errosHTML = '';
     if (state.erros.length > 0) {
       var itens = state.erros.slice(0, 40).map(function(e) {
-        return '<div style="margin-bottom:6px;padding:6px;background:#fff;border-radius:3px;font-size:11px"><b>' + (e.diretoria || '?') + '</b>' + (e.pasta ? ' · <span style="color:#6B7280">' + e.pasta.split('/').slice(-2).join('/') + '</span>' : '') + (e.arquivo ? ' · <i>' + e.arquivo + '</i>' : '') + '<br>' + (e.error || e.erro || '?') + '</div>';
+        return '<div style="margin-bottom:6px;padding:6px;background:#fff;border-radius:3px;font-size:11px"><b>' + esc(e.diretoria || '?') + '</b>' + (e.pasta ? ' · <span style="color:#6B7280">' + esc(e.pasta.split('/').slice(-2).join('/')) + '</span>' : '') + (e.arquivo ? ' · <i>' + esc(e.arquivo) + '</i>' : '') + '<br>' + esc(e.error || e.erro || '?') + '</div>';
       }).join('');
       errosHTML = '<details style="margin-top:12px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:4px">' +
         '<summary style="padding:10px;cursor:pointer;font-weight:600;color:#7F1D1D">⚠ Ver detalhes dos ' + state.erros.length + ' erros</summary>' +
