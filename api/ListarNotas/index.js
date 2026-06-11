@@ -12,6 +12,7 @@
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
+const { isAdminEmail } = require('../shared/authz');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -140,7 +141,7 @@ module.exports = async function (context, req) {
 
     diag.step = 'rbac';
     const qTodos = (req.query && req.query.todos) === '1';
-    const isAdmin = userRoles.includes('administrador') || userEmail === 'rafael.machado@pronep.com.br';
+    const isAdmin = userRoles.includes('administrador') || isAdminEmail(userEmail); // A4: centralizado
     const isFinanceiro = userRoles.includes('financeiro_nf');
     const isGestor = userRoles.some(r => r.startsWith('gestor'));
     diag.userScope = { isAdmin, isFinanceiro, isGestor };

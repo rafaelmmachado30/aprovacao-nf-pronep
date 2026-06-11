@@ -15,6 +15,7 @@
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
+const { isAdminEmail } = require('../shared/authz');
 const { notificar } = require('../shared/notificar');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { ClientSecretCredential } = require('@azure/identity');
@@ -236,7 +237,7 @@ module.exports = async function (context, req) {
     const graphRoles = await getUserRoles(user);
     const userRoles = Array.from(new Set([...claimsRoles, ...usefulPrincipalRoles, ...graphRoles]));
     diag.userRoles = userRoles;
-    const isAdmin = aprovadorEmail === 'rafael.machado@pronep.com.br' || userRoles.includes('administrador');
+    const isAdmin = userRoles.includes('administrador') || isAdminEmail(aprovadorEmail); // A4: centralizado
     const isFinanceiro = userRoles.includes('financeiro_nf');
     const isAprovadorAtribuido = (f.AprovadorAtual || '').toLowerCase() === aprovadorEmail;
 
@@ -272,10 +273,10 @@ module.exports = async function (context, req) {
       const numero = String(f.NumeroNF || '');
       // Match: starts with numero+_ (padrao novo) ou contem numero (padrao legado em Aprovadas)
       pdfTarget = files.find(x => x.name && (x.name.startsWith(numero + '_') || x.name.includes('_' + numero + '_')));
-      if (!pdfTarget && files.length > 0 && !ehEstorno) {
-        // Fallback APENAS pra fluxo normal (em estorno, sem match exato eh mais seguro nao deletar nada aleatorio)
-        pdfTarget = files.sort((a,b) => (b.lastModifiedDateTime||'').localeCompare(a.lastModifiedDateTime||''))[0];
-      }
+      // A2: removido o fallback "mais recente" do fluxo normal. Antes, sem match pelo
+      // numero, pegava o PDF mais recente da pasta compartilhada (podia ser de outra NF).
+      // Agora, sem match, a NF e rejeitada mas o PDF nao e movido (fica em Pendentes pra
+      // revisao manual) — em vez de carimbar/mover/deletar o arquivo errado.
     } catch (e) {
       diag.findPdfWarning = e.message;
     }

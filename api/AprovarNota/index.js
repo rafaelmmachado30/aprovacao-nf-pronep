@@ -19,6 +19,7 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
+const { getMergedRoles, isAdminEmail } = require('../shared/authz');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { notificar } = require('../shared/notificar');
 const { ClientSecretCredential } = require('@azure/identity');
@@ -279,8 +280,11 @@ module.exports = async function (context, req) {
     const f = normalizeFields(item.fields || {}, invColMap);
     diag.item = { Title: f.Title, Status: f.Status, Unidade: f.Unidade, Diretoria: f.Diretoria, AprovadorAtual: f.AprovadorAtual };
 
-    // RBAC: so o aprovador atribuido (ou admin) pode aprovar
-    const isAdmin = aprovadorEmail === 'rafael.machado@pronep.com.br';
+    // RBAC: so o aprovador atribuido (ou admin) pode aprovar.
+    // A4: admin vem do grupo Entra 'administrador' OU da whitelist central ADMIN_EMAILS
+    // (antes era o e-mail hardcoded — e membro do grupo admin nem conseguia aprovar).
+    const userRolesAA = await getMergedRoles(req, user);
+    const isAdmin = userRolesAA.includes('administrador') || isAdminEmail(aprovadorEmail);
     const isAprovadorAtribuido = (f.AprovadorAtual || '').toLowerCase() === aprovadorEmail;
     if (!isAdmin && !isAprovadorAtribuido) {
       context.res = { status: 403, body: {
@@ -391,12 +395,12 @@ module.exports = async function (context, req) {
         if (target) break;
       }
     }
-    if (!target && files.length > 0) {
-      // Fallback: pega o mais recente
-      target = files.sort((a,b) => (b.lastModifiedDateTime||'').localeCompare(a.lastModifiedDateTime||''))[0];
-    }
+    // A2: SEM fallback "mais recente". Antes, se nenhum arquivo batesse pelo numero,
+    // pegava o PDF modificado mais recentemente da pasta COMPARTILHADA e o carimbava/
+    // movia/deletava — podendo agir sobre a NF de OUTRO fornecedor. Agora falha com 404.
     if (!target) {
-      context.res = { status: 404, body: { error: 'PDF nao encontrado em Pendentes', folder } };
+      const nomes = files.map(x => x.name).slice(0, 15);
+      context.res = { status: 404, body: { error: 'PDF da NF ' + numero + ' nao encontrado em Pendentes pelo numero. Verifique o arquivo no SharePoint (pode ter sido renomeado).', folder, arquivosDisponiveis: nomes } };
       return;
     }
     diag.pdfFound = { name: target.name, id: target.id };

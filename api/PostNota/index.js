@@ -314,9 +314,18 @@ async function gerarProximoNumeroAuto(client, siteId, listNotasId, colMap) {
 // confiamos em CNPJ+valor+vencimento pra pegar reenvio do mesmo "reembolso/rescisao".
 // IGNORA NFs com status 'Rejeitada' — usuario pode corrigir e reenviar.
 async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj, numero, serie, chaveAcesso, valor, vencimento, isNumeroAutogerado) {
-  const resp = await client
-    .api(`/sites/${siteId}/lists/${listNotasId}/items?expand=fields&$top=999`)
-    .get();
+  // A1: pagina TODAS as NFs seguindo @odata.nextLink. Antes lia so a 1a pagina
+  // ($top=999) — acima disso uma NF duplicada antiga escapava silenciosamente da checagem.
+  const todosItens = [];
+  let urlDup = `/sites/${siteId}/lists/${listNotasId}/items?expand=fields&$top=999`;
+  let pagsDup = 0;
+  while (urlDup && pagsDup < 40) {
+    const resp = await client.api(urlDup).get();
+    todosItens.push(...(resp.value || []));
+    pagsDup++;
+    const nl = resp['@odata.nextLink'];
+    urlDup = nl ? nl.replace('https://graph.microsoft.com/v1.0', '') : null;
+  }
   // Resolve internal names dinamicamente; se nao tiver no map, cai pros displayNames padrao
   const colStatus  = (colMap && colMap['Status']) || 'Status';
   const colHash    = (colMap && colMap['HashSHA256']) || 'HashSHA256';
@@ -326,8 +335,9 @@ async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj
   const colValor   = (colMap && colMap['Valor']) || 'Valor';
   const colVenc    = (colMap && colMap['DataVencimento']) || 'DataVencimento';
   const vencNorm   = vencimento ? String(vencimento).substring(0, 10) : '';
+  const cnpjNorm   = String(cnpj || '').replace(/\D/g, '');
 
-  for (const item of (resp.value || [])) {
+  for (const item of todosItens) {
     const f = item.fields || {};
     const itemStatus = f[colStatus] || f.Status || '';
     // Pula NFs rejeitadas — usuario pode reenviar com a NF corrigida
@@ -345,12 +355,13 @@ async function verificaDuplicata(client, siteId, listNotasId, colMap, hash, cnpj
     if (hash && itemHash && hash === itemHash) {
       return { motivo: 'hash', notaId: item.id, status: itemStatus };
     }
-    if (cnpj && numero && itemDoc === cnpj && itemNum === numero) {
+    const itemDocNorm = String(itemDoc).replace(/\D/g, '');
+    if (cnpjNorm && numero && itemDocNorm === cnpjNorm && itemNum === numero) {
       return { motivo: 'cnpj_numero', notaId: item.id, status: itemStatus };
     }
     // REGRA EXTRA: numero veio autogerado no upload novo → confia em CNPJ+valor+venc.
     // Catches: usuario refaz upload do mesmo PDF (re-exportado) sem numero formal.
-    if (isNumeroAutogerado && cnpj && valor && vencNorm && itemDoc === cnpj) {
+    if (isNumeroAutogerado && cnpjNorm && valor && vencNorm && itemDocNorm === cnpjNorm) {
       const itemValor = Number(f[colValor] || f.Valor || 0);
       const itemVenc  = String(f[colVenc] || f.DataVencimento || '').substring(0, 10);
       if (Math.abs(itemValor - Number(valor)) < 0.01 && itemVenc === vencNorm) {
