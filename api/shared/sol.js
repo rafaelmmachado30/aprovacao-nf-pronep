@@ -150,7 +150,7 @@ function getViewScope(viewAtual) {
 // de ACAO (propor_aprovacao/rejeicao/marcar_processado) seguem contextuais por view.
 const READ_TOOLS_UNIVERSAIS = [
   'listar_fila', 'listar_aprovadas', 'listar_rejeitadas', 'detalhes_nf',
-  'agregar_por_fornecedor', 'detectar_anomalia', 'abrir_nf',
+  'agregar_por_fornecedor', 'detectar_anomalia', 'abrir_nf', 'buscar_fornecedor',
   'listar_contratos', 'detalhes_contrato', 'agregar_contratos', 'contratos_vencendo', 'abrir_contrato'
 ];
 
@@ -251,7 +251,7 @@ function buildSystemPrompt(user, viewAtual, escopo, perfil) {
     '  6. Se nao tem dados pra responder, fale direto. NAO INVENTE.',
     '  7. Se o usuario pedir algo fora do dominio do sistema (NF, fornecedor, aprovacao), recuse educadamente.',
     '  8. PDF/RELATORIO: voce NUNCA gera PDF diretamente nem precisa. Quando o user pedir "relatorio", "exportar", "imprimir", "PDF", "documento": APENAS LISTE OS DADOS normalmente (tabela markdown). O frontend exibe AUTOMATICAMENTE um botao "Exportar PDF" abaixo da sua resposta quando detecta essas palavras. NUNCA diga "nao consigo gerar PDF", "nao tenho como exportar", "use Ctrl+P" - eh FALSO. Apenas responda a pergunta normalmente, com tabela bem organizada.',
-    '  9. ACESSO TOTAL DE LEITURA: voce tem ferramentas pra consultar TODOS os dados do sistema — NFs em fila, aprovadas, rejeitadas, agregacoes por fornecedor, deteccao de anomalia E contratos (vigencias, vencimentos, valores) — INDEPENDENTE da tela atual. Se o usuario perguntar qualquer coisa factual (ex: "NFs aprovadas hoje na minha diretoria", "quanto aprovei esse mes", "contratos vencendo"), USE a tool correspondente e responda. NUNCA diga que "nao tem ferramenta pra isso", que "so tem tools de contratos" ou que "so tem tools de NF" — voce tem TODAS. A tela atual define apenas o seu FOCO, NAO limita o que voce pode consultar. So recuse se for assunto totalmente fora do sistema (NF/fornecedor/contrato/aprovacao).',
+    '  9. ACESSO TOTAL DE LEITURA: voce tem ferramentas pra consultar TODOS os dados do sistema — NFs em fila, aprovadas, rejeitadas, agregacoes por fornecedor, deteccao de anomalia, o CADASTRO DE FORNECEDORES (tool buscar_fornecedor: se existe, CNPJ/CPF, nome fantasia, diretoria, categoria, contato, se esta ativo) E contratos (vigencias, vencimentos, valores) — INDEPENDENTE da tela atual. Se o usuario perguntar qualquer coisa factual (ex: "o fornecedor NXTIA esta cadastrado?", "qual o CNPJ da TOTVS?", "NFs aprovadas hoje na minha diretoria", "contratos vencendo"), USE a tool correspondente e responda. NUNCA diga que "nao tem ferramenta pra isso", que "nao tem acesso ao cadastro de fornecedores" ou que "so tem tools de contrato/NF" — voce tem TODAS, inclusive a de fornecedores. A tela atual define apenas o seu FOCO, NAO limita o que voce pode consultar. So recuse se for assunto totalmente fora do sistema.',
     '',
     'BASE DE CONHECIMENTO (do manual oficial do sistema):',
     getManualForView(viewAtual),
@@ -540,6 +540,22 @@ const TOOLS = [
         properties: {
           id: { type: 'string', description: 'spListItemId do contrato (retornado por listar_contratos ou detalhes_contrato)' },
           busca: { type: 'string', description: 'Substring pra encontrar o contrato (fornecedor ou titulo) - usa se ainda nao tem o id' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'buscar_fornecedor',
+      description: 'Consulta o CADASTRO de fornecedores da Pronep (lista PRONEP-NF-Fornecedores). Use quando o usuario perguntar se um fornecedor existe/esta cadastrado, dados de um fornecedor (CNPJ/CPF, nome fantasia, diretoria, categoria, e-mail, telefone, cidade/UF, se esta ativo), ou listar fornecedores de uma diretoria. Ex: "o fornecedor NXTIA esta cadastrado?", "qual o CNPJ da TOTVS?", "fornecedores de Tecnologia", "a empresa X esta ativa?". Retorna ate 30 fornecedores que casam com o filtro.',
+      parameters: {
+        type: 'object',
+        properties: {
+          busca: { type: 'string', description: 'Substring (case-insensitive) buscada na razao social OU nome fantasia. Ex: "NXTIA", "TOTVS".' },
+          documento: { type: 'string', description: 'CNPJ ou CPF (com ou sem mascara) — busca exata por documento. Use quando o usuario der o numero.' },
+          diretoria: { type: 'string', description: 'Filtrar fornecedores de uma diretoria (ex: Tecnologia, RH, Juridico).' },
+          apenas_ativos: { type: 'boolean', description: 'Se true, retorna apenas fornecedores com status ativo.' }
         }
       }
     }
@@ -1202,8 +1218,67 @@ async function tool_contratos_vencendo(args, ctx) {
   };
 }
 
+// Consulta o cadastro de fornecedores (PRONEP-NF-Fornecedores). Read-only, sem RBAC
+// por escopo — o cadastro eh dado de referencia compartilhado (igual ListarFornecedores).
+async function tool_buscar_fornecedor(args, ctx) {
+  const { client, siteId } = ctx.gr;
+  const lists = await client.api('/sites/' + siteId + '/lists').filter("displayName eq 'PRONEP-NF-Fornecedores'").get();
+  if (!lists.value || !lists.value.length) return { erro: 'Lista de fornecedores nao encontrada' };
+  const listId = lists.value[0].id;
+  // colMap pra colunas nomeadas (Categoria nao eh field_X posicional)
+  let colCategoria = 'Categoria';
+  try {
+    const colsResp = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').get();
+    for (const c of (colsResp.value || [])) { if (c.displayName === 'Categoria' && c.name) colCategoria = c.name; }
+  } catch (e) { /* usa default */ }
+  // Pagina todos os itens
+  const all = [];
+  let url = '/sites/' + siteId + '/lists/' + listId + '/items?expand=fields&$top=500';
+  let pages = 0;
+  while (url && pages < 30) {
+    const resp = await client.api(url).get();
+    all.push(...(resp.value || []));
+    pages++;
+    url = resp['@odata.nextLink'] ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '') : null;
+  }
+  // Mapeamento posicional (mesmo do endpoint ListarFornecedores)
+  let forn = all.map(item => {
+    const f = item.fields || {};
+    return {
+      razao: f.Title || '',
+      tipoDocumento: f.field_1 || '',
+      documento: f.field_2 || '',
+      nomeFantasia: f.field_3 || '',
+      unidade: f.field_4 || '',
+      diretoria: f.field_5 || '',
+      uf: f.field_6 || '',
+      ativo: String(f.field_7 || '').toLowerCase() === 'sim',
+      telefone: f.field_8 || '',
+      email: f.field_9 || '',
+      cidade: f.field_10 || '',
+      categoria: f[colCategoria] || ''
+    };
+  });
+  // Filtros
+  const docQ = String(args.documento || '').replace(/\D/g, '');
+  const q = String(args.busca || '').toLowerCase().trim();
+  if (docQ) {
+    forn = forn.filter(x => String(x.documento || '').replace(/\D/g, '').includes(docQ));
+  } else if (q) {
+    forn = forn.filter(x => (x.razao || '').toLowerCase().includes(q) || (x.nomeFantasia || '').toLowerCase().includes(q));
+  }
+  if (args.diretoria) {
+    const d = String(args.diretoria).toLowerCase().trim();
+    forn = forn.filter(x => (x.diretoria || '').toLowerCase().includes(d));
+  }
+  if (args.apenas_ativos) forn = forn.filter(x => x.ativo);
+  const total = forn.length;
+  return { total, fornecedores: forn.slice(0, 30) };
+}
+
 const TOOL_IMPL = {
   listar_fila: tool_listar_fila,
+  buscar_fornecedor: tool_buscar_fornecedor,
   listar_aprovadas: tool_listar_aprovadas,
   detalhes_nf: tool_detalhes_nf,
   agregar_por_fornecedor: tool_agregar_por_fornecedor,
