@@ -4,8 +4,8 @@ name: Contratos — Alertas diários de vencimento
 # Varre contratos vencendo em 30/60/90 dias e envia email + push pro gestor da diretoria.
 #
 # Pré-requisitos:
-#   - Repository Secret: ALERTA_CONTRATOS_SECRET (opcional, mesmo valor da App Setting no Azure)
-#     Se não configurado no Azure, o endpoint aceita sem secret.
+#   - Repository Secret: ALERTA_CONTRATOS_SECRET (OBRIGATORIO, mesmo valor da App Setting no Azure)
+#     Enviado no header X-Alerta-Secret. Sem ele o endpoint responde 401/500.
 
 on:
   schedule:
@@ -33,12 +33,11 @@ jobs:
         run: |
           BASE="https://purple-forest-09588fe10.7.azurestaticapps.net/api/AlertaContratosDiario"
           URL="$BASE?dryRun=$DRY_RUN"
-          if [ -n "$SECRET" ]; then
-            URL="$URL&secret=$SECRET"
-          fi
           echo "Disparando AlertaContratosDiario (dryRun=$DRY_RUN)"
+          # A10: secret vai no HEADER (antes ia na query string e vazava em logs/proxies).
           HTTP_CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
             -H "Accept: application/json" \
+            -H "X-Alerta-Secret: $SECRET" \
             --max-time 290 \
             "$URL")
           echo "HTTP $HTTP_CODE"

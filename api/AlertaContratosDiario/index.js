@@ -292,14 +292,18 @@ module.exports = async function (context, req) {
       context.res = { status: 200, body: { ok: true, skipped: true, motivo: 'ALERTA_CONTRATOS_DISABLED=true' } };
       return;
     }
-    // Validacao de secret (se configurado)
+    // A10: secret OBRIGATORIO via header (antes: aceitava sem secret se a env nao
+    // estivesse setada — endpoint anonimo aberto; e o workflow mandava na query
+    // string, vazando em logs). Mesmo padrao do AlertaDiario.
     const secretEnv = process.env.ALERTA_CONTRATOS_SECRET;
-    if (secretEnv) {
-      const secretReq = (req.query && req.query.secret) || (req.headers && req.headers['x-alerta-secret']);
-      if (secretReq !== secretEnv) {
-        context.res = { status: 401, body: { error: 'secret invalido' } };
-        return;
-      }
+    if (!secretEnv) {
+      context.res = { status: 500, body: { error: 'ALERTA_CONTRATOS_SECRET nao configurado' } };
+      return;
+    }
+    const secretReq = (req.headers && (req.headers['x-alerta-secret'] || req.headers['X-Alerta-Secret'])) || '';
+    if (secretReq !== secretEnv) {
+      context.res = { status: 401, body: { error: 'secret invalido' } };
+      return;
     }
     const dryRun = String((req.query && req.query.dryRun) || '') === 'true';
 

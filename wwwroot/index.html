@@ -2277,9 +2277,11 @@ function login(p) {
 }
 
 function logout() {
-  document.getElementById('app').classList.remove('active');
-  document.getElementById('login').style.display = 'flex';
-  currentPersona = null;
+  // A9: encerra a sessao Easy Auth de verdade. Antes so escondia o app, mas o cookie
+  // de sessao permanecia e o tryAutoLoginFromAzure relogava sozinho no proximo F5
+  // (risco em maquina compartilhada). /.auth/logout limpa o cookie do SWA.
+  try { currentPersona = null; } catch (e) {}
+  window.location.href = '/.auth/logout?post_logout_redirect_uri=/';
 }
 
 // Tecla Enter no input dispara o login

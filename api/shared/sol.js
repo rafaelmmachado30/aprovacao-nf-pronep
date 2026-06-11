@@ -638,8 +638,8 @@ async function tool_listar_fila(args, ctx) {
   if (args.unidade && args.unidade !== 'TODAS') {
     notas = notas.filter(n => String(n.Unidade || '') === args.unidade);
   }
-  // Ordena por vencimento ASC
-  notas.sort((a, b) => String(a.Vencimento || '').localeCompare(String(b.Vencimento || '')));
+  // Ordena por vencimento ASC (campo real = DataVencimento)
+  notas.sort((a, b) => String(a.DataVencimento || a.Vencimento || '').localeCompare(String(b.DataVencimento || b.Vencimento || '')));
   if (args.apenas_d5) {
     const hoje = new Date(new Date().getTime() - 3*60*60*1000);
     const d5 = new Date(hoje.getTime() + 5*24*60*60*1000).toISOString().substring(0,10);
@@ -647,21 +647,29 @@ async function tool_listar_fila(args, ctx) {
   }
   // Limita resposta pra nao estourar contexto
   notas = notas.slice(0, 50);
+  // A5: resolve razao social via CNPJ (campo correto = CNPJFornecedor) usando o mapa cacheado.
+  try {
+    if (!ctx._fornMap) ctx._fornMap = await carregarMapFornecedoresParaSol(ctx.gr.client, ctx.gr.siteId);
+  } catch (e) { ctx._fornMap = ctx._fornMap || {}; }
   return {
     total: notas.length,
-    notas: notas.map(n => ({
-      id: n._id,
-      numero: n.NumeroNF,
-      fornecedor: n.Fornecedor,
-      cnpj: n.FornecedorCNPJ,
-      valor: Number(n.ValorTotal || n.Valor || 0),
-      vencimento: String(n.DataVencimento || n.Vencimento || '').substring(0,10),
-      unidade: n.Unidade,
-      diretoria: n.Diretoria,
-      status: n.Status,
-      lancadoPor: n.LancadoPor,
-      aprovadorAtual: n.AprovadorAtual
-    }))
+    notas: notas.map(n => {
+      const cnpjDigitos = String(n.CNPJFornecedor || '').replace(/\D/g, '');
+      const fornNome = (cnpjDigitos && ctx._fornMap[cnpjDigitos]) || String(n.CNPJFornecedor || '');
+      return {
+        id: n._id,
+        numero: n.NumeroNF,
+        fornecedor: fornNome || '(sem nome)',
+        cnpj: n.CNPJFornecedor || '',
+        valor: Number(n.ValorTotal || n.Valor || 0),
+        vencimento: String(n.DataVencimento || n.Vencimento || '').substring(0,10),
+        unidade: n.Unidade,
+        diretoria: n.Diretoria,
+        status: n.Status,
+        lancadoPor: n.LancadoPor,
+        aprovadorAtual: n.AprovadorAtual
+      };
+    })
   };
 }
 
@@ -859,7 +867,7 @@ async function tool_detectar_anomalia(args, ctx) {
   const resp = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=2000').get();
   let historico = (resp.value || []).map(it => normalizeItem(it, invColMap));
   historico = historico.filter(n => {
-    const cnpj1 = String(n.FornecedorCNPJ || '').replace(/\D/g, '');
+    const cnpj1 = String(n.CNPJFornecedor || '').replace(/\D/g, '');
     const cnpj2 = String(detalhe.cnpj || '').replace(/\D/g, '');
     return cnpj1 && cnpj1 === cnpj2 && n._id !== detalhe.id;
   });
