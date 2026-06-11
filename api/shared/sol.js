@@ -338,7 +338,8 @@ const TOOLS = [
         type: 'object',
         properties: {
           unidade: { type: 'string', enum: ['SP','RJ','ES','TODAS'], description: 'Filtrar por unidade (default TODAS)' },
-          apenas_d5: { type: 'boolean', description: 'Se true, mostra apenas NFs vencendo em D+5 ou antes' }
+          apenas_d5: { type: 'boolean', description: 'Se true, mostra apenas NFs vencendo em D+5 ou antes' },
+          fornecedor: { type: 'string', description: 'Filtrar por fornecedor (substring da razao social/nome fantasia OU CNPJ). Ex: "NXTIA".' }
         }
       }
     }
@@ -347,12 +348,13 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'listar_aprovadas',
-      description: 'Lista NFs ja aprovadas pelo usuario ou no escopo dele. Suporta filtro de periodo.',
+      description: 'Lista NFs ja aprovadas pelo usuario ou no escopo dele. Suporta filtro de periodo e de fornecedor. IMPORTANTE: use o parametro periodo="todos" quando o usuario NAO especificar um periodo (ex: "NFs aprovadas do fornecedor X") — o default este_mes pode esconder aprovacoes de meses anteriores.',
       parameters: {
         type: 'object',
         properties: {
-          periodo: { type: 'string', enum: ['hoje','ontem','esta_semana','este_mes','mes_passado','todos'], description: 'Janela temporal de aprovados (default este_mes)' },
-          unidade: { type: 'string', enum: ['SP','RJ','ES','TODAS'] }
+          periodo: { type: 'string', enum: ['hoje','ontem','esta_semana','este_mes','mes_passado','todos'], description: 'Janela temporal de aprovados (default este_mes). Use "todos" se o usuario nao pediu periodo especifico.' },
+          unidade: { type: 'string', enum: ['SP','RJ','ES','TODAS'] },
+          fornecedor: { type: 'string', description: 'Filtrar por fornecedor (substring da razao social/nome fantasia OU CNPJ). Ex: "NXTIA".' }
         }
       }
     }
@@ -525,7 +527,8 @@ const TOOLS = [
       parameters: {
         type: 'object',
         properties: {
-          escopo: { type: 'string', enum: ['minhas','todas'], description: 'Default minhas (LancadoPor=email). Admin pode usar todas.' }
+          escopo: { type: 'string', enum: ['minhas','todas'], description: 'Default minhas (LancadoPor=email). Admin/Financeiro pode usar todas.' },
+          fornecedor: { type: 'string', description: 'Filtrar por fornecedor (substring da razao social/nome fantasia OU CNPJ). Ex: "NXTIA".' }
         }
       }
     }
@@ -646,9 +649,13 @@ function filtraRBAC(notas, user, isAdmin, isFinanceiro) {
   // Admin e Financeiro veem TUDO (relatorios pra equipe inteira)
   if (isAdmin || isFinanceiro) return notas;
   const email = (user.email || '').toLowerCase();
+  // Ve as NFs em que esta envolvido: como APROVADOR atual OU como quem LANCOU.
+  // Antes so olhava AprovadorAtual — entao uma NF que o usuario lancou mas outro
+  // aprovou (ex: re-lancada e aprovada por outra diretoria) sumia das respostas.
   return notas.filter(n => {
     const apv = String(n.AprovadorAtual || '').toLowerCase();
-    return apv === email;
+    const lan = String(n.LancadoPor || '').toLowerCase();
+    return apv === email || lan === email;
   });
 }
 
@@ -689,17 +696,26 @@ async function tool_listar_fila(args, ctx) {
     const d5 = new Date(hoje.getTime() + 5*24*60*60*1000).toISOString().substring(0,10);
     notas = notas.filter(n => String(n.DataVencimento || n.Vencimento || '').substring(0,10) <= d5);
   }
-  // Limita resposta pra nao estourar contexto
-  notas = notas.slice(0, 50);
   // A5: resolve razao social via CNPJ (campo correto = CNPJFornecedor) usando o mapa cacheado.
   try {
     if (!ctx._fornMap) ctx._fornMap = await carregarMapFornecedoresParaSol(ctx.gr.client, ctx.gr.siteId);
   } catch (e) { ctx._fornMap = ctx._fornMap || {}; }
+  const razaoDeFila = n => { const c = String(n.CNPJFornecedor || '').replace(/\D/g, ''); return (c && ctx._fornMap[c]) || String(n.CNPJFornecedor || ''); };
+  // Filtro por fornecedor (nome OU cnpj) — ANTES do corte de 50 pra nao perder matches.
+  if (args.fornecedor) {
+    const fq = String(args.fornecedor).toLowerCase().trim();
+    const fqDig = fq.replace(/\D/g, '');
+    notas = notas.filter(n => {
+      const c = String(n.CNPJFornecedor || '').replace(/\D/g, '');
+      return razaoDeFila(n).toLowerCase().includes(fq) || (fqDig.length >= 3 && c.includes(fqDig));
+    });
+  }
+  // Limita resposta pra nao estourar contexto
+  notas = notas.slice(0, 50);
   return {
     total: notas.length,
     notas: notas.map(n => {
-      const cnpjDigitos = String(n.CNPJFornecedor || '').replace(/\D/g, '');
-      const fornNome = (cnpjDigitos && ctx._fornMap[cnpjDigitos]) || String(n.CNPJFornecedor || '');
+      const fornNome = razaoDeFila(n);
       return {
         id: n._id,
         numero: n.NumeroNF,
@@ -749,6 +765,19 @@ async function tool_listar_aprovadas(args, ctx) {
   if (args.unidade && args.unidade !== 'TODAS') {
     notas = notas.filter(n => String(n.Unidade || '') === args.unidade);
   }
+  // Resolve razao social via CNPJ (mapa cacheado). A NF so guarda o CNPJ — sem isso o
+  // nome saia vazio e nao dava pra filtrar por fornecedor (bug A5 que faltava aqui).
+  try { if (!ctx._fornMap) ctx._fornMap = await carregarMapFornecedoresParaSol(client, siteId); } catch (e) { ctx._fornMap = ctx._fornMap || {}; }
+  const razaoDeAprov = n => { const c = String(n.CNPJFornecedor || '').replace(/\D/g, ''); return (c && ctx._fornMap[c]) || String(n.CNPJFornecedor || ''); };
+  if (args.fornecedor) {
+    const fq = String(args.fornecedor).toLowerCase().trim();
+    const fqDig = fq.replace(/\D/g, '');
+    notas = notas.filter(n => {
+      const r = razaoDeAprov(n).toLowerCase();
+      const c = String(n.CNPJFornecedor || '').replace(/\D/g, '');
+      return r.includes(fq) || (fqDig.length >= 3 && c.includes(fqDig));
+    });
+  }
   notas.sort((a, b) => String(b.AprovadoEm || '').localeCompare(String(a.AprovadoEm || '')));
   notas = notas.slice(0, 50);
   return {
@@ -757,11 +786,13 @@ async function tool_listar_aprovadas(args, ctx) {
     notas: notas.map(n => ({
       id: n._id,
       numero: n.NumeroNF,
-      fornecedor: n.Fornecedor,
+      fornecedor: razaoDeAprov(n) || '(sem nome)',
+      cnpj: n.CNPJFornecedor || '',
       valor: Number(n.ValorTotal || n.Valor || 0),
       vencimento: String(n.DataVencimento || n.Vencimento || '').substring(0,10),
       aprovadoEm: String(n.AprovadoEm || '').substring(0,10),
-      unidade: n.Unidade
+      unidade: n.Unidade,
+      diretoria: n.Diretoria
     }))
   };
 }
@@ -815,26 +846,39 @@ async function tool_detalhes_nf(args, ctx) {
   // FALLBACK CRUCIAL: se nao passou numero mas passou id, usa id como numero tambem
   // (resolve o caso da SOL passar "36534" como id quando na verdade eh NumeroNF)
   const numeroAlvo = args.numero || args.id;
+  let multiplasMesmoNumero = 0;
   if (!item && numeroAlvo) {
-    // Pagina por todas as NFs ate achar (max 30 paginas = 15k items)
+    // Coleta TODAS as NFs com esse numero (nao para na 1a). Pode haver mais de uma:
+    // ex. uma REJEITADA antiga + a re-lancada/aprovada (a anti-duplicidade ignora
+    // rejeitadas, entao o mesmo numero pode coexistir). Antes pegava a 1a da lista —
+    // muitas vezes a rejeitada — e respondia status errado.
     const alvoNum = String(numeroAlvo).replace(/\D/g, '');
+    const matches = [];
     let url = '/sites/' + siteId + '/lists/' + listNotasId + '/items?expand=fields&$top=500';
     let pages = 0;
-    while (url && pages < 30 && !item) {
+    while (url && pages < 30) {
       const resp = await client.api(url).get();
       for (const it of (resp.value || [])) {
-        const n = normalizeItem(it, invColMap);
-        const numStr = String(n.NumeroNF || '');
-        // Match exato OU normalizado (so digitos) pra tolerar formatacao tipo "NF-48" vs "48"
-        if (numStr === String(numeroAlvo) || numStr.replace(/\D/g,'') === alvoNum) {
-          item = { id: n._id, fields: it.fields };
-          break;
+        const nn = normalizeItem(it, invColMap);
+        const numStr = String(nn.NumeroNF || '');
+        if (numStr === String(numeroAlvo) || numStr.replace(/\D/g, '') === alvoNum) {
+          matches.push({ it: it, n: nn });
         }
       }
       pages++;
       url = resp['@odata.nextLink']
         ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '')
         : null;
+    }
+    if (matches.length) {
+      // Desempate: prefere NF NAO-rejeitada; depois a mais recente por LancadoEm.
+      const ehRej = m => String(m.n.Status || '').toLowerCase() === 'rejeitada';
+      matches.sort((a, b) => {
+        if (ehRej(a) !== ehRej(b)) return ehRej(a) ? 1 : -1;
+        return String(b.n.LancadoEm || '').localeCompare(String(a.n.LancadoEm || ''));
+      });
+      item = { id: matches[0].n._id, fields: matches[0].it.fields };
+      multiplasMesmoNumero = matches.length;
     }
   }
   if (!item) return { erro: 'NF nao encontrada' };
@@ -870,9 +914,13 @@ async function tool_detalhes_nf(args, ctx) {
     status: n.Status,
     aprovadorAtual: n.AprovadorAtual,
     lancadoPor: n.LancadoPor,
+    lancadoEm: String(n.LancadoEm || '').substring(0,10),
     aprovadoEm: n.AprovadoEm,
     descricao: n.Descricao,
-    serie: n.Serie
+    serie: n.Serie,
+    // Avisa o modelo se ha mais de uma NF com esse numero (ex: rejeitada antiga + re-lancada).
+    // Mostramos a NAO-rejeitada/mais recente; ele deve mencionar isso ao usuario.
+    multiplas_mesmo_numero: multiplasMesmoNumero > 1 ? multiplasMesmoNumero : 0
   };
 }
 
@@ -1144,16 +1192,28 @@ async function tool_listar_rejeitadas(args, ctx) {
     const emailLow = String(ctx.user.email).toLowerCase();
     notas = notas.filter(n => String(n.LancadoPor || '').toLowerCase() === emailLow);
   }
+  // Resolve razao social via CNPJ (mapa cacheado) — a NF so guarda o CNPJ.
+  try { if (!ctx._fornMap) ctx._fornMap = await carregarMapFornecedoresParaSol(client, siteId); } catch (e) { ctx._fornMap = ctx._fornMap || {}; }
+  const razaoDeRej = n => { const c = String(n.CNPJFornecedor || '').replace(/\D/g, ''); return (c && ctx._fornMap[c]) || String(n.CNPJFornecedor || ''); };
+  if (args.fornecedor) {
+    const fq = String(args.fornecedor).toLowerCase().trim();
+    const fqDig = fq.replace(/\D/g, '');
+    notas = notas.filter(n => {
+      const c = String(n.CNPJFornecedor || '').replace(/\D/g, '');
+      return razaoDeRej(n).toLowerCase().includes(fq) || (fqDig.length >= 3 && c.includes(fqDig));
+    });
+  }
   // Ordena: mais recentes primeiro (RejeitadoEm ou LancadoEm)
   notas.sort((a, b) => String(b.RejeitadoEm || b.LancadoEm || '').localeCompare(String(a.RejeitadoEm || a.LancadoEm || '')));
   notas = notas.slice(0, 50);
   return {
     total: notas.length,
-    escopo: (escopo === 'todas' && ctx.isAdmin) ? 'todas' : 'minhas',
+    escopo: (escopo === 'todas' && (ctx.isAdmin || ctx.isFinanceiro)) ? 'todas' : 'minhas',
     notas: notas.map(n => ({
       id: n._id,
       numero: n.NumeroNF,
-      fornecedor: n.Fornecedor,
+      fornecedor: razaoDeRej(n) || '(sem nome)',
+      cnpj: n.CNPJFornecedor || '',
       valor: Number(n.ValorTotal || n.Valor || 0),
       vencimento: String(n.DataVencimento || n.Vencimento || '').substring(0, 10),
       rejeitadoEm: String(n.RejeitadoEm || '').substring(0, 10),
