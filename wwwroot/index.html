@@ -1281,8 +1281,14 @@ window.solChat = (function() {
       if (fab) fab.classList.add('hidden');
       panel.innerHTML = renderPanel(view);
       setTimeout(function(){ var el = document.getElementById('sol-input'); if (el && !state.busy) el.focus(); }, 60);
-      var msgs = document.getElementById('sol-msgs');
-      if (msgs) msgs.scrollTop = msgs.scrollHeight;
+      // Rola para o FIM (mensagem mais nova). No painel quem rola e o .san-panel-body
+      // (o #sol-msgs perde o overflow via CSS), entao rolamos ambos. Em rAF + timeout
+      // pra rolar DEPOIS do layout de tabelas/imagens — senao volta pro topo.
+      var alvosScroll = [panel.querySelector('.san-panel-body'), document.getElementById('sol-msgs')];
+      function rolarParaFim(){ alvosScroll.forEach(function(el){ if (el) el.scrollTop = el.scrollHeight; }); }
+      rolarParaFim();
+      requestAnimationFrame(rolarParaFim);
+      setTimeout(rolarParaFim, 80);
     } else {
       panel.classList.remove('open');
       overlay && overlay.classList.remove('open');
