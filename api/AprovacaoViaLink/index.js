@@ -42,6 +42,13 @@ async function resolveListaNotas(client) {
   return { siteId, listId: lists.value[0].id };
 }
 
+// C7: escape de HTML pra valores dinamicos interpolados nas paginas de resposta.
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function htmlPagina(titulo, mensagem, cor, detalhe) {
   const corBg = cor || '#1F4E79';
   return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>${titulo}</title>
@@ -83,10 +90,11 @@ module.exports = async function (context, req) {
 
     let payload;
     try {
-      payload = jwt.verify(token, secret);
+      // C7: trava o algoritmo em HS256 (evita ataque de confusao de algoritmo).
+      payload = jwt.verify(token, secret, { algorithms: ['HS256'] });
     } catch (e) {
       context.res = { status: 401, headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        body: htmlPagina('Link expirado ou invalido', `Esse link nao eh mais valido (${e.message}). Pode ter sido usado antes ou expirado.`, '#C62828') };
+        body: htmlPagina('Link expirado ou invalido', `Esse link nao eh mais valido (${esc(e.message)}). Pode ter sido usado antes ou expirado.`, '#C62828') };
       return;
     }
 
@@ -120,7 +128,7 @@ module.exports = async function (context, req) {
     }
     if (aprovadorAtual && aprovadorAtual !== aprovador.toLowerCase()) {
       context.res = { status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8' },
-        body: htmlPagina('Voce nao eh o aprovador atual', `Esta NF foi reatribuida. Aprovador atual: ${aprovadorAtual}`, '#C62828') };
+        body: htmlPagina('Voce nao eh o aprovador atual', `Esta NF foi reatribuida. Aprovador atual: ${esc(aprovadorAtual)}`, '#C62828') };
       return;
     }
 
@@ -141,7 +149,7 @@ module.exports = async function (context, req) {
       await aprovarHandler(fakeCtx, fakeReq);
       if (fakeCtx.res && fakeCtx.res.status === 200) {
         context.res = { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          body: htmlPagina('NF aprovada com sucesso!', `A NF #${itemId} foi aprovada por <b>${aprovador}</b>. O PDF com watermark foi arquivado em Notas Aprovadas e o submitter foi notificado.`, '#2E7D32') };
+          body: htmlPagina('NF aprovada com sucesso!', `A NF #${esc(itemId)} foi aprovada por <b>${esc(aprovador)}</b>. O PDF com watermark foi arquivado em Notas Aprovadas e o submitter foi notificado.`, '#2E7D32') };
       } else {
         const errBody = fakeCtx.res ? fakeCtx.res.body : { error: 'erro desconhecido' };
         context.res = { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' },
@@ -163,7 +171,7 @@ module.exports = async function (context, req) {
       await rejeitarHandler(fakeCtx, fakeReq);
       if (fakeCtx.res && fakeCtx.res.status === 200) {
         context.res = { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' },
-          body: htmlPagina('NF rejeitada', `A NF #${itemId} foi rejeitada por <b>${aprovador}</b>. O PDF com watermark vermelho foi arquivado em Rejeitadas e o submitter foi notificado.`, '#C62828') };
+          body: htmlPagina('NF rejeitada', `A NF #${esc(itemId)} foi rejeitada por <b>${esc(aprovador)}</b>. O PDF com watermark vermelho foi arquivado em Rejeitadas e o submitter foi notificado.`, '#C62828') };
       } else {
         const errBody = fakeCtx.res ? fakeCtx.res.body : { error: 'erro desconhecido' };
         context.res = { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' },

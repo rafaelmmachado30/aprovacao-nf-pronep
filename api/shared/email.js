@@ -32,9 +32,12 @@ function gerarLinks(itemId, aprovadorEmail) {
   const secret = process.env.LINK_APROVACAO_SECRET;
   if (!secret) return null;
   const base = 'https://purple-forest-09588fe10.7.azurestaticapps.net';
-  const opts = { expiresIn: '7d' };
-  const tokenAprovar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'aprovar' }, secret, opts);
-  const tokenRejeitar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'rejeitar' }, secret, opts);
+  // C7: validade reduzida de 7d para 48h (menor janela se o link vazar) + jti unico
+  // por token (identificador rastreavel) + algoritmo HS256 explicito.
+  const crypto = require('crypto');
+  const opts = { expiresIn: '48h', algorithm: 'HS256' };
+  const tokenAprovar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'aprovar', jti: crypto.randomUUID() }, secret, opts);
+  const tokenRejeitar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'rejeitar', jti: crypto.randomUUID() }, secret, opts);
   return {
     aprovar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenAprovar)}`,
     rejeitar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenRejeitar)}`
