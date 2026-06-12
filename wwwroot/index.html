@@ -608,7 +608,10 @@
   .venc-cal-day.verde:hover { background: #A7F3D0; }
   .venc-cal-day.vermelho { background: #FEE2E2; color: #B91C1C; font-weight: 600; }
   .venc-cal-day.vermelho:hover { background: #FECACA; }
+  /* Fins de semana / feriados: hachura por cima da cor de prazo + numero em italico */
+  .venc-cal-day.naoutil { background-image: repeating-linear-gradient(45deg, rgba(71,85,105,.20) 0 2px, transparent 2px 5px); font-style: italic; font-weight: 500; }
   .venc-cal-day.sel { outline: 2px solid var(--azul-escuro); outline-offset: -2px; }
+  .venc-cal-legenda i.leg-naoutil { background: #EEF2F6; background-image: repeating-linear-gradient(45deg, rgba(71,85,105,.30) 0 2px, transparent 2px 5px); }
   .venc-cal-legenda { display: flex; gap: 14px; margin-top: 10px; font-size: 11px; color: #647883; flex-wrap: wrap; }
   .venc-cal-legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
 
@@ -4072,7 +4075,7 @@ const views = {
           <label>Vencimento * <span class="small muted" style="font-weight:400">(mínimo: D+5 dias úteis)</span></label>
           <input id="frm-venc" type="hidden">
           <div class="venc-picker">
-            <input id="frm-venc-display" type="text" readonly placeholder="dd/mm/aaaa — clique para escolher" autocomplete="off" onclick="toggleCalVenc(event)">
+            <input id="frm-venc-display" type="text" readonly placeholder="Selecione a data" autocomplete="off" onclick="toggleCalVenc(event)">
             <div id="venc-cal" class="venc-cal" style="display:none"></div>
           </div>
           <div id="frm-venc-info" class="small" style="margin-top:4px"></div>
@@ -6956,9 +6959,9 @@ function renderCalVenc() {
   const offset = new Date(y, m, 1).getDay(); // 0 = domingo
   const selISO = document.getElementById('frm-venc').value;
   let html = '<div class="venc-cal-head">' +
-    '<button type="button" onclick="navCalVenc(-1)">‹</button>' +
+    '<button type="button" onclick="event.stopPropagation();navCalVenc(-1)">‹</button>' +
     '<span class="venc-cal-title">' + meses[m] + ' ' + y + '</span>' +
-    '<button type="button" onclick="navCalVenc(1)">›</button>' +
+    '<button type="button" onclick="event.stopPropagation();navCalVenc(1)">›</button>' +
     '</div><div class="venc-cal-grid">';
   for (let i = 0; i < 7; i++) html += '<div class="venc-cal-dow">' + dows[i] + '</div>';
   for (let e = 0; e < offset; e++) html += '<div class="venc-cal-day empty"></div>';
@@ -6968,13 +6971,17 @@ function renderCalVenc() {
     if (dt < HOJE) { html += '<div class="venc-cal-day past">' + dia + '</div>'; continue; }
     const dias = diasEntre(HOJE, dt);
     let cls = 'venc-cal-day ' + (dias < 5 ? 'vermelho' : 'verde');
+    const util = ehDiaUtil(dt);
+    if (!util) cls += ' naoutil';
     if (iso === selISO) cls += ' sel';
-    html += '<div class="' + cls + '" title="' + (dias < 5 ? 'Fora do prazo (D+' + dias + ')' : 'Dentro do prazo (D+' + dias + ')') + '" onclick="selecionarDiaVenc(\'' + iso + '\')">' + dia + '</div>';
+    const tituloPrazo = (dias < 5 ? 'Fora do prazo (D+' + dias + ')' : 'Dentro do prazo (D+' + dias + ')') + (util ? '' : ' · fim de semana/feriado');
+    html += '<div class="' + cls + '" title="' + tituloPrazo + '" onclick="selecionarDiaVenc(\'' + iso + '\')">' + dia + '</div>';
   }
   html += '</div>' +
     '<div class="venc-cal-legenda">' +
     '<span><i style="background:#FEE2E2"></i>Fora do prazo (&lt; D+5)</span>' +
     '<span><i style="background:#D1FAE5"></i>Dentro do prazo (&ge; D+5)</span>' +
+    '<span><i class="leg-naoutil"></i>Fim de semana / feriado</span>' +
     '</div>';
   cal.innerHTML = html;
 }
