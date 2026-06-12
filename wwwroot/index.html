@@ -588,6 +588,30 @@
   .nf-card-venc.venc-alerta { color: #C62828; font-weight: 600; }
   .nf-card-venc b { color: var(--cinza-texto); }
 
+  /* Calendario customizado de vencimento (dias coloridos por prazo D+5) */
+  .venc-picker { position: relative; }
+  #frm-venc-display { cursor: pointer; background: #fff; }
+  .venc-cal { position: absolute; z-index: 60; top: 100%; left: 0; margin-top: 4px; background: #fff;
+    border: 1px solid var(--cinza-borda); border-radius: 10px; box-shadow: 0 10px 30px rgba(31,78,121,.18);
+    padding: 12px; width: 300px; }
+  .venc-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .venc-cal-head button { background: #F4F8FB; border: 1px solid var(--cinza-borda); border-radius: 6px;
+    cursor: pointer; padding: 3px 11px; font-size: 16px; line-height: 1; color: var(--azul-escuro); }
+  .venc-cal-head button:hover { background: #E3EEF6; }
+  .venc-cal-title { font-weight: 600; color: var(--azul-escuro); font-size: 14px; }
+  .venc-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .venc-cal-dow { text-align: center; font-size: 11px; color: #647883; font-weight: 600; padding: 2px 0; }
+  .venc-cal-day { text-align: center; padding: 7px 0; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .venc-cal-day.empty { cursor: default; }
+  .venc-cal-day.past { color: #C7CED4; cursor: not-allowed; }
+  .venc-cal-day.verde { background: #D1FAE5; color: #065F46; font-weight: 600; }
+  .venc-cal-day.verde:hover { background: #A7F3D0; }
+  .venc-cal-day.vermelho { background: #FEE2E2; color: #B91C1C; font-weight: 600; }
+  .venc-cal-day.vermelho:hover { background: #FECACA; }
+  .venc-cal-day.sel { outline: 2px solid var(--azul-escuro); outline-offset: -2px; }
+  .venc-cal-legenda { display: flex; gap: 14px; margin-top: 10px; font-size: 11px; color: #647883; flex-wrap: wrap; }
+  .venc-cal-legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+
   .nf-card-toggle {
     text-align: center; padding: 5px; border-top: 1px dashed #E1E8EE;
     font-size: 10px; color: var(--cinza-medio); user-select: none;
@@ -4046,7 +4070,11 @@ const views = {
         </div>
         <div class="form-row">
           <label>Vencimento * <span class="small muted" style="font-weight:400">(mínimo: D+5 dias úteis)</span></label>
-          <input id="frm-venc" type="date" onchange="onVencChange()" onblur="onVencChange()">
+          <input id="frm-venc" type="hidden">
+          <div class="venc-picker">
+            <input id="frm-venc-display" type="text" readonly placeholder="dd/mm/aaaa — clique para escolher" autocomplete="off" onclick="toggleCalVenc(event)">
+            <div id="venc-cal" class="venc-cal" style="display:none"></div>
+          </div>
           <div id="frm-venc-info" class="small" style="margin-top:4px"></div>
         </div>
 
@@ -6897,13 +6925,83 @@ function addDiasUteis(date, n) {
   return result;
 }
 
+// ===== Calendario customizado de vencimento (dias coloridos por prazo D+5) =====
+// Vermelho = vence em menos de D+5 dias uteis (fora do prazo); Verde = D+5 ou mais.
+// Reusa HOJE, diasEntre() e ehDiaUtil() (mesma logica da validacao do lancamento).
+function toggleCalVenc(e) {
+  if (e) e.stopPropagation();
+  const cal = document.getElementById('venc-cal');
+  if (!cal) return;
+  if (cal.style.display === 'block') { cal.style.display = 'none'; return; }
+  const iso = document.getElementById('frm-venc').value;
+  const base = iso ? new Date(iso + 'T00:00:00') : new Date(HOJE);
+  window._vencCalView = { y: base.getFullYear(), m: base.getMonth() };
+  // Garante feriados carregados pra colorir certo, depois re-renderiza.
+  try { if (typeof carregarFeriadosBR === 'function') carregarFeriadosBR().then(function(){ if (document.getElementById('venc-cal').style.display === 'block') renderCalVenc(); }); } catch (e2) {}
+  renderCalVenc();
+  cal.style.display = 'block';
+}
+function navCalVenc(delta) {
+  const v = window._vencCalView; if (!v) return;
+  const d = new Date(v.y, v.m + delta, 1);
+  window._vencCalView = { y: d.getFullYear(), m: d.getMonth() };
+  renderCalVenc();
+}
+function renderCalVenc() {
+  const cal = document.getElementById('venc-cal'); if (!cal) return;
+  const v = window._vencCalView; const y = v.y, m = v.m;
+  const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  const dows = ['D','S','T','Q','Q','S','S'];
+  const diasNoMes = new Date(y, m + 1, 0).getDate();
+  const offset = new Date(y, m, 1).getDay(); // 0 = domingo
+  const selISO = document.getElementById('frm-venc').value;
+  let html = '<div class="venc-cal-head">' +
+    '<button type="button" onclick="navCalVenc(-1)">‹</button>' +
+    '<span class="venc-cal-title">' + meses[m] + ' ' + y + '</span>' +
+    '<button type="button" onclick="navCalVenc(1)">›</button>' +
+    '</div><div class="venc-cal-grid">';
+  for (let i = 0; i < 7; i++) html += '<div class="venc-cal-dow">' + dows[i] + '</div>';
+  for (let e = 0; e < offset; e++) html += '<div class="venc-cal-day empty"></div>';
+  for (let dia = 1; dia <= diasNoMes; dia++) {
+    const dt = new Date(y, m, dia);
+    const iso = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(dia).padStart(2, '0');
+    if (dt < HOJE) { html += '<div class="venc-cal-day past">' + dia + '</div>'; continue; }
+    const dias = diasEntre(HOJE, dt);
+    let cls = 'venc-cal-day ' + (dias < 5 ? 'vermelho' : 'verde');
+    if (iso === selISO) cls += ' sel';
+    html += '<div class="' + cls + '" title="' + (dias < 5 ? 'Fora do prazo (D+' + dias + ')' : 'Dentro do prazo (D+' + dias + ')') + '" onclick="selecionarDiaVenc(\'' + iso + '\')">' + dia + '</div>';
+  }
+  html += '</div>' +
+    '<div class="venc-cal-legenda">' +
+    '<span><i style="background:#FEE2E2"></i>Fora do prazo (&lt; D+5)</span>' +
+    '<span><i style="background:#D1FAE5"></i>Dentro do prazo (&ge; D+5)</span>' +
+    '</div>';
+  cal.innerHTML = html;
+}
+function selecionarDiaVenc(iso) {
+  document.getElementById('frm-venc').value = iso;
+  const disp = document.getElementById('frm-venc-display');
+  if (disp) disp.value = iso.split('-').reverse().join('/');
+  const cal = document.getElementById('venc-cal'); if (cal) cal.style.display = 'none';
+  onVencChange();
+}
+// Fecha o calendario ao clicar fora dele
+document.addEventListener('click', function (ev) {
+  const cal = document.getElementById('venc-cal');
+  if (!cal || cal.style.display !== 'block') return;
+  const dentro = ev.target.closest && ev.target.closest('.venc-picker');
+  if (!dentro) cal.style.display = 'none';
+});
+
 function onVencChange() {
   const vencEl = document.getElementById('frm-venc');
+  // O feedback visual (cor/borda) vai no campo de exibicao, ja que #frm-venc agora eh hidden.
+  const dispEl = document.getElementById('frm-venc-display') || vencEl;
   const info = document.getElementById('frm-venc-info');
   const blocoForaPrazo = document.getElementById('frm-venc-fora-prazo');
   if (!vencEl.value) {
-    vencEl.style.color = '';
-    vencEl.style.borderColor = '';
+    dispEl.style.color = '';
+    dispEl.style.borderColor = '';
     info.innerHTML = '';
     blocoForaPrazo.style.display = 'none';
     validarBotaoEnvio();
@@ -6918,15 +7016,15 @@ function onVencChange() {
   }
   const dias = diasEntre(HOJE, venc);
   if (dias < 5) {
-    vencEl.style.color = 'var(--vermelho)';
-    vencEl.style.borderColor = 'var(--vermelho)';
-    vencEl.style.fontWeight = '600';
+    dispEl.style.color = 'var(--vermelho)';
+    dispEl.style.borderColor = 'var(--vermelho)';
+    dispEl.style.fontWeight = '600';
     info.innerHTML = `<span style="color:var(--vermelho);font-weight:600">⚠ ${dias < 0 ? 'Data passada' : 'Apenas '+dias+' dia(s) até o vencimento'} — fora do prazo padrão (D+5)</span>`;
     blocoForaPrazo.style.display = 'block';
   } else {
-    vencEl.style.color = 'var(--verde)';
-    vencEl.style.borderColor = 'var(--cinza-borda)';
-    vencEl.style.fontWeight = '500';
+    dispEl.style.color = 'var(--verde)';
+    dispEl.style.borderColor = 'var(--cinza-borda)';
+    dispEl.style.fontWeight = '500';
     info.innerHTML = `<span style="color:var(--verde);font-weight:500">✓ ${dias} dia(s) até o vencimento — dentro do prazo</span>`;
     blocoForaPrazo.style.display = 'none';
     document.querySelectorAll('input[name="frm-negociou"]').forEach(r => r.checked = false);
