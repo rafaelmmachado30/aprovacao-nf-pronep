@@ -1080,7 +1080,23 @@ async function _carregarTodosContratos(ctx) {
       nextUrl = idx >= 0 ? next.substring(idx + 5) : null;
     } else nextUrl = null;
   }
-  return todos;
+  // RBAC de contratos aplicado no ponto unico por onde TODAS as tools de contrato passam.
+  return _filtraContratosRBAC(ctx, todos);
+}
+
+// RBAC de contratos — MESMO criterio do endpoint ListarContratos:
+//   - admin OU juridico (gestor_juridica): veem TODO o acervo;
+//   - gestor: so as diretorias que gerencia (mapeadas em PRONEP-NF-Diretorias);
+//   - demais (submitter, financeiro sem gestor, etc.): NENHUM contrato.
+// Antes a SAN ignorava isso e expunha o acervo inteiro pra qualquer perfil.
+function _filtraContratosRBAC(ctx, lista) {
+  const cr = (ctx && ctx.contratos) || {};
+  if (cr.veTodos) return lista;
+  if (cr.isGestor && Array.isArray(cr.diretorias) && cr.diretorias.length) {
+    const set = new Set(cr.diretorias.map(d => String(d).toLowerCase().trim()));
+    return lista.filter(c => set.has(String(c.Diretoria || '').toLowerCase().trim()));
+  }
+  return [];
 }
 
 // Helper: calcula dias para vencer (negativo se ja venceu)
@@ -1396,6 +1412,16 @@ async function runSol(history, userMessage, user, opts) {
   // Resolve escopo do user (gestor de quais diretorias/unidades) pra passar pro prompt
   const escopo = await resolveEscopoUsuario(client, siteId, listDirId, user.email);
   const perfil = { isAdmin, isFinanceiro };
+  // RBAC de CONTRATOS na SAN (espelha o endpoint ListarContratos). Admin/juridico veem
+  // tudo; gestor so as diretorias que gerencia; demais nada.
+  const rolesSol = Array.isArray(opts.roles) ? opts.roles : [];
+  const isJuridicoContratos = rolesSol.includes('gestor_juridica');
+  const isGestorContratos = rolesSol.includes('gestor') || rolesSol.some(function(r){ return /^gestor_/.test(String(r)); });
+  ctx.contratos = {
+    veTodos: isAdmin || isJuridicoContratos,
+    isGestor: isGestorContratos,
+    diretorias: (escopo && escopo.diretorias) || []
+  };
   const systemPrompt = buildSystemPrompt(user, viewAtual, escopo, perfil);
 
   // Tenta Anthropic primeiro

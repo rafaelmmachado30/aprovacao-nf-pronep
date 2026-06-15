@@ -73,6 +73,7 @@ module.exports = async function (context, req) {
       viewAtual: viewAtual,
       isAdmin: isAdmin,
       isFinanceiro: isFinanceiro,
+      roles: graphRoles,   // pra RBAC de contratos na SAN (gestor_juridica / gestor_*)
       maxIter: 8
     });
 
