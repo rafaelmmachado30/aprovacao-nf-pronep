@@ -34,6 +34,7 @@ const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
+const { diretoriasAcessiveis } = require('../shared/acessoContratos');
 const contratosShared = require('../shared/contratos');
 
 const cache = { siteId: null, listId: null, listDirId: null, colMap: null };
@@ -121,10 +122,9 @@ module.exports = async function (context, req) {
     const isJuridicoFullAccess = allRoles.includes('gestor_juridica');
     const veTodosContratos = isAdmin || isJuridicoFullAccess;
     const isGestor = allRoles.includes('gestor') || allRoles.some(function(r){ return /^gestor_/.test(r); });
-    if (!veTodosContratos && !isGestor) {
-      context.res = { status: 403, body: { error: 'Acesso negado. Restrito a Gestores, Juridico e Admins.' } };
-      return;
-    }
+    // Sem 403 fixo aqui: o acesso e decidido pelo Controle de Acessos (mapa explicito por
+    // diretoria) + fallback no aprovador de NF. Quem nao tem nenhuma pasta liberada recebe
+    // lista vazia (abaixo). Isso permite liberar Financeiro e outros perfis sem hardcode.
 
     // 3. Resolve site/lists
     const client = getGraphClient();
@@ -144,20 +144,20 @@ module.exports = async function (context, req) {
     }
     const colMap = await getColMap(client, siteId, listId);
 
-    // 4. Define escopo de diretorias
-    // null = sem filtro (admin OU juridico - ambos veem tudo no acervo de contratos)
+    // 4. Define escopo de diretorias via Controle de Acessos (mapa explicito) + fallback
+    // no aprovador de NF. null = sem filtro (admin/juridico veem tudo).
     let scopeDiretorias = null;
-    if (!veTodosContratos && isGestor) {
-      scopeDiretorias = await diretoriasDoGestor(client, siteId, listDirId, user.email);
+    if (!veTodosContratos) {
+      scopeDiretorias = await diretoriasAcessiveis(client, siteId, listDirId, user.email);
       if (!scopeDiretorias.length) {
-        // Gestor sem mapeamento — retorna vazio
+        // Nenhuma pasta liberada (nem por config, nem como aprovador de NF) — lista vazia.
         context.res = {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
           body: {
             ok: true,
-            userScope: { roles: allRoles, diretoriasGestorOf: [] },
-            mensagem: 'Voce eh gestor mas nao foi encontrado nenhum mapeamento na lista PRONEP-NF-Diretorias.',
+            userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor, diretoriasGestorOf: [] },
+            mensagem: 'Voce nao tem nenhuma pasta de contratos liberada. Solicite acesso ao Admin (tela Controle de Acessos).',
             stats: zeroStats(),
             arvore: []
           }

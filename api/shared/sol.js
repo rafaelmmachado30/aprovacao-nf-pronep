@@ -1092,8 +1092,9 @@ async function _carregarTodosContratos(ctx) {
 function _filtraContratosRBAC(ctx, lista) {
   const cr = (ctx && ctx.contratos) || {};
   if (cr.veTodos) return lista;
-  if (cr.isGestor && Array.isArray(cr.diretorias) && cr.diretorias.length) {
-    const set = new Set(cr.diretorias.map(d => String(d).toLowerCase().trim()));
+  const dirs = Array.isArray(cr.diretorias) ? cr.diretorias : [];
+  if (dirs.length) {
+    const set = new Set(dirs.map(d => String(d).toLowerCase().trim()));
     return lista.filter(c => set.has(String(c.Diretoria || '').toLowerCase().trim()));
   }
   return [];
@@ -1415,13 +1416,17 @@ async function runSol(history, userMessage, user, opts) {
   // RBAC de CONTRATOS na SAN (espelha o endpoint ListarContratos). Admin/juridico veem
   // tudo; gestor so as diretorias que gerencia; demais nada.
   const rolesSol = Array.isArray(opts.roles) ? opts.roles : [];
-  const isJuridicoContratos = rolesSol.includes('gestor_juridica');
-  const isGestorContratos = rolesSol.includes('gestor') || rolesSol.some(function(r){ return /^gestor_/.test(String(r)); });
-  ctx.contratos = {
-    veTodos: isAdmin || isJuridicoContratos,
-    isGestor: isGestorContratos,
-    diretorias: (escopo && escopo.diretorias) || []
-  };
+  const veTodosContr = isAdmin || rolesSol.includes('gestor_juridica');
+  let dirsContr = [];
+  if (!veTodosContr) {
+    // Mesmo criterio do ListarContratos: Controle de Acessos (mapa explicito) + fallback
+    // no aprovador de NF. Se falhar, cai pro escopo de aprovador de NF.
+    try {
+      const { diretoriasAcessiveis } = require('./acessoContratos');
+      dirsContr = await diretoriasAcessiveis(client, siteId, listDirId, user.email);
+    } catch (e) { dirsContr = (escopo && escopo.diretorias) || []; }
+  }
+  ctx.contratos = { veTodos: veTodosContr, diretorias: dirsContr };
   const systemPrompt = buildSystemPrompt(user, viewAtual, escopo, perfil);
 
   // Tenta Anthropic primeiro

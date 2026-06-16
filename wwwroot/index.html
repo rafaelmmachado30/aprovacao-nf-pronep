@@ -1004,7 +1004,7 @@ const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
   gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','contratos','mapa-aprovadores','arquitetura'] },
   financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','auditoria','arquitetura','configuracoes'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','controle-acessos','auditoria','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -1113,6 +1113,7 @@ const ICONS = {
   contratos:    '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 12h7M8 15h8"/><path d="M7 18.5c1-1 2 0 3 0.5 1 0.5 2-1 3-0.5"/></svg>',
   mapa:         '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
   auditoria:    '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>',
+  controleAcessos: '<svg viewBox="0 0 24 24"><path d="M12 2l7 3v6c0 4.5-3 8-7 11-4-3-7-6.5-7-11V5z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg>',
   arquitetura:  '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M9 14l-3 3M15 14l3 3M8 19h8"/></svg>',
   configuracoes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
 };
@@ -2047,6 +2048,7 @@ const menuItems = [
   { id: 'fornecedores',      label: 'Fornecedores',               icon: ICONS.fornecedores },
   { id: 'contratos',         label: 'Contratos',                  icon: ICONS.contratos },
   { id: 'mapa-aprovadores',  label: 'Mapa de Aprovadores',        icon: ICONS.mapa },
+  { id: 'controle-acessos',  label: 'Controle de Acessos',        icon: ICONS.controleAcessos },
   { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
   { id: 'arquitetura',       label: 'Arquitetura do Sistema',     icon: ICONS.arquitetura },
   { id: 'configuracoes',     label: 'Configurações',              icon: ICONS.configuracoes },
@@ -4394,8 +4396,121 @@ const views = {
     // Atualiza status do push apos render (precisa do DOM montado)
     setTimeout(() => { try { atualizarStatusPush(); } catch (e) {} }, 50);
     return renderConfiguracoesView();
+  },
+  'controle-acessos': () => {
+    setTimeout(carregarControleAcessos, 30);
+    return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Carregando Controle de Acessos...</div><div class="small muted">Buscando diretorias e gestores</div></div>';
   }
 };
+
+// ===== Controle de Acessos a contratos (tela admin) =====
+async function carregarControleAcessos() {
+  const area = document.getElementById('content-area');
+  if (!area) return;
+  try {
+    const r = await fetch('/api/GetControleAcessos', { credentials: 'include' });
+    if (r.status === 403) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Acesso restrito a administradores.</div>'; return; }
+    if (!r.ok) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Falha ao carregar Controle de Acessos (HTTP ' + r.status + ')</div>'; return; }
+    const data = await r.json();
+    window._ca = { diretorias: data.diretorias || [], gestores: data.gestores || [], acessos: data.acessos || {}, dirSel: '', comAcessoSet: new Set() };
+    area.innerHTML = renderControleAcessosView();
+  } catch (e) {
+    area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>' + escHtml(e.message || 'erro') + '</div>';
+  }
+}
+
+function renderControleAcessosView() {
+  const ca = window._ca || {};
+  const dirs = ca.diretorias || [];
+  const optsDir = ['<option value="">— selecione uma pasta —</option>'].concat(
+    dirs.map(function (d) { return '<option value="' + escAttr(d) + '"' + (ca.dirSel === d ? ' selected' : '') + '>' + escHtml(d) + '</option>'; })
+  ).join('');
+  return '' +
+    '<h2>Controle de Acessos a Contratos</h2>' +
+    '<div class="view-sub">Defina quais gestores podem acessar cada pasta (diretoria) de contratos. ' +
+      'Pastas <b>não configuradas</b> seguem a regra padrão (quem aprova NF da diretoria vê os contratos dela). ' +
+      'Ao definir uma pasta aqui, a sua lista passa a valer para ela. Admin e Jurídico veem tudo sempre.</div>' +
+    '<div class="card">' +
+      '<label style="font-weight:600;color:var(--azul-escuro)">Pasta (Diretoria)</label><br>' +
+      '<select id="ca-dir" onchange="caSelecionarDiretoria(this.value)" style="width:100%;max-width:420px;margin-top:6px;padding:8px;border:1px solid var(--cinza-borda);border-radius:6px">' + optsDir + '</select>' +
+      '<div id="ca-listas" style="margin-top:18px">' + (ca.dirSel ? caRenderListas() : '<div class="small muted">Selecione uma pasta acima para definir os acessos.</div>') + '</div>' +
+    '</div>';
+}
+
+function caRenderListas() {
+  const ca = window._ca;
+  if (!ca || !ca.dirSel) return '';
+  const com = ca.comAcessoSet || new Set();
+  const pool = ca.gestores || [];
+  const disp = pool.filter(function (g) { return !com.has(g.email); });
+  const comArr = pool.filter(function (g) { return com.has(g.email); });
+  function optList(arr) { return arr.map(function (g) { return '<option value="' + escAttr(g.email) + '">' + escHtml(g.nome) + ' (' + escHtml(g.email) + ')</option>'; }).join(''); }
+  const semConfig = !(ca.acessos && Array.isArray(ca.acessos[ca.dirSel]));
+  return '' +
+    (semConfig ? '<div class="alert alert-info" style="margin-bottom:12px"><span class="ico">ℹ</span><div>Esta pasta ainda usa a regra padrão (aprovador de NF). Ao salvar uma lista aqui, você passa a controlá-la manualmente. Salvar com a lista vazia volta ao padrão.</div></div>' : '') +
+    '<div style="display:flex;gap:14px;align-items:stretch;flex-wrap:wrap">' +
+      '<div style="flex:1;min-width:240px">' +
+        '<div style="font-weight:600;font-size:13px;margin-bottom:4px">Disponíveis (' + disp.length + ')</div>' +
+        '<select id="ca-disp" multiple size="12" style="width:100%;border:1px solid var(--cinza-borda);border-radius:6px;padding:4px;font-size:13px">' + optList(disp) + '</select>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;justify-content:center;gap:8px">' +
+        '<button class="btn btn-secondary" onclick="caMover(\'add\')" title="Liberar acesso">→</button>' +
+        '<button class="btn btn-secondary" onclick="caMover(\'rem\')" title="Remover acesso">←</button>' +
+      '</div>' +
+      '<div style="flex:1;min-width:240px">' +
+        '<div style="font-weight:600;font-size:13px;margin-bottom:4px;color:#065F46">Com acesso (' + comArr.length + ')</div>' +
+        '<select id="ca-com" multiple size="12" style="width:100%;border:1px solid #A7F3D0;background:#F0FDF4;border-radius:6px;padding:4px;font-size:13px">' + optList(comArr) + '</select>' +
+      '</div>' +
+    '</div>' +
+    '<div style="margin-top:14px;display:flex;gap:10px;align-items:center">' +
+      '<button class="btn btn-primary" onclick="caSalvar()">Salvar acessos desta pasta</button>' +
+      '<span id="ca-msg" class="small muted"></span>' +
+    '</div>';
+}
+
+function caSelecionarDiretoria(dir) {
+  const ca = window._ca;
+  if (!ca) return;
+  ca.dirSel = dir || '';
+  const explicit = (ca.acessos && Array.isArray(ca.acessos[dir])) ? ca.acessos[dir] : [];
+  ca.comAcessoSet = new Set(explicit.map(function (e) { return String(e).toLowerCase(); }));
+  const el = document.getElementById('ca-listas');
+  if (el) el.innerHTML = dir ? caRenderListas() : '<div class="small muted">Selecione uma pasta acima para definir os acessos.</div>';
+}
+
+function caMover(acao) {
+  const ca = window._ca;
+  if (!ca || !ca.dirSel) return;
+  const sel = document.getElementById(acao === 'add' ? 'ca-disp' : 'ca-com');
+  if (!sel) return;
+  const escolhidos = Array.from(sel.selectedOptions).map(function (o) { return String(o.value).toLowerCase(); });
+  if (acao === 'add') escolhidos.forEach(function (e) { ca.comAcessoSet.add(e); });
+  else escolhidos.forEach(function (e) { ca.comAcessoSet.delete(e); });
+  const el = document.getElementById('ca-listas');
+  if (el) el.innerHTML = caRenderListas();
+}
+
+async function caSalvar() {
+  const ca = window._ca;
+  if (!ca || !ca.dirSel) return;
+  const emails = Array.from(ca.comAcessoSet);
+  const msg = document.getElementById('ca-msg');
+  if (msg) { msg.textContent = 'Salvando...'; msg.style.color = ''; }
+  try {
+    const r = await fetch('/api/SalvarControleAcessos', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diretoria: ca.dirSel, emails: emails }) });
+    const data = await r.json().catch(function () { return {}; });
+    if (r.ok) {
+      ca.acessos = data.acessos || ca.acessos || {};
+      if (emails.length) ca.acessos[ca.dirSel] = emails; else delete ca.acessos[ca.dirSel];
+      if (msg) { msg.textContent = '✓ Salvo'; msg.style.color = 'var(--verde)'; }
+      const el = document.getElementById('ca-listas'); if (el) el.innerHTML = caRenderListas();
+    } else {
+      if (msg) { msg.textContent = '✗ ' + (data.error || ('HTTP ' + r.status)); msg.style.color = 'var(--vermelho)'; }
+    }
+  } catch (e) {
+    if (msg) { msg.textContent = '✗ ' + (e.message || 'erro de rede'); msg.style.color = 'var(--vermelho)'; }
+  }
+}
 
 // A8: retorna o mapa de aprovadores ATIVO — prefere o dinamico carregado da API
 // (/api/ListarDiretorias = matriz real do SharePoint) e cai pro hardcoded so se a
