@@ -38,12 +38,14 @@ async function resolveSite(client) {
   return siteResp.id;
 }
 
-// Normaliza lista de e-mails: lowercase, trim, sem vazios, sem duplicatas.
-function normEmails(arr) {
+// Normaliza lista de diretorias: trim, sem vazios, sem duplicatas (case-insensitive).
+function normDirs(arr) {
   const out = [];
-  for (const e of (Array.isArray(arr) ? arr : [])) {
-    const v = String(e || '').toLowerCase().trim();
-    if (v && /@/.test(v) && out.indexOf(v) < 0) out.push(v);
+  const seen = new Set();
+  for (const d of (Array.isArray(arr) ? arr : [])) {
+    const v = String(d || '').trim();
+    const k = v.toLowerCase();
+    if (v && !seen.has(k)) { seen.add(k); out.push(v); }
   }
   return out;
 }
@@ -66,21 +68,21 @@ module.exports = async function (context, req) {
     let novoMapa;
 
     if (body.mapa && typeof body.mapa === 'object') {
-      // Substitui o mapa inteiro (normalizando cada diretoria)
+      // Substitui o mapa inteiro (pasta -> diretorias com acesso)
       novoMapa = {};
       for (const d of Object.keys(body.mapa)) {
-        const ems = normEmails(body.mapa[d]);
-        if (ems.length) novoMapa[String(d).trim()] = ems;
+        const ds = normDirs(body.mapa[d]);
+        if (ds.length) novoMapa[String(d).trim()] = ds;
       }
     } else if (body.diretoria) {
-      // Atualiza apenas uma diretoria
+      // Atualiza apenas uma pasta. body.diretoria = pasta; body.diretorias = diretorias liberadas.
       novoMapa = Object.assign({}, mapaAtual);
-      const dir = String(body.diretoria).trim();
-      const ems = normEmails(body.emails);
-      if (ems.length) novoMapa[dir] = ems;
-      else delete novoMapa[dir]; // lista vazia = remove config explicita (volta ao fallback)
+      const folder = String(body.diretoria).trim();
+      const ds = normDirs(body.diretorias);
+      if (ds.length) novoMapa[folder] = ds;
+      else delete novoMapa[folder]; // lista vazia = remove config explicita (volta ao fallback)
     } else {
-      context.res = { status: 400, body: { error: 'Envie { diretoria, emails } ou { mapa }' } };
+      context.res = { status: 400, body: { error: 'Envie { diretoria, diretorias } ou { mapa }' } };
       return;
     }
 

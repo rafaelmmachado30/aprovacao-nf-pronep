@@ -1,15 +1,15 @@
 /**
  * /api/GetControleAcessos (GET) — ADMIN ONLY
  *
- * Retorna os dados da tela Controle de Acessos a contratos:
+ * Dados da tela Controle de Acessos (modelo POR DIRETORIA):
  *   {
- *     diretorias: ['Tecnologia','RH',...],          // pastas de contrato (diretorias)
- *     gestores:   [{ nome, email }, ...],            // pool atribuivel
- *     acessos:    { 'Tecnologia': ['a@x','b@x'], ... } // mapa atual (config explicita)
+ *     folders:    ['Comercial','Tecnologia','Suprimentos',...]  // pastas (acervo de contratos)
+ *     diretorias: ['Tecnologia','RH',...]                       // pool de diretorias atribuiveis
+ *     acessos:    { 'Tecnologia': ['Tecnologia','Comercial'], ... } // mapa atual (pasta -> diretorias)
  *   }
  *
- * O pool de gestores = aprovadores cadastrados na PRONEP-NF-Diretorias + membros do
- * grupo Financeiro-Gestao (pra permitir liberar o Financeiro, conforme decisao do Rafa).
+ * As PESSOAS vem automaticamente da matriz de gestores (PRONEP-NF-Diretorias): quem for
+ * gestor de uma diretoria liberada ve a pasta. Por isso a tela trabalha com diretorias, nao e-mails.
  */
 
 require('isomorphic-fetch');
@@ -21,7 +21,7 @@ const { TokenCredentialAuthenticationProvider } =
   require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 
 const LIST_DIR = 'PRONEP-NF-Diretorias';
-const FINANCEIRO_GROUP_ID = process.env.GESTOR_FINANCEIRO_GROUP_ID || 'c2a73d16-4659-4b3c-93a1-0c0fbfaaaa96';
+const LIST_CONTRATOS = 'PRONEP-NF-Contratos';
 
 function getGraphClient() {
   const tenantId = process.env.AAD_TENANT_ID;
@@ -52,49 +52,60 @@ async function resolveListId(client, siteId, displayName) {
 module.exports = async function (context, req) {
   try {
     const authz = await requireAdmin(context, req);
-    if (!authz) return; // requireAdmin ja setou 401/403
+    if (!authz) return;
 
     const client = getGraphClient();
     const siteId = await resolveSite(client);
-    const listDirId = await resolveListId(client, siteId, LIST_DIR);
 
-    // 1) Diretorias (pastas) + pool de gestores a partir da matriz de NF
-    const diretoriasSet = new Set();
-    const poolMap = {}; // email -> nome
+    // 1) Diretorias da matriz (pool atribuivel)
+    const dirSet = new Set();
+    const listDirId = await resolveListId(client, siteId, LIST_DIR);
     if (listDirId) {
       const resp = await client.api('/sites/' + siteId + '/lists/' + listDirId + '/items?expand=fields&$top=300').get();
       for (const it of (resp.value || [])) {
-        const f = it.fields || {};
-        const dir = (String(f.Title || '').split('|')[1] || '').trim();
-        if (dir) diretoriasSet.add(dir);
-        const email = String(f.field_3 || '').toLowerCase().trim();
-        const nome = String(f.field_4 || '').trim();
-        if (email) poolMap[email] = poolMap[email] || nome || email;
+        const dir = (String((it.fields || {}).Title || '').split('|')[1] || '').trim();
+        if (dir) dirSet.add(dir);
       }
     }
 
-    // 2) Adiciona membros do grupo Financeiro-Gestao ao pool (pra poder liberar Financeiro)
+    // 2) Pastas de contrato (dropdown) = diretorias distintas no acervo de contratos
+    const folderSet = new Set();
     try {
-      const grp = await client.api('/groups/' + FINANCEIRO_GROUP_ID + '/members')
-        .select('id,displayName,mail,userPrincipalName').top(100).get();
-      for (const u of (grp.value || [])) {
-        const email = String(u.mail || u.userPrincipalName || '').toLowerCase().trim();
-        if (email && !poolMap[email]) poolMap[email] = u.displayName || email;
+      const listContrId = await resolveListId(client, siteId, LIST_CONTRATOS);
+      if (listContrId) {
+        const cols = await client.api('/sites/' + siteId + '/lists/' + listContrId + '/columns').get();
+        let cDir = 'Diretoria';
+        for (const c of (cols.value || [])) { if (c.displayName === 'Diretoria' && c.name) cDir = c.name; }
+        let url = '/sites/' + siteId + '/lists/' + listContrId + '/items?expand=fields&$top=999';
+        let pages = 0;
+        while (url && pages < 50) {
+          const r = await client.api(url).get();
+          for (const it of (r.value || [])) {
+            const d = String((it.fields || {})[cDir] || '').trim();
+            if (d) folderSet.add(d);
+          }
+          pages++;
+          const nx = r['@odata.nextLink'];
+          url = nx ? nx.replace('https://graph.microsoft.com/v1.0', '') : null;
+        }
       }
-    } catch (e) { /* grupo opcional — segue sem ele */ }
+    } catch (e) { /* sem acervo acessivel -> usa a matriz como pastas */ }
+    if (!folderSet.size) { for (const d of dirSet) folderSet.add(d); }
 
-    // 3) Mapa atual de acessos
+    // 3) Pool de diretorias atribuiveis = uniao (matriz + pastas existentes)
+    const poolSet = new Set();
+    for (const d of dirSet) poolSet.add(d);
+    for (const d of folderSet) poolSet.add(d);
+
     const acessos = await lerMapaAcessos(client, siteId, null);
 
-    const gestores = Object.keys(poolMap)
-      .map(function (em) { return { email: em, nome: poolMap[em] }; })
-      .sort(function (a, b) { return String(a.nome).localeCompare(String(b.nome)); });
-    const diretorias = Array.from(diretoriasSet).sort(function (a, b) { return a.localeCompare(b); });
+    const folders = Array.from(folderSet).sort(function (a, b) { return a.localeCompare(b); });
+    const diretorias = Array.from(poolSet).sort(function (a, b) { return a.localeCompare(b); });
 
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-      body: { ok: true, diretorias: diretorias, gestores: gestores, acessos: acessos }
+      body: { ok: true, folders: folders, diretorias: diretorias, acessos: acessos }
     };
   } catch (err) {
     context.log && context.log.error && context.log.error('GetControleAcessos:', err);

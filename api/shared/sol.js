@@ -1092,12 +1092,8 @@ async function _carregarTodosContratos(ctx) {
 function _filtraContratosRBAC(ctx, lista) {
   const cr = (ctx && ctx.contratos) || {};
   if (cr.veTodos) return lista;
-  const dirs = Array.isArray(cr.diretorias) ? cr.diretorias : [];
-  if (dirs.length) {
-    const set = new Set(dirs.map(d => String(d).toLowerCase().trim()));
-    return lista.filter(c => set.has(String(c.Diretoria || '').toLowerCase().trim()));
-  }
-  return [];
+  const { podeVerContrato } = require('./acessoContratos');
+  return lista.filter(function (c) { return podeVerContrato(c.Diretoria, cr.dirsUsuario || [], cr.mapa || {}); });
 }
 
 // Helper: calcula dias para vencer (negativo se ja venceu)
@@ -1417,16 +1413,18 @@ async function runSol(history, userMessage, user, opts) {
   // tudo; gestor so as diretorias que gerencia; demais nada.
   const rolesSol = Array.isArray(opts.roles) ? opts.roles : [];
   const veTodosContr = isAdmin || rolesSol.includes('gestor_juridica');
-  let dirsContr = [];
+  let dirsContrU = [];
+  let mapaContr = {};
   if (!veTodosContr) {
-    // Mesmo criterio do ListarContratos: Controle de Acessos (mapa explicito) + fallback
-    // no aprovador de NF. Se falhar, cai pro escopo de aprovador de NF.
+    // Mesmo criterio do ListarContratos: acesso por DIRETORIA (Controle de Acessos) +
+    // fallback no aprovador de NF. Se falhar, cai pro escopo de aprovador de NF.
     try {
-      const { diretoriasAcessiveis } = require('./acessoContratos');
-      dirsContr = await diretoriasAcessiveis(client, siteId, listDirId, user.email);
-    } catch (e) { dirsContr = (escopo && escopo.diretorias) || []; }
+      const ac = require('./acessoContratos');
+      dirsContrU = await ac.dirsDoUsuario(client, siteId, listDirId, user.email);
+      mapaContr = await ac.lerMapaAcessos(client, siteId, null);
+    } catch (e) { dirsContrU = (escopo && escopo.diretorias) || []; mapaContr = {}; }
   }
-  ctx.contratos = { veTodos: veTodosContr, diretorias: dirsContr };
+  ctx.contratos = { veTodos: veTodosContr, dirsUsuario: dirsContrU, mapa: mapaContr };
   const systemPrompt = buildSystemPrompt(user, viewAtual, escopo, perfil);
 
   // Tenta Anthropic primeiro

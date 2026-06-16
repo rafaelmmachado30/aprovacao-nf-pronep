@@ -34,7 +34,7 @@ const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
-const { diretoriasAcessiveis } = require('../shared/acessoContratos');
+const { dirsDoUsuario, podeVerContrato, lerMapaAcessos } = require('../shared/acessoContratos');
 const contratosShared = require('../shared/contratos');
 
 const cache = { siteId: null, listId: null, listDirId: null, colMap: null };
@@ -144,26 +144,14 @@ module.exports = async function (context, req) {
     }
     const colMap = await getColMap(client, siteId, listId);
 
-    // 4. Define escopo de diretorias via Controle de Acessos (mapa explicito) + fallback
-    // no aprovador de NF. null = sem filtro (admin/juridico veem tudo).
-    let scopeDiretorias = null;
+    // 4. Acesso por DIRETORIA. veTodos (admin/juridico) = sem filtro. Senao, resolve as
+    // diretorias em que o usuario e gestor + o mapa de Controle de Acessos; a filtragem
+    // por-contrato acontece mais abaixo (podeVerContrato).
+    let dirsU = [];
+    let mapaAcessos = {};
     if (!veTodosContratos) {
-      scopeDiretorias = await diretoriasAcessiveis(client, siteId, listDirId, user.email);
-      if (!scopeDiretorias.length) {
-        // Nenhuma pasta liberada (nem por config, nem como aprovador de NF) — lista vazia.
-        context.res = {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-          body: {
-            ok: true,
-            userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor, diretoriasGestorOf: [] },
-            mensagem: 'Voce nao tem nenhuma pasta de contratos liberada. Solicite acesso ao Admin (tela Controle de Acessos).',
-            stats: zeroStats(),
-            arvore: []
-          }
-        };
-        return;
-      }
+      dirsU = await dirsDoUsuario(client, siteId, listDirId, user.email);
+      mapaAcessos = await lerMapaAcessos(client, siteId, null);
     }
 
     // 5. Carrega TODOS os contratos com PAGINACAO (Graph limita 999 por pagina).
@@ -238,9 +226,24 @@ module.exports = async function (context, req) {
 
     // 6. Aplica filtros
     let filtrados = todos;
-    if (scopeDiretorias) {
-      const set = new Set(scopeDiretorias);
-      filtrados = filtrados.filter(function(c){ return set.has(c.diretoria); });
+    if (!veTodosContratos) {
+      // RBAC por diretoria: ve a pasta se e gestor de alguma diretoria liberada pra ela
+      // (ou, sem config, da propria diretoria da pasta).
+      filtrados = filtrados.filter(function(c){ return podeVerContrato(c.diretoria, dirsU, mapaAcessos); });
+      if (!filtrados.length) {
+        context.res = {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+          body: {
+            ok: true,
+            userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor, diretoriasGestorOf: dirsU },
+            mensagem: 'Voce nao tem nenhuma pasta de contratos liberada. Solicite acesso ao Admin (tela Controle de Acessos).',
+            stats: zeroStats(),
+            arvore: []
+          }
+        };
+        return;
+      }
     }
     if (f.diretoria) filtrados = filtrados.filter(function(c){ return c.diretoria === f.diretoria; });
     if (f.unidade) filtrados = filtrados.filter(function(c){ return c.unidade === f.unidade; });
@@ -269,7 +272,7 @@ module.exports = async function (context, req) {
       headers: { 'Content-Type': 'application/json' },
       body: {
         ok: true,
-        userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor, diretoriasGestorOf: scopeDiretorias || 'TODAS' },
+        userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor, diretoriasGestorOf: veTodosContratos ? 'TODAS' : dirsU },
         stats,
         total: filtrados.length,
         formato,

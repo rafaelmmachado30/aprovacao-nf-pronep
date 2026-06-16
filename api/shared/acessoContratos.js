@@ -1,16 +1,19 @@
 /**
- * shared/acessoContratos.js — Controle de Acessos a contratos.
+ * shared/acessoContratos.js — Controle de Acessos a contratos (por DIRETORIA).
  *
- * Desacopla "quem ve quais contratos" da matriz de aprovacao de NF.
- * O mapa { "Diretoria": ["email1","email2"], ... } fica salvo num item da lista
- * PRONEP-NF-Config (Title = 'acessoContratos', campo ConfigJson).
+ * Modelo (decisao do Rafa): cada PASTA de contrato (uma diretoria, ex: "Tecnologia")
+ * pode ser acessada por uma ou mais DIRETORIAS. Quem for gestor/aprovador de qualquer
+ * diretoria liberada ve a pasta — as PESSOAS vem automaticamente da matriz de gestores
+ * (PRONEP-NF-Diretorias). Assim, trocar o gestor de uma diretoria ajusta o acesso sozinho.
  *
- * Modelo COMPLEMENTAR (decisao do Rafa):
- *   - Diretoria COM config explicita no Controle de Acessos -> vale a config.
- *   - Diretoria SEM config -> fallback: o aprovador de NF daquela diretoria ve os contratos
- *     (PRONEP-NF-Diretorias). Assim ninguem perde acesso antes de configurar.
+ * Mapa salvo num item da lista PRONEP-NF-Config (Title='acessoContratos', ConfigJson):
+ *   { "Tecnologia": ["Tecnologia","Comercial"], "Suprimentos": [...], ... }
+ *   chave  = pasta (diretoria do contrato);  valor = diretorias com acesso.
  *
- * Admin e Juridico (gestor_juridica) veem tudo — tratado fora deste helper.
+ * Modelo COMPLEMENTAR:
+ *   - Pasta COM config -> so as diretorias listadas tem acesso (via seus gestores).
+ *   - Pasta SEM config -> fallback: a propria diretoria da pasta (aprovador de NF dela).
+ *   - Admin e Juridico veem tudo (tratado fora deste helper).
  */
 
 require('isomorphic-fetch');
@@ -18,7 +21,6 @@ require('isomorphic-fetch');
 const LIST_CONFIG = 'PRONEP-NF-Config';
 const ACESSO_TITLE = 'acessoContratos';
 
-// cache do id da lista Config por siteId (instancia da Function reaproveita)
 const _cfgCache = {};
 async function resolveConfigListId(client, siteId) {
   if (_cfgCache[siteId]) return _cfgCache[siteId];
@@ -29,14 +31,13 @@ async function resolveConfigListId(client, siteId) {
   return id;
 }
 
-// Acha o item Config 'acessoContratos' (ou null).
 async function findAcessoItem(client, siteId, listConfigId) {
   const resp = await client.api('/sites/' + siteId + '/lists/' + listConfigId + '/items')
     .expand('fields').top(50).get();
   return (resp.value || []).find(function (x) { return x.fields && x.fields.Title === ACESSO_TITLE; }) || null;
 }
 
-// Le o mapa { diretoria: [emails] }. {} se nao existe / invalido.
+// Le o mapa { pasta: [diretorias] }. {} se nao existe / invalido.
 async function lerMapaAcessos(client, siteId, listConfigId) {
   try {
     const cfgId = listConfigId || await resolveConfigListId(client, siteId);
@@ -50,7 +51,7 @@ async function lerMapaAcessos(client, siteId, listConfigId) {
   return {};
 }
 
-// Grava o mapa completo (cria o item se nao existir). Retorna { ok, itemId }.
+// Grava o mapa completo (cria o item se nao existir).
 async function salvarMapaAcessos(client, siteId, listConfigId, mapa) {
   const cfgId = listConfigId || await resolveConfigListId(client, siteId);
   if (!cfgId) throw new Error("Lista '" + LIST_CONFIG + "' nao encontrada");
@@ -66,44 +67,46 @@ async function salvarMapaAcessos(client, siteId, listConfigId, mapa) {
   return { ok: true, itemId: created.id, action: 'created' };
 }
 
-// Le a matriz de aprovadores de NF -> { diretoria: Set(emails) } (usada no fallback).
-async function lerAprovadoresPorDiretoria(client, siteId, listDirId) {
-  const out = {};
-  if (!listDirId) return out;
+// Diretorias em que o e-mail e gestor/aprovador (matriz PRONEP-NF-Diretorias).
+// Title formato "Unidade|Diretoria"; field_3 = e-mail do aprovador.
+async function dirsDoUsuario(client, siteId, listDirId, email) {
+  const out = new Set();
+  const em = String(email || '').toLowerCase().trim();
+  if (!listDirId || !em) return [];
   try {
     const resp = await client.api('/sites/' + siteId + '/lists/' + listDirId + '/items?expand=fields&$top=300').get();
     for (const it of (resp.value || [])) {
       const f = it.fields || {};
-      const email = String(f.field_3 || '').toLowerCase().trim();
-      const dir = (String(f.Title || '').split('|')[1] || '').trim();
-      if (dir && email) {
-        if (!out[dir]) out[dir] = new Set();
-        out[dir].add(email);
+      if (String(f.field_3 || '').toLowerCase().trim() === em) {
+        const dir = (String(f.Title || '').split('|')[1] || '').trim();
+        if (dir) out.add(dir);
       }
     }
   } catch (e) { /* lista pode nao existir */ }
-  return out;
+  return Array.from(out);
 }
 
-// Resolve o conjunto de diretorias que o email acessa, no modelo complementar.
-// Retorna array de nomes de diretoria.
-async function diretoriasAcessiveis(client, siteId, listDirId, email) {
-  const em = String(email || '').toLowerCase().trim();
-  if (!em) return [];
-  const cfgId = await resolveConfigListId(client, siteId);
-  const mapa = await lerMapaAcessos(client, siteId, cfgId);
-  const aprov = await lerAprovadoresPorDiretoria(client, siteId, listDirId);
-  const dirs = new Set();
-  // 1) Diretorias COM config explicita: vale a lista de e-mails configurada.
-  for (const d of Object.keys(mapa)) {
-    const lista = Array.isArray(mapa[d]) ? mapa[d].map(function (x) { return String(x).toLowerCase().trim(); }) : [];
-    if (lista.indexOf(em) >= 0) dirs.add(d);
+// Normaliza nome de diretoria pra comparacao (lower + trim).
+function _norm(s) { return String(s || '').toLowerCase().trim(); }
+
+// Decide se um usuario (com suas diretorias dirsUsuario) pode ver os contratos de uma
+// pasta (folderDiretoria), dado o mapa de acessos. Modelo complementar.
+function podeVerContrato(folderDiretoria, dirsUsuario, mapa) {
+  const folder = String(folderDiretoria || '').trim();
+  if (!folder) return false;
+  const dirsU = (dirsUsuario || []).map(_norm);
+  // Acha a config da pasta (case-insensitive na chave)
+  let liberadas = null;
+  for (const k of Object.keys(mapa || {})) {
+    if (_norm(k) === _norm(folder) && Array.isArray(mapa[k])) { liberadas = mapa[k]; break; }
   }
-  // 2) Diretorias SEM config: fallback no aprovador de NF.
-  for (const d of Object.keys(aprov)) {
-    if (!Array.isArray(mapa[d]) && aprov[d].has(em)) dirs.add(d);
+  if (liberadas) {
+    // Pasta configurada: usuario ve se e gestor de alguma diretoria liberada.
+    const set = liberadas.map(_norm);
+    return dirsU.some(function (d) { return set.indexOf(d) >= 0; });
   }
-  return Array.from(dirs);
+  // Pasta sem config: fallback — so a propria diretoria da pasta (aprovador de NF dela).
+  return dirsU.indexOf(_norm(folder)) >= 0;
 }
 
 module.exports = {
@@ -112,6 +115,6 @@ module.exports = {
   resolveConfigListId,
   lerMapaAcessos,
   salvarMapaAcessos,
-  lerAprovadoresPorDiretoria,
-  diretoriasAcessiveis
+  dirsDoUsuario,
+  podeVerContrato
 };
