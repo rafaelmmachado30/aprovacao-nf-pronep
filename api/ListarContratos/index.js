@@ -34,7 +34,7 @@ const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
-const { dirsDoUsuario, podeVerContrato, lerMapaAcessos } = require('../shared/acessoContratos');
+const { podeVerContrato, lerMapaAcessos } = require('../shared/acessoContratos');
 const contratosShared = require('../shared/contratos');
 
 const cache = { siteId: null, listId: null, listDirId: null, colMap: null };
@@ -144,13 +144,11 @@ module.exports = async function (context, req) {
     }
     const colMap = await getColMap(client, siteId, listId);
 
-    // 4. Acesso por DIRETORIA. veTodos (admin/juridico) = sem filtro. Senao, resolve as
-    // diretorias em que o usuario e gestor + o mapa de Controle de Acessos; a filtragem
-    // por-contrato acontece mais abaixo (podeVerContrato).
-    let dirsU = [];
+    // 4. Acesso por GRUPO. veTodos (admin/juridico) = sem filtro. Senao, usa os grupos do
+    // usuario (allRoles, ja resolvidos via Graph) + o mapa de Controle de Acessos; a
+    // filtragem por-contrato acontece mais abaixo (podeVerContrato).
     let mapaAcessos = {};
     if (!veTodosContratos) {
-      dirsU = await dirsDoUsuario(client, siteId, listDirId, user.email);
       mapaAcessos = await lerMapaAcessos(client, siteId, null);
     }
 
@@ -227,16 +225,16 @@ module.exports = async function (context, req) {
     // 6. Aplica filtros
     let filtrados = todos;
     if (!veTodosContratos) {
-      // RBAC por diretoria: ve a pasta se e gestor de alguma diretoria liberada pra ela
-      // (ou, sem config, da propria diretoria da pasta).
-      filtrados = filtrados.filter(function(c){ return podeVerContrato(c.diretoria, dirsU, mapaAcessos); });
+      // RBAC por grupo: ve a pasta se pertence a algum grupo liberado pra ela
+      // (ou, sem config, ao grupo de mesmo nome da pasta).
+      filtrados = filtrados.filter(function(c){ return podeVerContrato(c.diretoria, allRoles, mapaAcessos); });
       if (!filtrados.length) {
         context.res = {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
           body: {
             ok: true,
-            userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor, diretoriasGestorOf: dirsU },
+            userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor },
             mensagem: 'Voce nao tem nenhuma pasta de contratos liberada. Solicite acesso ao Admin (tela Controle de Acessos).',
             stats: zeroStats(),
             arvore: []
@@ -272,7 +270,7 @@ module.exports = async function (context, req) {
       headers: { 'Content-Type': 'application/json' },
       body: {
         ok: true,
-        userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor, diretoriasGestorOf: veTodosContratos ? 'TODAS' : dirsU },
+        userScope: { roles: allRoles, isAdmin, isJuridicoFullAccess, isGestor, gruposDoUsuario: veTodosContratos ? 'TODAS' : allRoles },
         stats,
         total: filtrados.length,
         formato,

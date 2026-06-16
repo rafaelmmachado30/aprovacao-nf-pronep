@@ -1,27 +1,28 @@
 /**
  * /api/GetControleAcessos (GET) — ADMIN ONLY
  *
- * Dados da tela Controle de Acessos (modelo POR DIRETORIA):
+ * Dados da tela Controle de Acessos (modelo POR GRUPO/diretoria):
  *   {
- *     folders:    ['Comercial','Tecnologia','Suprimentos',...]  // pastas (acervo de contratos)
- *     diretorias: ['Tecnologia','RH',...]                       // pool de diretorias atribuiveis
- *     acessos:    { 'Tecnologia': ['Tecnologia','Comercial'], ... } // mapa atual (pasta -> diretorias)
+ *     folders: ['Comercial','Tecnologia','Particulares',...]      // pastas reais do acervo
+ *     grupos:  [{ role:'gestor_tecnologia', label:'Tecnologia' }, ...] // grupos atribuiveis (Entra)
+ *     acessos: { 'Comercial': ['gestor_juridica'], ... }          // mapa atual (pasta -> roles)
  *   }
  *
- * As PESSOAS vem automaticamente da matriz de gestores (PRONEP-NF-Diretorias): quem for
- * gestor de uma diretoria liberada ve a pasta. Por isso a tela trabalha com diretorias, nao e-mails.
+ * As pessoas vem da pertinencia ao grupo do Entra. Por isso a tela trabalha com GRUPOS
+ * (lista canonica e limpa), nao com os nomes soltos da matriz/acervo.
  */
 
 require('isomorphic-fetch');
 const { requireAdmin } = require('../shared/authz');
 const { lerMapaAcessos } = require('../shared/acessoContratos');
+const { gruposContrato } = require('../shared/userRoles');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
   require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 
-const LIST_DIR = 'PRONEP-NF-Diretorias';
 const LIST_CONTRATOS = 'PRONEP-NF-Contratos';
+const LIST_DIR = 'PRONEP-NF-Diretorias';
 
 function getGraphClient() {
   const tenantId = process.env.AAD_TENANT_ID;
@@ -57,18 +58,7 @@ module.exports = async function (context, req) {
     const client = getGraphClient();
     const siteId = await resolveSite(client);
 
-    // 1) Diretorias da matriz (pool atribuivel)
-    const dirSet = new Set();
-    const listDirId = await resolveListId(client, siteId, LIST_DIR);
-    if (listDirId) {
-      const resp = await client.api('/sites/' + siteId + '/lists/' + listDirId + '/items?expand=fields&$top=300').get();
-      for (const it of (resp.value || [])) {
-        const dir = (String((it.fields || {}).Title || '').split('|')[1] || '').trim();
-        if (dir) dirSet.add(dir);
-      }
-    }
-
-    // 2) Pastas de contrato (dropdown) = diretorias distintas no acervo de contratos
+    // Pastas de contrato (dropdown) = diretorias distintas no acervo de contratos.
     const folderSet = new Set();
     try {
       const listContrId = await resolveListId(client, siteId, LIST_CONTRATOS);
@@ -89,23 +79,30 @@ module.exports = async function (context, req) {
           url = nx ? nx.replace('https://graph.microsoft.com/v1.0', '') : null;
         }
       }
-    } catch (e) { /* sem acervo acessivel -> usa a matriz como pastas */ }
-    if (!folderSet.size) { for (const d of dirSet) folderSet.add(d); }
+    } catch (e) { /* sem acervo acessivel */ }
 
-    // 3) Pool de diretorias atribuiveis = uniao (matriz + pastas existentes)
-    const poolSet = new Set();
-    for (const d of dirSet) poolSet.add(d);
-    for (const d of folderSet) poolSet.add(d);
+    // Fallback: se nao achou pastas no acervo, usa as diretorias da matriz como pastas.
+    if (!folderSet.size) {
+      try {
+        const listDirId = await resolveListId(client, siteId, LIST_DIR);
+        if (listDirId) {
+          const resp = await client.api('/sites/' + siteId + '/lists/' + listDirId + '/items?expand=fields&$top=300').get();
+          for (const it of (resp.value || [])) {
+            const dir = (String((it.fields || {}).Title || '').split('|')[1] || '').trim();
+            if (dir) folderSet.add(dir);
+          }
+        }
+      } catch (e) { /* ignora */ }
+    }
 
     const acessos = await lerMapaAcessos(client, siteId, null);
-
     const folders = Array.from(folderSet).sort(function (a, b) { return a.localeCompare(b); });
-    const diretorias = Array.from(poolSet).sort(function (a, b) { return a.localeCompare(b); });
+    const grupos = gruposContrato(); // lista canonica [{role,label}] dos grupos do Entra
 
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-      body: { ok: true, folders: folders, diretorias: diretorias, acessos: acessos }
+      body: { ok: true, folders: folders, grupos: grupos, acessos: acessos }
     };
   } catch (err) {
     context.log && context.log.error && context.log.error('GetControleAcessos:', err);

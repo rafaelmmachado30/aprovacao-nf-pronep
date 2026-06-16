@@ -32,6 +32,30 @@ const GROUP_TO_ROLE = {
   '334eb19b-c138-4551-8e45-a36ca4e32e48': 'gestor_tecnica_rjes'
 };
 
+// Rotulos amigaveis (diretoria) dos grupos atribuiveis em Controle de Acessos de contratos.
+// Sao os GRUPOS de acesso do Entra — a fonte de verdade pra "quais diretorias existem".
+// O acesso a contratos passa a ser por pertencer a um desses grupos.
+const ROLE_LABELS = {
+  gestor_suprimentos: 'Suprimentos',
+  gestor_administrativa: 'Administrativa',
+  gestor_juridica: 'Jurídica',
+  gestor_financeira: 'Financeira',
+  gestor_qualidade: 'Qualidade',
+  gestor_tecnologia: 'Tecnologia',
+  gestor_rh_dp: 'RH-DP',
+  gestor_tecnica_sp: 'Técnica-SP',
+  gestor_tecnica_rjes: 'Técnica-RJ/ES',
+  gestor_fiscal_contabil: 'Fiscal-Contábil',
+  financeiro_nf: 'Financeiro (Gestão)'
+};
+
+// Lista canonica [{ role, label }] dos grupos atribuiveis (ordenada por label).
+function gruposContrato() {
+  return Object.keys(ROLE_LABELS)
+    .map(function (r) { return { role: r, label: ROLE_LABELS[r] }; })
+    .sort(function (a, b) { return a.label.localeCompare(b.label); });
+}
+
 function formatGuid(guid) {
   if (!guid) return guid;
   const d = String(guid).replace(/-/g, '').toLowerCase();
@@ -103,4 +127,4 @@ async function getUserRoles(user) {
   }
 }
 
-module.exports = { getUserRoles, GROUP_TO_ROLE };
+module.exports = { getUserRoles, GROUP_TO_ROLE, ROLE_LABELS, gruposContrato };

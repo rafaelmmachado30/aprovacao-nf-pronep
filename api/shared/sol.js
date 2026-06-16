@@ -1093,7 +1093,7 @@ function _filtraContratosRBAC(ctx, lista) {
   const cr = (ctx && ctx.contratos) || {};
   if (cr.veTodos) return lista;
   const { podeVerContrato } = require('./acessoContratos');
-  return lista.filter(function (c) { return podeVerContrato(c.Diretoria, cr.dirsUsuario || [], cr.mapa || {}); });
+  return lista.filter(function (c) { return podeVerContrato(c.Diretoria, cr.roles || [], cr.mapa || {}); });
 }
 
 // Helper: calcula dias para vencer (negativo se ja venceu)
@@ -1413,18 +1413,14 @@ async function runSol(history, userMessage, user, opts) {
   // tudo; gestor so as diretorias que gerencia; demais nada.
   const rolesSol = Array.isArray(opts.roles) ? opts.roles : [];
   const veTodosContr = isAdmin || rolesSol.includes('gestor_juridica');
-  let dirsContrU = [];
   let mapaContr = {};
   if (!veTodosContr) {
-    // Mesmo criterio do ListarContratos: acesso por DIRETORIA (Controle de Acessos) +
-    // fallback no aprovador de NF. Se falhar, cai pro escopo de aprovador de NF.
-    try {
-      const ac = require('./acessoContratos');
-      dirsContrU = await ac.dirsDoUsuario(client, siteId, listDirId, user.email);
-      mapaContr = await ac.lerMapaAcessos(client, siteId, null);
-    } catch (e) { dirsContrU = (escopo && escopo.diretorias) || []; mapaContr = {}; }
+    // Mesmo criterio do ListarContratos: acesso por GRUPO (Controle de Acessos) +
+    // fallback no grupo de mesmo nome da pasta. As pessoas vem da pertinencia ao grupo.
+    try { mapaContr = await require('./acessoContratos').lerMapaAcessos(client, siteId, null); }
+    catch (e) { mapaContr = {}; }
   }
-  ctx.contratos = { veTodos: veTodosContr, dirsUsuario: dirsContrU, mapa: mapaContr };
+  ctx.contratos = { veTodos: veTodosContr, roles: rolesSol, mapa: mapaContr };
   const systemPrompt = buildSystemPrompt(user, viewAtual, escopo, perfil);
 
   // Tenta Anthropic primeiro

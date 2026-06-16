@@ -4403,9 +4403,20 @@ const views = {
   }
 };
 
-// ===== Controle de Acessos a contratos (tela admin) — POR DIRETORIA =====
-// Cada PASTA de contrato libera acesso a uma ou mais DIRETORIAS. Quem for gestor de uma
-// diretoria liberada ve a pasta (as pessoas vem da matriz de gestores automaticamente).
+// ===== Controle de Acessos a contratos (tela admin) — POR GRUPO =====
+// Cada PASTA de contrato libera acesso a um ou mais GRUPOS (diretorias do Entra). Quem for
+// MEMBRO de um grupo liberado ve a pasta — as pessoas vem da pertinencia ao grupo (Graph).
+function _caNorm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]/g, ''); }
+function caFolderRole(folder) {
+  const f = _caNorm(folder);
+  const g = (window._ca && window._ca.grupos || []).find(function (x) { return _caNorm(x.label) === f; });
+  return g ? g.role : null;
+}
+function caLabelDoRole(role) {
+  const g = (window._ca && window._ca.grupos || []).find(function (x) { return String(x.role).toLowerCase() === String(role).toLowerCase(); });
+  return g ? g.label : role;
+}
+
 async function carregarControleAcessos() {
   const area = document.getElementById('content-area');
   if (!area) return;
@@ -4414,7 +4425,7 @@ async function carregarControleAcessos() {
     if (r.status === 403) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Acesso restrito a administradores.</div>'; return; }
     if (!r.ok) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Falha ao carregar Controle de Acessos (HTTP ' + r.status + ')</div>'; return; }
     const data = await r.json();
-    window._ca = { folders: data.folders || [], diretorias: data.diretorias || [], acessos: data.acessos || {}, folderSel: '', comSet: new Set() };
+    window._ca = { folders: data.folders || [], grupos: data.grupos || [], acessos: data.acessos || {}, folderSel: '', comSet: new Set() };
     area.innerHTML = renderControleAcessosView();
   } catch (e) {
     area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>' + escHtml(e.message || 'erro') + '</div>';
@@ -4429,13 +4440,13 @@ function renderControleAcessosView() {
   ).join('');
   return '' +
     '<h2>Controle de Acessos a Contratos</h2>' +
-    '<div class="view-sub">Escolha uma <b>pasta de contrato</b> e defina quais <b>diretorias</b> têm acesso a ela. ' +
-      'Quem for gestor de uma diretoria liberada passa a ver os contratos da pasta — as pessoas vêm automaticamente da matriz de gestores. ' +
-      'Pasta <b>não configurada</b> segue o padrão (só a própria diretoria dela). Admin e Jurídico veem tudo sempre.</div>' +
+    '<div class="view-sub">Escolha uma <b>pasta de contrato</b> e defina quais <b>grupos (diretorias)</b> têm acesso a ela. ' +
+      'Quem for membro de um grupo liberado passa a ver os contratos da pasta — as pessoas vêm automaticamente da pertinência ao grupo. ' +
+      'Pasta <b>não configurada</b> segue o padrão (só o grupo de mesmo nome). Admin e Jurídico veem tudo sempre.</div>' +
     '<div class="card">' +
       '<label style="font-weight:600;color:var(--azul-escuro)">Pasta de contrato</label><br>' +
       '<select id="ca-folder" onchange="caSelecionarPasta(this.value)" style="width:100%;max-width:420px;margin-top:6px;padding:8px;border:1px solid var(--cinza-borda);border-radius:6px">' + optsFolder + '</select>' +
-      '<div id="ca-listas" style="margin-top:18px">' + (ca.folderSel ? caRenderListas() : '<div class="small muted">Selecione uma pasta acima para definir quais diretorias têm acesso.</div>') + '</div>' +
+      '<div id="ca-listas" style="margin-top:18px">' + (ca.folderSel ? caRenderListas() : '<div class="small muted">Selecione uma pasta acima para definir quais grupos têm acesso.</div>') + '</div>' +
     '</div>';
 }
 
@@ -4443,17 +4454,20 @@ function caRenderListas() {
   const ca = window._ca;
   if (!ca || !ca.folderSel) return '';
   const com = ca.comSet || new Set();
-  const comLower = new Set(Array.from(com).map(function (d) { return String(d).toLowerCase(); }));
-  const pool = ca.diretorias || [];
-  const disp = pool.filter(function (d) { return !comLower.has(String(d).toLowerCase()); });
-  const comArr = Array.from(com);
-  function optList(arr) { return arr.map(function (d) { return '<option value="' + escAttr(d) + '">' + escHtml(d) + '</option>'; }).join(''); }
+  const grupos = ca.grupos || [];
+  const disp = grupos.filter(function (g) { return !com.has(String(g.role).toLowerCase()); });
+  const comArr = grupos.filter(function (g) { return com.has(String(g.role).toLowerCase()); });
+  function optList(arr) { return arr.map(function (g) { return '<option value="' + escAttr(g.role) + '">' + escHtml(g.label) + '</option>'; }).join(''); }
   const semConfig = !(ca.acessos && Array.isArray(ca.acessos[ca.folderSel]));
+  const ownRole = caFolderRole(ca.folderSel);
+  const avisoPadrao = ownRole
+    ? 'Esta pasta ainda usa a regra padrão (só o grupo <b>' + escHtml(caLabelDoRole(ownRole)) + '</b> a vê). Já deixei esse grupo à direita — adicione outros para liberar mais. Salvar com a lista vazia volta ao padrão.'
+    : 'Esta pasta não tem grupo de mesmo nome, então por padrão só Admin/Jurídico a veem. Adicione os grupos que devem ter acesso e salve.';
   return '' +
-    (semConfig ? '<div class="alert alert-info" style="margin-bottom:12px"><span class="ico">ℹ</span><div>Esta pasta ainda usa a regra padrão (só a diretoria <b>' + escHtml(ca.folderSel) + '</b> a vê, via seus gestores). Adicionei essa diretoria à direita por padrão — adicione outras para liberar mais. Salvar com a lista vazia volta ao padrão.</div></div>' : '') +
+    (semConfig ? '<div class="alert alert-info" style="margin-bottom:12px"><span class="ico">ℹ</span><div>' + avisoPadrao + '</div></div>' : '') +
     '<div style="display:flex;gap:14px;align-items:stretch;flex-wrap:wrap">' +
       '<div style="flex:1;min-width:240px">' +
-        '<div style="font-weight:600;font-size:13px;margin-bottom:4px">Diretorias disponíveis (' + disp.length + ')</div>' +
+        '<div style="font-weight:600;font-size:13px;margin-bottom:4px">Grupos disponíveis (' + disp.length + ')</div>' +
         '<select id="ca-disp" multiple size="12" style="width:100%;border:1px solid var(--cinza-borda);border-radius:6px;padding:4px;font-size:13px">' + optList(disp) + '</select>' +
       '</div>' +
       '<div style="display:flex;flex-direction:column;justify-content:center;gap:8px">' +
@@ -4461,7 +4475,7 @@ function caRenderListas() {
         '<button class="btn btn-secondary" onclick="caMover(\'rem\')" title="Remover acesso">←</button>' +
       '</div>' +
       '<div style="flex:1;min-width:240px">' +
-        '<div style="font-weight:600;font-size:13px;margin-bottom:4px;color:#065F46">Diretorias com acesso (' + comArr.length + ')</div>' +
+        '<div style="font-weight:600;font-size:13px;margin-bottom:4px;color:#065F46">Grupos com acesso (' + comArr.length + ')</div>' +
         '<select id="ca-com" multiple size="12" style="width:100%;border:1px solid #A7F3D0;background:#F0FDF4;border-radius:6px;padding:4px;font-size:13px">' + optList(comArr) + '</select>' +
       '</div>' +
     '</div>' +
@@ -4475,10 +4489,15 @@ function caSelecionarPasta(folder) {
   const ca = window._ca;
   if (!ca) return;
   ca.folderSel = folder || '';
-  if (!folder) { ca.comSet = new Set(); const el0 = document.getElementById('ca-listas'); if (el0) el0.innerHTML = '<div class="small muted">Selecione uma pasta acima para definir quais diretorias têm acesso.</div>'; return; }
+  if (!folder) { ca.comSet = new Set(); const el0 = document.getElementById('ca-listas'); if (el0) el0.innerHTML = '<div class="small muted">Selecione uma pasta acima para definir quais grupos têm acesso.</div>'; return; }
   const explicit = (ca.acessos && Array.isArray(ca.acessos[folder])) ? ca.acessos[folder] : null;
-  // Sem config: pre-seleciona a propria diretoria da pasta (padrao), pra nao remover acesso sem querer.
-  ca.comSet = new Set(explicit ? explicit : [folder]);
+  if (explicit) {
+    ca.comSet = new Set(explicit.map(function (r) { return String(r).toLowerCase(); }));
+  } else {
+    // Sem config: pre-seleciona o grupo de mesmo nome da pasta (padrao), se existir.
+    const own = caFolderRole(folder);
+    ca.comSet = new Set(own ? [String(own).toLowerCase()] : []);
+  }
   const el = document.getElementById('ca-listas');
   if (el) el.innerHTML = caRenderListas();
 }
@@ -4488,14 +4507,9 @@ function caMover(acao) {
   if (!ca || !ca.folderSel) return;
   const sel = document.getElementById(acao === 'add' ? 'ca-disp' : 'ca-com');
   if (!sel) return;
-  const escolhidos = Array.from(sel.selectedOptions).map(function (o) { return o.value; });
-  if (acao === 'add') {
-    escolhidos.forEach(function (d) { ca.comSet.add(d); });
-  } else {
-    // remove por comparacao case-insensitive
-    const rmLower = new Set(escolhidos.map(function (d) { return String(d).toLowerCase(); }));
-    ca.comSet = new Set(Array.from(ca.comSet).filter(function (d) { return !rmLower.has(String(d).toLowerCase()); }));
-  }
+  const escolhidos = Array.from(sel.selectedOptions).map(function (o) { return String(o.value).toLowerCase(); });
+  if (acao === 'add') escolhidos.forEach(function (r) { ca.comSet.add(r); });
+  else escolhidos.forEach(function (r) { ca.comSet.delete(r); });
   const el = document.getElementById('ca-listas');
   if (el) el.innerHTML = caRenderListas();
 }
@@ -4503,15 +4517,15 @@ function caMover(acao) {
 async function caSalvar() {
   const ca = window._ca;
   if (!ca || !ca.folderSel) return;
-  const diretorias = Array.from(ca.comSet);
+  const roles = Array.from(ca.comSet);
   const msg = document.getElementById('ca-msg');
   if (msg) { msg.textContent = 'Salvando...'; msg.style.color = ''; }
   try {
-    const r = await fetch('/api/SalvarControleAcessos', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diretoria: ca.folderSel, diretorias: diretorias }) });
+    const r = await fetch('/api/SalvarControleAcessos', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diretoria: ca.folderSel, diretorias: roles }) });
     const data = await r.json().catch(function () { return {}; });
     if (r.ok) {
       ca.acessos = data.acessos || ca.acessos || {};
-      if (diretorias.length) ca.acessos[ca.folderSel] = diretorias; else delete ca.acessos[ca.folderSel];
+      if (roles.length) ca.acessos[ca.folderSel] = roles; else delete ca.acessos[ca.folderSel];
       if (msg) { msg.textContent = '✓ Salvo'; msg.style.color = 'var(--verde)'; }
       const el = document.getElementById('ca-listas'); if (el) el.innerHTML = caRenderListas();
     } else {
