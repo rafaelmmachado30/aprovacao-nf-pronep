@@ -171,12 +171,23 @@ module.exports = async function (context, req) {
     if (!dryRun && garantirLista) {
       try {
         colMap = await contratos.getContratoColMap(client, siteNF, listIdContratos);
-        const existentes = await client.api('/sites/' + siteNF + '/lists/' + listIdContratos + '/items?expand=fields&$top=999').get();
         const colDriveId = colMap['DriveItemId'] || 'DriveItemId';
-        for (const it of (existentes.value || [])) {
-          const f = it.fields || {};
-          const did = f[colDriveId] || f.DriveItemId || '';
-          if (did) itensExistentes[did] = it.id;
+        // PAGINA TODAS as paginas — a lista de contratos tem milhares de itens. Antes lia
+        // so a 1a pagina (999), entao itens alem disso nao entravam no indice de dedup e
+        // cada re-sync RECRIAVA o arquivo (duplicatas). Agora indexa o acervo inteiro.
+        let urlEx = '/sites/' + siteNF + '/lists/' + listIdContratos + '/items?expand=fields&$top=999';
+        let pgsEx = 0;
+        while (urlEx && pgsEx < 60) {
+          const existentes = await client.api(urlEx).get();
+          for (const it of (existentes.value || [])) {
+            const f = it.fields || {};
+            const did = f[colDriveId] || f.DriveItemId || '';
+            if (did) itensExistentes[did] = it.id;
+          }
+          pgsEx++;
+          urlEx = existentes['@odata.nextLink']
+            ? existentes['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '')
+            : null;
         }
       } catch (eLista) {
         // Lista nao existe, foi deletada, ou listId esta stale. ABORTA antes de Claude.
