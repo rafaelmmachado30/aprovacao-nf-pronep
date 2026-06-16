@@ -99,13 +99,31 @@ module.exports = async function (context, req) {
     let removidos = 0;
     const erros = [];
     if (aplicar) {
-      for (const itemId of aRemover) {
+      // Apaga em LOTE via Graph $batch (20 por request) com orcamento de tempo (~30s),
+      // pra nao estourar o timeout do gateway. Retorna quantos ainda faltam; rode de novo
+      // ate restantes = 0. Sao milhares — leva algumas execucoes.
+      const inicio = Date.now();
+      const BUDGET_MS = 30000;
+      let i = 0;
+      while (i < aRemover.length && (Date.now() - inicio) < BUDGET_MS) {
+        const lote = aRemover.slice(i, i + 20);
+        const requests = lote.map(function (itemId, idx) {
+          return { id: String(idx + 1), method: 'DELETE', url: '/sites/' + siteId + '/lists/' + listId + '/items/' + itemId };
+        });
         try {
-          await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + itemId).delete();
-          removidos++;
-        } catch (e) { erros.push({ itemId: itemId, erro: e.message }); }
+          const resp = await client.api('/$batch').post({ requests: requests });
+          for (const r of (resp.responses || [])) {
+            if (r.status >= 200 && r.status < 300) removidos++;
+            else if (r.status !== 404) erros.push({ id: r.id, status: r.status });
+            else removidos++; // 404 = ja nao existe, conta como removido
+          }
+        } catch (e) {
+          erros.push({ erro: e.message });
+        }
+        i += lote.length;
       }
     }
+    const restantes = aplicar ? (aRemover.length - removidos) : aRemover.length;
 
     context.res = {
       status: 200,
@@ -117,8 +135,13 @@ module.exports = async function (context, req) {
         gruposComDuplicata: gruposComDup,
         duplicatasIdentificadas: aRemover.length,
         removidos: aplicar ? removidos : 0,
-        erros: erros,
-        dica: aplicar ? 'Limpeza aplicada.' : 'DRY-RUN. Para remover de fato, chame com ?aplicar=true'
+        restantes: restantes,
+        erros: erros.slice(0, 20),
+        dica: !aplicar
+          ? 'DRY-RUN. Para remover de fato, chame com ?aplicar=true (em lotes; rode de novo ate restantes=0).'
+          : (restantes > 0
+              ? 'Removidos ' + removidos + ' neste lote. Ainda faltam ' + restantes + ' — chame ?aplicar=true de novo.'
+              : 'Limpeza concluida! Nao ha mais duplicatas.')
       }
     };
   } catch (err) {
