@@ -4570,21 +4570,33 @@ async function caSalvar() {
   const ca = window._ca;
   if (!ca || !ca.folderSel) return;
   const tokens = Array.from(ca.tokenSet);
-  const msg = document.getElementById('ca-msg');
+  let msg = document.getElementById('ca-msg');
   if (msg) { msg.textContent = 'Salvando...'; msg.style.color = ''; }
   try {
     const r = await fetch('/api/SalvarControleAcessos', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diretoria: ca.folderSel, diretorias: tokens }) });
     const data = await r.json().catch(function () { return {}; });
-    if (r.ok) {
-      ca.acessos = data.acessos || ca.acessos || {};
-      if (tokens.length) ca.acessos[ca.folderSel] = tokens; else delete ca.acessos[ca.folderSel];
-      if (msg) { msg.textContent = '✓ Salvo'; msg.style.color = 'var(--verde)'; }
-      caRefreshCorpo();
-    } else {
-      if (msg) { msg.textContent = '✗ ' + (data.error || ('HTTP ' + r.status)); msg.style.color = 'var(--vermelho)'; }
+    if (!r.ok || !data.ok) {
+      if (msg) { msg.textContent = '✗ Erro ao salvar: ' + (data.error || ('HTTP ' + r.status)); msg.style.color = 'var(--vermelho)'; }
+      return;
+    }
+    // Estado local = o que o BACKEND confirmou (autoritativo).
+    ca.acessos = data.acessos || ca.acessos || {};
+    const conf = (ca.acessos[ca.folderSel] || []);
+    ca.tokenSet = new Set(conf.map(function (t) { return String(t).toLowerCase(); }));
+    // Re-renderiza o corpo (recria o #ca-msg) e DEPOIS escreve a confirmacao, pra ela nao ser apagada.
+    caRefreshCorpo();
+    msg = document.getElementById('ca-msg');
+    if (msg) {
+      const nGrupos = conf.filter(function (t) { return String(t).indexOf('@') < 0; }).length;
+      const nPessoas = conf.filter(function (t) { return String(t).indexOf('@') >= 0; }).length;
+      msg.textContent = conf.length
+        ? '✓ Salvo! Esta pasta agora libera ' + nGrupos + ' grupo(s) inteiro(s) + ' + nPessoas + ' pessoa(s).'
+        : '✓ Salvo! Pasta voltou ao padrão (sem config específica).';
+      msg.style.color = 'var(--verde)';
     }
   } catch (e) {
-    if (msg) { msg.textContent = '✗ ' + (e.message || 'erro de rede'); msg.style.color = 'var(--vermelho)'; }
+    msg = document.getElementById('ca-msg');
+    if (msg) { msg.textContent = '✗ Erro de rede: ' + (e.message || 'falha'); msg.style.color = 'var(--vermelho)'; }
   }
 }
 
