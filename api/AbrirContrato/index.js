@@ -17,6 +17,7 @@ const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
+const { podeVerContrato, lerMapaAcessos } = require('../shared/acessoContratos');
 
 const cache = { siteId: null, listId: null, listDirId: null, colMap: null };
 
@@ -97,11 +98,8 @@ module.exports = async function (context, req) {
     const userRoles = await getUserRoles(user);
     const allRoles = Array.from(new Set([].concat(claimsRoles, userRoles || [])));
     const isAdmin = allRoles.includes('administrador') || allRoles.includes('admin');
-    const isGestor = allRoles.includes('gestor');
-    if (!isAdmin && !isGestor) {
-      context.res = { status: 403, body: { error: 'Acesso negado' } };
-      return;
-    }
+    const veTodos = isAdmin || allRoles.includes('gestor_juridica'); // admin/juridico veem tudo
+    // Sem 403 fixo aqui — acesso e por GRUPO (Controle de Acessos), conferido por-contrato abaixo.
 
     // 3. Busca contrato no SP
     const client = getGraphClient();
@@ -116,11 +114,12 @@ module.exports = async function (context, req) {
     const driveItemId = f.DriveItemId || '';
     const caminhoSP = f.CaminhoSharepoint || '';
 
-    // 4. Confere escopo do gestor
-    if (!isAdmin && isGestor) {
-      const dirsScope = await diretoriasDoGestor(client, siteId, listDirId, user.email);
-      if (!dirsScope.includes(diretoria)) {
-        context.res = { status: 403, body: { error: 'Contrato fora do seu escopo de diretoria' } };
+    // 4. Confere acesso por GRUPO (mesmo criterio do ListarContratos: Controle de Acessos
+    // + fallback no grupo de mesmo nome da pasta).
+    if (!veTodos) {
+      const mapa = await lerMapaAcessos(client, siteId, null);
+      if (!podeVerContrato(diretoria, allRoles, mapa)) {
+        context.res = { status: 403, body: { error: 'Voce nao tem acesso a esta pasta de contratos. Solicite liberacao ao Admin (Controle de Acessos).' } };
         return;
       }
     }
