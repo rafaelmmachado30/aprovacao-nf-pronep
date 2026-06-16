@@ -1,0 +1,2037 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Pronep — Aprovação de NF (Protótipo)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --azul-escuro: #1F4E79;
+    --azul-claro: #27AAE1;
+    --azul-bg: #F4F8FB;
+    --azul-soft: #E6F2F9;
+    --cinza-texto: #2C3E50;
+    --cinza-medio: #647883;
+    --cinza-borda: #DCE3E9;
+    --branco: #FFFFFF;
+    --verde: #2E7D32;
+    --verde-bg: #E8F5E9;
+    --amarelo: #F9A825;
+    --amarelo-bg: #FFF8E1;
+    --vermelho: #C62828;
+    --vermelho-bg: #FFEBEE;
+    --sombra: 0 1px 3px rgba(31,78,121,0.08), 0 4px 12px rgba(31,78,121,0.04);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif; color: var(--cinza-texto); background: var(--azul-bg); -webkit-font-smoothing: antialiased; }
+  a { color: var(--azul-claro); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  button { font-family: inherit; cursor: pointer; border: none; }
+
+  /* ===== LOGIN ===== */
+  #login {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--azul-escuro) 0%, var(--azul-claro) 100%);
+    padding: 20px;
+  }
+  .login-card {
+    background: var(--branco); border-radius: 12px; padding: 40px 48px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.25); max-width: 520px; width: 100%;
+  }
+  .login-logo { display: flex; align-items: center; justify-content: center; margin-bottom: 20px; padding: 8px 0; }
+  .login-logo img { max-width: 280px; height: auto; }
+  .login-card h1 { margin: 16px 0 4px; font-size: 22px; color: var(--azul-escuro); font-weight: 600; }
+  .login-card .subtitle { color: var(--cinza-medio); font-size: 14px; margin-bottom: 24px; }
+  .login-card .sso { background: var(--azul-escuro); color: var(--branco); width: 100%; padding: 12px; border-radius: 6px; font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; justify-content: center; gap: 10px; transition: background 0.15s; }
+  .login-card .sso:hover { background: #163A5B; }
+  .ms-logo { display: inline-grid; grid-template-columns: 1fr 1fr; gap: 1px; width: 16px; height: 16px; }
+  .ms-logo span { background: var(--branco); }
+  .ms-logo span:nth-child(1) { background: #F25022; }
+  .ms-logo span:nth-child(2) { background: #7FBA00; }
+  .ms-logo span:nth-child(3) { background: #00A4EF; }
+  .ms-logo span:nth-child(4) { background: #FFB900; }
+  .demo-hint { padding: 12px; background: var(--amarelo-bg); border-left: 3px solid var(--amarelo); border-radius: 4px; font-size: 13px; color: #6D4C00; margin-bottom: 16px; }
+  .persona-section { margin-top: 16px; }
+  .persona-section .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cinza-medio); margin-bottom: 8px; font-weight: 600; }
+  .persona-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .persona { padding: 12px; border: 1.5px solid var(--cinza-borda); border-radius: 6px; background: var(--branco); text-align: left; transition: all 0.15s; cursor: pointer; }
+  .persona:hover { border-color: var(--azul-claro); background: var(--azul-soft); }
+  .persona .role { font-weight: 600; color: var(--azul-escuro); font-size: 13px; }
+  .persona .name { font-size: 12px; color: var(--cinza-medio); margin-top: 2px; }
+
+  /* ===== APP SHELL ===== */
+  #app { display: none; min-height: 100vh; }
+  #app.active { display: grid; grid-template-columns: 240px 1fr; grid-template-rows: auto 1fr; grid-template-areas: 'topbar topbar' 'sidebar content'; }
+
+  /* Topbar — estilo Pronep Analytics */
+  .topbar { grid-area: topbar; background: var(--branco); border-bottom: 4px solid var(--azul-claro); display: flex; align-items: center; padding: 14px 32px; gap: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); position: sticky; top: 0; z-index: 10; }
+  .topbar .logo-area { display: flex; align-items: center; gap: 20px; }
+  .topbar .logo-area img { height: 36px; width: auto; display: block; }
+  .topbar .divider { width: 1px; height: 36px; background: var(--cinza-borda); }
+  .topbar .titles { display: flex; flex-direction: column; gap: 2px; }
+  .topbar .titles .title { font-size: 17px; font-weight: 700; color: var(--azul-escuro); line-height: 1.2; }
+  .topbar .titles .subtitle { font-size: 12px; color: var(--cinza-medio); line-height: 1.2; }
+  .topbar .spacer { flex: 1; }
+  .topbar .user-area { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 220px; }
+  .topbar .user-area .user-email { font-size: 14px; font-weight: 700; color: var(--azul-escuro); }
+  .topbar .user-area .user-roles { font-size: 12px; color: var(--cinza-medio); }
+  .topbar .user-area .logout-link { font-size: 13px; color: var(--azul-claro); cursor: pointer; margin-top: 2px; background: none; border: none; padding: 0; font-family: inherit; font-weight: 500; }
+  .topbar .user-area .logout-link:hover { text-decoration: underline; }
+
+  .sidebar { grid-area: sidebar; background: var(--azul-escuro); color: var(--branco); display: flex; flex-direction: column; padding: 16px 0; position: sticky; top: 0; height: calc(100vh - 84px); }
+  .sidebar nav { padding: 12px 0; flex: 1; overflow-y: auto; }
+  .nav-section-label { padding: 12px 20px 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: #8FA5B5; font-weight: 600; }
+  .sidebar a.nav-item { display: flex; align-items: center; gap: 12px; padding: 8px 18px; color: rgba(255,255,255,0.85); font-size: 14px; border-left: 3px solid transparent; transition: all 0.1s; cursor: pointer; }
+  .sidebar a.nav-item:hover { background: rgba(255,255,255,0.05); color: var(--branco); text-decoration: none; }
+  .sidebar a.nav-item.active { background: rgba(39,170,225,0.18); border-left-color: var(--azul-claro); color: var(--branco); font-weight: 500; }
+  .sidebar a.nav-item .icon {
+    width: 30px; height: 30px; border-radius: 7px;
+    background: linear-gradient(135deg, #27AAE1 0%, #1F4E79 100%);
+    display: grid; place-items: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.15);
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+  }
+  .sidebar a.nav-item:hover .icon { transform: translateY(-1px); }
+  .sidebar a.nav-item.active .icon { box-shadow: 0 2px 6px rgba(39,170,225,0.5), inset 0 1px 0 rgba(255,255,255,0.2); }
+  .sidebar a.nav-item .icon svg { width: 16px; height: 16px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .sidebar a.nav-item .badge { margin-left: auto; background: var(--azul-claro); color: var(--branco); font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: 600; }
+  .sidebar .footer-area { padding: 12px 20px; font-size: 11px; color: #8FA5B5; border-top: 1px solid rgba(255,255,255,0.1); }
+
+  .content { grid-area: content; padding: 24px 32px 48px; overflow-x: auto; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .view h2 { color: var(--azul-escuro); font-size: 22px; margin: 0 0 4px; font-weight: 600; }
+  .view .view-sub { color: var(--cinza-medio); font-size: 13px; margin-bottom: 24px; }
+
+  /* ===== CARDS / KPIS ===== */
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+  .kpi { background: var(--branco); padding: 18px 20px; border-radius: 8px; box-shadow: var(--sombra); border-left: 3px solid var(--azul-claro); }
+  .kpi .label { font-size: 12px; color: var(--cinza-medio); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+  .kpi .value { font-size: 26px; color: var(--azul-escuro); font-weight: 700; margin-top: 6px; }
+  .kpi .delta { font-size: 12px; margin-top: 4px; }
+  .kpi .delta.up { color: var(--verde); }
+  .kpi .delta.down { color: var(--vermelho); }
+
+  .card { background: var(--branco); border-radius: 8px; padding: 20px 24px; box-shadow: var(--sombra); margin-bottom: 18px; }
+  .card h3 { margin: 0 0 12px; font-size: 15px; color: var(--azul-escuro); font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .card h3 .pill { font-size: 11px; padding: 2px 8px; background: var(--azul-soft); color: var(--azul-escuro); border-radius: 10px; font-weight: 600; }
+
+  .chart-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 18px; }
+  @media (max-width: 1100px) { .chart-grid { grid-template-columns: 1fr; } .kpi-row { grid-template-columns: 1fr 1fr; } }
+
+  /* ===== TABLES ===== */
+  table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.data th { background: #F4F7FA; color: var(--azul-escuro); text-align: left; padding: 10px 12px; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; border-bottom: 2px solid var(--cinza-borda); }
+  table.data td { padding: 10px 12px; border-bottom: 1px solid #EEF2F5; }
+  table.data tr:hover td { background: var(--azul-bg); }
+  table.data .num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.data .center { text-align: center; }
+  .status-pill { display: inline-block; padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+  .status-pendente { background: var(--amarelo-bg); color: #8C5A00; }
+  .status-aprovada { background: var(--verde-bg); color: var(--verde); }
+  .status-rejeitada { background: var(--vermelho-bg); color: var(--vermelho); }
+  .status-duplicada { background: #FCE4EC; color: #AD1457; }
+  .icon-btn { padding: 6px 10px; border-radius: 4px; background: transparent; color: var(--azul-claro); font-size: 12px; font-weight: 500; }
+  .icon-btn:hover { background: var(--azul-soft); }
+  .icon-btn.danger { color: var(--vermelho); }
+  .icon-btn.success { color: var(--verde); }
+
+  /* ===== FORMS ===== */
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-row { display: flex; flex-direction: column; gap: 4px; }
+  .form-row.full { grid-column: 1 / -1; }
+  .form-row label { font-size: 12px; font-weight: 600; color: var(--cinza-medio); text-transform: uppercase; letter-spacing: 0.03em; }
+  .form-row input, .form-row select, .form-row textarea { padding: 9px 12px; border: 1.5px solid var(--cinza-borda); border-radius: 5px; font-size: 14px; font-family: inherit; transition: border-color 0.15s, box-shadow 0.15s; background: var(--branco); }
+  .form-row input:focus, .form-row select:focus, .form-row textarea:focus { outline: none; border-color: var(--azul-claro); box-shadow: 0 0 0 3px rgba(39,170,225,0.15); }
+  .form-row input[readonly] { background: var(--azul-bg); color: var(--cinza-medio); }
+  .file-drop { border: 2px dashed var(--cinza-borda); padding: 28px; border-radius: 6px; text-align: center; background: var(--azul-bg); transition: all 0.15s; cursor: pointer; }
+  .file-drop:hover { border-color: var(--azul-claro); background: var(--azul-soft); }
+  .file-drop .fd-icon { font-size: 28px; margin-bottom: 6px; }
+  .file-drop .fd-main { color: var(--azul-escuro); font-weight: 600; font-size: 14px; }
+  .file-drop .fd-sub { color: var(--cinza-medio); font-size: 12px; margin-top: 4px; }
+  .file-drop.has-file { border-style: solid; border-color: var(--verde); background: var(--verde-bg); }
+  .file-drop.has-file .fd-main { color: var(--verde); }
+
+  .btn { padding: 10px 18px; border-radius: 5px; font-size: 14px; font-weight: 600; transition: all 0.15s; }
+  .btn-primary { background: var(--azul-escuro); color: var(--branco); }
+  .btn-primary:hover { background: #163A5B; }
+  .btn-secondary { background: var(--branco); color: var(--azul-escuro); border: 1.5px solid var(--cinza-borda); }
+  .btn-secondary:hover { border-color: var(--azul-claro); color: var(--azul-claro); }
+  .btn-success { background: var(--verde); color: var(--branco); }
+  .btn-success:hover { background: #1B5E20; }
+  .btn-danger { background: var(--vermelho); color: var(--branco); }
+  .btn-danger:hover { background: #8B1717; }
+  .btn-row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+
+  /* ===== ALERTS / TOASTS ===== */
+  .alert { padding: 12px 16px; border-radius: 5px; font-size: 13px; margin: 10px 0 16px; display: flex; gap: 10px; align-items: flex-start; }
+  .alert .ico { font-size: 16px; flex-shrink: 0; }
+  .alert-warning { background: var(--amarelo-bg); border-left: 3px solid var(--amarelo); color: #6D4C00; }
+  .alert-error { background: var(--vermelho-bg); border-left: 3px solid var(--vermelho); color: #8B1B1B; }
+  .alert-success { background: var(--verde-bg); border-left: 3px solid var(--verde); color: #1B5E20; }
+  .alert-info { background: var(--azul-soft); border-left: 3px solid var(--azul-claro); color: var(--azul-escuro); }
+  #toasts { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
+  .toast { background: var(--azul-escuro); color: var(--branco); padding: 12px 18px; border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.2); font-size: 13px; min-width: 280px; animation: slidein 0.25s ease-out; }
+  .toast.success { background: var(--verde); }
+  .toast.error { background: var(--vermelho); }
+  @keyframes slidein { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+  /* ===== FILTER BAR ===== */
+  .filter-bar { display: flex; gap: 12px; align-items: center; padding: 14px 18px; background: var(--branco); border-radius: 8px; box-shadow: var(--sombra); margin-bottom: 16px; flex-wrap: wrap; }
+  .filter-bar select, .filter-bar input { padding: 7px 10px; border: 1px solid var(--cinza-borda); border-radius: 4px; font-size: 13px; background: var(--branco); }
+  .filter-bar .label { font-size: 12px; color: var(--cinza-medio); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .filter-bar .spacer { flex: 1; }
+
+  /* ===== MODAL ===== */
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(20,40,60,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+  .modal-backdrop.active { display: flex; }
+  .modal { background: var(--branco); border-radius: 10px; padding: 28px 32px; max-width: 560px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+  .modal h3 { margin: 0 0 14px; color: var(--azul-escuro); font-size: 18px; }
+  .modal .close-x { float: right; cursor: pointer; color: var(--cinza-medio); font-size: 20px; line-height: 1; }
+  .modal-pdf-preview { background: #F0F4F8; border: 1px solid var(--cinza-borda); padding: 16px; margin: 12px 0; border-radius: 4px; font-size: 12px; color: var(--cinza-medio); font-family: 'Courier New', monospace; position: relative; min-height: 220px; }
+  .modal-pdf-preview .watermark-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: Arial, sans-serif; transform: rotate(-22deg); color: rgba(0,90,180,0.30); font-size: 22px; font-weight: 800; letter-spacing: 2px; text-align: center; line-height: 1.5; pointer-events: none; }
+  .modal-pdf-preview .watermark-overlay .l1 { font-size: 30px; letter-spacing: 4px; }
+
+  /* ===== ARCHITECTURE DIAGRAM ===== */
+  .arch-diagram { background: var(--branco); padding: 20px; border-radius: 8px; box-shadow: var(--sombra); overflow-x: auto; }
+  .arch-diagram svg { width: 100%; height: auto; min-width: 800px; }
+
+  /* role-based hiding via JS sets data-role="hidden" */
+  [data-role-hidden="true"] { display: none !important; }
+
+  /* utility */
+  .muted { color: var(--cinza-medio); }
+  .small { font-size: 12px; }
+  .mono { font-family: 'Courier New', monospace; }
+  .tag { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 11px; font-weight: 600; background: var(--azul-soft); color: var(--azul-escuro); }
+  .tag-rj { background: #E8F4F8; color: #0277BD; }
+  .tag-sp { background: #F3E5F5; color: #6A1B9A; }
+  .tag-es { background: #FFF3E0; color: #E65100; }
+  hr { border: 0; border-top: 1px solid var(--cinza-borda); margin: 18px 0; }
+</style>
+</head>
+<body>
+
+<!-- ====================== LOGIN ====================== -->
+<div id="login">
+  <div class="login-card">
+    <div class="login-logo">
+      <img src="pronep-logo.png" alt="Pronep Life Care">
+    </div>
+    <h1 style="text-align:center">Sistema de Aprovação de NF</h1>
+    <div class="subtitle" style="text-align:center">Entre com sua conta corporativa @pronep.com.br</div>
+
+    <div id="login-step-email">
+      <div class="form-row" style="margin-bottom:14px">
+        <label>E-mail corporativo</label>
+        <input id="login-email" type="email" placeholder="nome.sobrenome@pronep.com.br" autocomplete="email" autofocus>
+      </div>
+      <div id="login-msg"></div>
+      <button class="sso" onclick="loginCheckEmail()">
+        <span class="ms-logo"><span></span><span></span><span></span><span></span></span>
+        Continuar com Microsoft (Entra ID)
+      </button>
+      <div class="demo-hint" style="margin-top:14px">
+        <b>Modo demonstração:</b> em produção, o botão acima abriria o popup de login Microsoft. No protótipo, basta digitar um e-mail @pronep.com.br conhecido e clicar em "Continuar".
+        <a href="#" onclick="event.preventDefault();togglePersonasDemo()" style="margin-left:6px">Mostrar atalhos de demo →</a>
+      </div>
+      <div id="personas-demo" style="display:none">
+        <div class="persona-section">
+          <div class="label">Atalhos de demonstração — clique para entrar</div>
+          <div class="persona-grid">
+            <button class="persona" onclick="login('submitter')"><div class="role">Submitter</div><div class="name">carla.souza@pronep.com.br</div></button>
+            <button class="persona" onclick="login('gestor')"><div class="role">Gestor — Suprimentos</div><div class="name">bruno.hioka@pronep.com.br</div></button>
+            <button class="persona" onclick="login('financeiro')"><div class="role">Financeiro</div><div class="name">sandra.ferreira@pronep.com.br</div></button>
+            <button class="persona" onclick="login('admin')"><div class="role">Admin / Presidência</div><div class="name">rafael.machado@pronep.com.br</div></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="login-step-loading" style="display:none;text-align:center;padding:30px">
+      <div style="font-size:14px;color:var(--cinza-medio);margin-bottom:14px">Verificando credenciais no Entra ID…</div>
+      <div style="display:inline-block;border:3px solid var(--cinza-borda);border-top-color:var(--azul-claro);border-radius:50%;width:36px;height:36px;animation:spin 0.8s linear infinite"></div>
+    </div>
+  </div>
+</div>
+<style>
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+<!-- ====================== APP SHELL ====================== -->
+<div id="app">
+  <header class="topbar">
+    <div class="logo-area">
+      <img src="pronep-logo.png" alt="Pronep Life Care">
+      <div class="divider"></div>
+      <div class="titles">
+        <div class="title">Sistema de Aprovação de NF</div>
+        <div class="subtitle" id="crumb-view">Aprovação de Notas Fiscais e Reembolsos</div>
+      </div>
+    </div>
+    <div class="spacer"></div>
+    <div class="user-area">
+      <div class="user-email" id="user-email">rafael.machado@pronep.com.br</div>
+      <div class="user-roles" id="user-roles">Admin</div>
+      <button class="logout-link" onclick="logout()">Sair da plataforma</button>
+    </div>
+  </header>
+
+  <aside class="sidebar">
+    <nav id="nav-list"></nav>
+    <div class="footer-area">v1.0 · Protótipo<br>22/maio/2026</div>
+  </aside>
+
+  <main class="content" id="content-area">
+    <!-- Views injected by JS -->
+  </main>
+</div>
+
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal" id="modal-content"></div>
+</div>
+<div id="toasts"></div>
+
+<script>
+// ============== STATE ==============
+const personas = {
+  submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submitter (Colaborador)',                shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','fila-aprovacao','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
+  gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Gestor · Suprimentos (SP/RJ/ES)',        shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['fila-aprovacao','nova-nf','minhas-nfs','mapa-aprovadores','arquitetura'] },
+  financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','mapa-aprovadores','arquitetura'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','mapa-aprovadores','auditoria','arquitetura'] }
+};
+
+// Grupos de segurança do Entra ID consultados via Microsoft Graph.
+// Em produção: GET /groups/{id}/members → resposta atualizada em tempo real.
+// No protótipo: hardcoded para demonstração.
+const gruposEntraID = {
+  'PRONEP-Financeiro-Gestao': {
+    descricao: 'Gestores do Financeiro autorizados a negociar prazos de NF',
+    membros: [
+      { email: 'sandra.ferreira@pronep.com.br',  nome: 'Sandra Ferreira',  cargo: 'Gerente Financeiro' },
+      { email: 'vitor.costa@pronep.com.br',      nome: 'Vitor Costa',      cargo: 'Coordenador Financeiro' },
+      { email: 'monica.pires@pronep.com.br',     nome: 'Monica Pires',     cargo: 'Analista Financeiro Sênior' },
+      { email: 'bruno.mendes@pronep.com.br',     nome: 'Bruno Mendes',     cargo: 'Analista Financeiro' },
+    ]
+  }
+};
+
+// Base de usuários reconhecidos pelo Entra ID (no protótipo). Cada e-mail mapeia para um perfil + dados.
+const usuariosReconhecidos = {
+  // Submitters comuns
+  'carla.souza@pronep.com.br':       { persona: 'submitter', nome: 'Carla Souza',       cargo: 'Compras RJ' },
+  'tiago.lima@pronep.com.br':        { persona: 'submitter', nome: 'Tiago Lima',        cargo: 'Compras SP' },
+  'marcelo.vianna@pronep.com.br':    { persona: 'submitter', nome: 'Marcelo Vianna',    cargo: 'Compras ES' },
+  // Gestores reais (extraídos do PA)
+  'bruno.hioka@pronep.com.br':       { persona: 'gestor', nome: 'Bruno Hioka',       cargo: 'Suprimentos · SP/RJ/ES',           dept: 'Suprimentos' },
+  'vitor.amaral@pronep.com.br':      { persona: 'gestor', nome: 'Vitor Amaral',      cargo: 'Técnica · RJ/ES',                  dept: 'Técnica' },
+  'nicolle.boas@pronep.com.br':      { persona: 'gestor', nome: 'Nicolle Boas',      cargo: 'Técnica · SP',                     dept: 'Técnica' },
+  'henrico.molina@pronep.com.br':    { persona: 'gestor', nome: 'Henrico Molina',    cargo: 'Financeira · SP/RJ/ES',            dept: 'Financeira' },
+  'janilene.santos@pronep.com.br':   { persona: 'gestor', nome: 'Janilene Santos',   cargo: 'RH-DP + Fiscal-Contábil · SP/RJ/ES', dept: 'RH-DP' },
+  'rafaella.santos@pronep.com.br':   { persona: 'gestor', nome: 'Rafaella Santos',   cargo: 'Jurídica + Administrativa · SP/RJ/ES', dept: 'Jurídica' },
+  'sabrina.fernandes@pronep.com.br': { persona: 'gestor', nome: 'Sabrina Fernandes', cargo: 'Qualidade · SP/RJ/ES',             dept: 'Qualidade' },
+  // Financeiro / Admin
+  'sandra.ferreira@pronep.com.br':   { persona: 'financeiro', nome: 'Sandra Ferreira', cargo: 'Financeiro' },
+  'rafael.machado@pronep.com.br':    { persona: 'admin',      nome: 'Rafael Machado',  cargo: 'Tecnologia · Admin do Sistema' },
+};
+
+// Mapa real extraído do Power Automate atual (Unidade × Diretoria → e-mail do aprovador)
+const aprovadoresReais = {
+  'SP|Suprimentos':       { email: 'bruno.hioka@pronep.com.br',       nome: 'Bruno Hioka' },
+  'SP|Técnica':           { email: 'nicolle.boas@pronep.com.br',      nome: 'Nicolle Boas' },
+  'SP|Financeira':        { email: 'henrico.molina@pronep.com.br',    nome: 'Henrico Molina' },
+  'SP|RH-DP':             { email: 'janilene.santos@pronep.com.br',   nome: 'Janilene Santos' },
+  'SP|Tecnologia':        { email: 'rafael.machado@pronep.com.br',    nome: 'Rafael Machado' },
+  'SP|Fiscal-Contábil':   { email: 'janilene.santos@pronep.com.br',   nome: 'Janilene Santos' },
+  'SP|Jurídica':          { email: 'rafaella.santos@pronep.com.br',   nome: 'Rafaella Santos' },
+  'SP|Administrativa':    { email: 'rafaella.santos@pronep.com.br',   nome: 'Rafaella Santos' },
+  'SP|Qualidade':         { email: 'sabrina.fernandes@pronep.com.br', nome: 'Sabrina Fernandes' },
+  'RJ|Suprimentos':       { email: 'bruno.hioka@pronep.com.br',       nome: 'Bruno Hioka' },
+  'RJ|Técnica':           { email: 'vitor.amaral@pronep.com.br',      nome: 'Vitor Amaral' },
+  'RJ|Financeira':        { email: 'henrico.molina@pronep.com.br',    nome: 'Henrico Molina' },
+  'RJ|RH-DP':             { email: 'janilene.santos@pronep.com.br',   nome: 'Janilene Santos' },
+  'RJ|Tecnologia':        { email: 'rafael.machado@pronep.com.br',    nome: 'Rafael Machado' },
+  'RJ|Fiscal-Contábil':   { email: 'janilene.santos@pronep.com.br',   nome: 'Janilene Santos' },
+  'RJ|Jurídica':          { email: 'rafaella.santos@pronep.com.br',   nome: 'Rafaella Santos' },
+  'RJ|Administrativa':    { email: 'rafaella.santos@pronep.com.br',   nome: 'Rafaella Santos' },
+  'RJ|Qualidade':         { email: 'sabrina.fernandes@pronep.com.br', nome: 'Sabrina Fernandes' },
+  'ES|Suprimentos':       { email: 'bruno.hioka@pronep.com.br',       nome: 'Bruno Hioka' },
+  'ES|Técnica':           { email: 'vitor.amaral@pronep.com.br',      nome: 'Vitor Amaral' },
+  'ES|Financeira':        { email: 'henrico.molina@pronep.com.br',    nome: 'Henrico Molina' },
+  'ES|RH-DP':             { email: 'janilene.santos@pronep.com.br',   nome: 'Janilene Santos' },
+  'ES|Tecnologia':        { email: 'rafael.machado@pronep.com.br',    nome: 'Rafael Machado' },
+  'ES|Fiscal-Contábil':   { email: 'janilene.santos@pronep.com.br',   nome: 'Janilene Santos' },
+  'ES|Jurídica':          { email: 'rafaella.santos@pronep.com.br',   nome: 'Rafaella Santos' },
+  'ES|Administrativa':    { email: 'rafaella.santos@pronep.com.br',   nome: 'Rafaella Santos' },
+  'ES|Qualidade':         { email: 'sabrina.fernandes@pronep.com.br', nome: 'Sabrina Fernandes' },
+};
+
+const unidades = ['SP','RJ','ES'];
+const diretorias = ['Suprimentos','Qualidade','Administrativa','Jurídica','Fiscal-Contábil','Técnica','Financeira','RH-DP','Tecnologia'];
+
+const fornecedores = [
+  { cnpj: '32.554.883/0001-78', razao: 'TNC-GAN Terapia Nutricional',     unidade: 'RJ', diretoria: 'Técnica',        categoria: 'Serviços',  ativo: true },
+  { cnpj: '14.785.236/0001-04', razao: 'MedSupply Materiais Hospitalares',unidade: 'RJ', diretoria: 'Suprimentos',    categoria: 'Materiais', ativo: true },
+  { cnpj: '09.118.473/0001-22', razao: 'Olá Tecnologia em Saúde',         unidade: 'SP', diretoria: 'Tecnologia',     categoria: 'Serviços',  ativo: true },
+  { cnpj: '09.118.473/0002-03', razao: 'Olá Tecnologia em Saúde',         unidade: 'RJ', diretoria: 'Tecnologia',     categoria: 'Serviços',  ativo: true },
+  { cnpj: '09.118.473/0003-94', razao: 'Olá Tecnologia em Saúde',         unidade: 'ES', diretoria: 'Tecnologia',     categoria: 'Serviços',  ativo: true },
+  { cnpj: '21.456.789/0001-90', razao: 'Advocacia Bertolini & Associados',unidade: 'RJ', diretoria: 'Jurídica',       categoria: 'Serviços',  ativo: true },
+  { cnpj: '07.331.456/0001-11', razao: 'Construtora Capixaba Reformas',   unidade: 'ES', diretoria: 'Administrativa', categoria: 'Serviços',  ativo: true },
+  { cnpj: '18.923.118/0001-65', razao: 'Lavanderia Hospital Limpa+',      unidade: 'SP', diretoria: 'Suprimentos',    categoria: 'Serviços',  ativo: true },
+  { cnpj: '32.554.883/0002-59', razao: 'TNC-GAN Terapia Nutricional',     unidade: 'SP', diretoria: 'Técnica',        categoria: 'Serviços',  ativo: false },
+];
+
+let notas = [
+  { id: 'NF-2026-0451', numero: '2545', serie: '70000', fornecedorIdx: 0, valor: 280.17, valorLiquido: 267.13, vencimento: '2026-06-28', emissao: '2026-05-11', unidade: 'RJ', diretoria: 'Técnica', status: 'pendente', lancadoPor: 'Carla Souza', lancadoEm: '2026-05-21 09:34', aprovadoPor: null, aprovadoEm: null, chaveAcesso: '33052026...4739', hash: 'a3f9c2...d18e' },
+  { id: 'NF-2026-0450', numero: '8814', serie: '1', fornecedorIdx: 1, valor: 5420.00, vencimento: '2026-06-15', emissao: '2026-05-19', unidade: 'RJ', diretoria: 'Suprimentos', status: 'pendente', lancadoPor: 'Carla Souza', lancadoEm: '2026-05-21 11:02', aprovadoPor: null, aprovadoEm: null, hash: 'b7d1e9...4a22' },
+  { id: 'NF-2026-0449', numero: '00231', serie: '1', fornecedorIdx: 2, valor: 12800.00, vencimento: '2026-06-10', emissao: '2026-05-18', unidade: 'SP', diretoria: 'Tecnologia', status: 'pendente', lancadoPor: 'Tiago Lima', lancadoEm: '2026-05-20 16:18', aprovadoPor: null, aprovadoEm: null, hash: '9ee0...c177' },
+  { id: 'NF-2026-0454', numero: '00455', serie: '1', fornecedorIdx: 2, valor: 8900.00, vencimento: '2026-06-04', emissao: '2026-05-20', unidade: 'SP', diretoria: 'Tecnologia', status: 'aprovada', lancadoPor: 'Tiago Lima',     lancadoEm: '2026-05-22 08:14', aprovadoPor: 'Rafael Machado',  aprovadoEm: '2026-05-22 09:22', hash: '1aaf...2230' },
+  { id: 'NF-2026-0453', numero: '00879', serie: '1', fornecedorIdx: 1, valor: 3270.00, vencimento: '2026-05-25', emissao: '2026-05-21', unidade: 'RJ', diretoria: 'Suprimentos', status: 'aprovada', lancadoPor: 'Carla Souza',    lancadoEm: '2026-05-22 10:01', aprovadoPor: 'Bruno Hioka',    aprovadoEm: '2026-05-22 11:48', hash: '7cd9...18f3' },
+  { id: 'NF-2026-0452', numero: '20144', serie: '2', fornecedorIdx: 4, valor: 12300.00, vencimento: '2026-06-08', emissao: '2026-05-19', unidade: 'ES', diretoria: 'Administrativa', status: 'aprovada', lancadoPor: 'Marcelo Vianna', lancadoEm: '2026-05-22 13:30', aprovadoPor: 'Rafaella Santos', aprovadoEm: '2026-05-22 14:55', hash: '4bd0...91ab' },
+  { id: 'NF-2026-0448', numero: '00112', serie: '1', fornecedorIdx: 3, valor: 4500.00, vencimento: '2026-06-02', emissao: '2026-05-15', unidade: 'RJ', diretoria: 'Jurídica', status: 'aprovada', lancadoPor: 'Carla Souza', lancadoEm: '2026-05-15 09:12', aprovadoPor: 'Rafaella Santos', aprovadoEm: '2026-05-15 14:08', hash: 'cf83...8821' },
+  { id: 'NF-2026-0447', numero: '4471', serie: '1', fornecedorIdx: 5, valor: 1840.00, vencimento: '2026-06-05', emissao: '2026-05-14', unidade: 'SP', diretoria: 'Suprimentos', status: 'aprovada', lancadoPor: 'Tiago Lima', lancadoEm: '2026-05-14 10:48', aprovadoPor: 'Bruno Hioka', aprovadoEm: '2026-05-14 17:32', hash: 'e012...f4a5' },
+  { id: 'NF-2026-0446', numero: '00788', serie: '2', fornecedorIdx: 4, valor: 18500.00, vencimento: '2026-06-12', emissao: '2026-05-13', unidade: 'ES', diretoria: 'Administrativa', status: 'aprovada', lancadoPor: 'Marcelo Vianna', lancadoEm: '2026-05-13 14:22', aprovadoPor: 'Rafaella Santos', aprovadoEm: '2026-05-13 18:05', hash: '7a33...91be' },
+  { id: 'NF-2026-0445', numero: '1102', serie: '1', fornecedorIdx: 1, valor: 7200.00, vencimento: '2026-05-25', emissao: '2026-05-12', unidade: 'RJ', diretoria: 'Suprimentos', status: 'rejeitada', motivo: 'Vencimento errado (anterior a D+5)', lancadoPor: 'Carla Souza', lancadoEm: '2026-05-12 09:33', rejeitadoPor: 'Sistema', rejeitadoEm: '2026-05-12 09:33', hash: '5523...88ca' },
+  { id: 'NF-2026-0444', numero: '2545', serie: '70000', fornecedorIdx: 0, valor: 280.17, vencimento: '2026-06-28', emissao: '2026-05-11', unidade: 'RJ', diretoria: 'Técnica', status: 'duplicada', motivo: 'Duplicidade detectada — NF já lançada como NF-2026-0451 (status pendente)', lancadoPor: 'Carla Souza', lancadoEm: '2026-05-21 11:15', hash: 'a3f9c2...d18e' },
+];
+
+let currentPersona = null;
+let currentView = null;
+
+// ============== ÍCONES SVG (estilo Pronep Analytics) ==============
+const ICONS = {
+  dashboard:    '<svg viewBox="0 0 24 24"><path d="M3 12l3-3 4 4 5-6 6 7"/><path d="M3 20h18"/></svg>',
+  fila:         '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  minhas:       '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 14h8M8 18h6"/></svg>',
+  lancamento:   '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 8v8M8 12h8"/></svg>',
+  aprovadas:    '<svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>',
+  rejeitadas:   '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  fornecedores: '<svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><path d="M3.27 6.96 12 12.01l8.73-5.05M12 22.08V12"/></svg>',
+  mapa:         '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+  auditoria:    '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>',
+  arquitetura:  '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M9 14l-3 3M15 14l3 3M8 19h8"/></svg>',
+};
+
+// ============== MENU ITEMS ==============
+const menuItems = [
+  { id: 'dashboard',         label: 'Dashboard',                  icon: ICONS.dashboard },
+  { id: 'fila-aprovacao',    label: 'Fila de Aprovação',          icon: ICONS.fila, badge: () => {
+      const pend = notas.filter(n => n.status === 'pendente');
+      if (currentPersona.shortRole === 'Gestor') {
+        const escopo = escopoDoGestor(currentPersona.email);
+        return pend.filter(n => escopo.some(e => e.unidade === n.unidade && e.diretoria === n.diretoria)).length;
+      }
+      if (currentPersona.shortRole === 'Submitter') return pend.filter(n => n.lancadoPor === currentPersona.name).length;
+      return pend.length;
+    }},
+  { id: 'minhas-nfs',        label: 'Minhas NFs',                 icon: ICONS.minhas },
+  { id: 'nova-nf',           label: 'Lançamento de Notas Fiscais',icon: ICONS.lancamento },
+  { id: 'aprovadas',         label: 'Notas Aprovadas',            icon: ICONS.aprovadas },
+  { id: 'rejeitadas',        label: 'Notas Rejeitadas',           icon: ICONS.rejeitadas },
+  { id: 'rejeitadas-minhas', label: 'Notas Rejeitadas',           icon: ICONS.rejeitadas },
+  { id: 'fornecedores',      label: 'Fornecedores',               icon: ICONS.fornecedores },
+  { id: 'mapa-aprovadores',  label: 'Mapa de Aprovadores',        icon: ICONS.mapa },
+  { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
+  { id: 'arquitetura',       label: 'Arquitetura do Sistema',     icon: ICONS.arquitetura },
+];
+
+// ============== HELPERS ==============
+function fmtBRL(v) { return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+function fmtDate(s) { if (!s) return '—'; const d = new Date(s + 'T00:00:00'); return d.toLocaleDateString('pt-BR'); }
+function fornecedorOf(n) { return fornecedores[n.fornecedorIdx] || { razao: '—', cnpj: '—' }; }
+function statusPill(s) {
+  const map = { pendente: 'PENDENTE', aprovada: 'APROVADA', rejeitada: 'REJEITADA', duplicada: 'DUPLICADA' };
+  return `<span class="status-pill status-${s}">${map[s] || s}</span>`;
+}
+function toast(msg, kind='info') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+function openModal(html) {
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('modal-backdrop').classList.add('active');
+}
+function closeModal() { document.getElementById('modal-backdrop').classList.remove('active'); }
+document.getElementById('modal-backdrop').addEventListener('click', e => { if (e.target.id === 'modal-backdrop') closeModal(); });
+
+// ============== AUTH ==============
+function togglePersonasDemo() {
+  const el = document.getElementById('personas-demo');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function loginCheckEmail() {
+  const email = (document.getElementById('login-email').value || '').trim().toLowerCase();
+  const msg = document.getElementById('login-msg');
+  msg.innerHTML = '';
+  if (!email) {
+    msg.innerHTML = '<div class="alert alert-error"><span class="ico">✕</span><div>Digite seu e-mail corporativo.</div></div>';
+    return;
+  }
+  if (!email.endsWith('@pronep.com.br')) {
+    msg.innerHTML = '<div class="alert alert-error"><span class="ico">✕</span><div>Apenas contas <b>@pronep.com.br</b> são aceitas. Você tentou: <span class="mono">' + email + '</span></div></div>';
+    return;
+  }
+  const u = usuariosReconhecidos[email];
+  if (!u) {
+    msg.innerHTML = '<div class="alert alert-error"><span class="ico">✕</span><div><b>Usuário não autorizado neste sistema.</b><br>O e-mail <span class="mono">' + email + '</span> não está cadastrado no grupo de acesso ao Sistema de Aprovação de NF.<br><br>Solicite ao administrador (rafael.machado@pronep.com.br) a adição do seu usuário ao grupo correspondente do Entra ID.</div></div>';
+    return;
+  }
+  // Simular handshake com Microsoft
+  document.getElementById('login-step-email').style.display = 'none';
+  document.getElementById('login-step-loading').style.display = 'block';
+  setTimeout(() => {
+    loginAs(u, email);
+  }, 900);
+}
+
+function loginAs(userData, emailLogin) {
+  const base = personas[userData.persona];
+  // Resolve o e-mail (vem do login ou da lista)
+  const email = emailLogin || Object.entries(usuariosReconhecidos).find(([k,v]) => v.nome === userData.nome)?.[0] || '';
+  // Clonar e personalizar
+  currentPersona = Object.assign({}, base, {
+    name: userData.nome,
+    email: email,
+    initials: userData.nome.split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase(),
+    role: userData.cargo || base.role,
+    dept: userData.dept || base.dept
+  });
+  document.getElementById('user-email').textContent = currentPersona.email || '—';
+  document.getElementById('user-roles').textContent = currentPersona.role;
+  document.getElementById('login').style.display = 'none';
+  document.getElementById('app').classList.add('active');
+  // Reset login screen for next session
+  document.getElementById('login-step-email').style.display = 'block';
+  document.getElementById('login-step-loading').style.display = 'none';
+  document.getElementById('login-email').value = '';
+  document.getElementById('login-msg').innerHTML = '';
+  renderNav();
+  showView(currentPersona.canSee[0]);
+}
+
+// Backwards-compat: o atalho de demo (botões persona) chama login('xxx')
+function login(p) {
+  const baseEmails = { submitter: 'carla.souza@pronep.com.br', gestor: 'bruno.hioka@pronep.com.br', financeiro: 'sandra.ferreira@pronep.com.br', admin: 'rafael.machado@pronep.com.br' };
+  loginAs(usuariosReconhecidos[baseEmails[p]]);
+}
+
+function logout() {
+  document.getElementById('app').classList.remove('active');
+  document.getElementById('login').style.display = 'flex';
+  currentPersona = null;
+}
+
+// Tecla Enter no input dispara o login
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('login-email');
+  if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') loginCheckEmail(); });
+});
+
+// ============== NAV ==============
+function renderNav() {
+  const nav = document.getElementById('nav-list');
+  let html = '';
+  const sections = currentPersona.canSee;
+  if (sections.length) html += '<div class="nav-section-label">Operação</div>';
+  sections.forEach(id => {
+    const m = menuItems.find(x => x.id === id);
+    if (!m) return;
+    const badge = m.badge ? m.badge() : null;
+    html += `<a class="nav-item${id===currentView?' active':''}" data-view="${id}" onclick="showView('${id}')">
+      <span class="icon">${m.icon}</span>
+      <span>${m.label}</span>
+      ${badge ? `<span class="badge">${badge}</span>` : ''}
+    </a>`;
+  });
+  nav.innerHTML = html;
+}
+
+function showView(id) {
+  currentView = id;
+  const m = menuItems.find(m=>m.id===id) || {label:'Visão'};
+  document.getElementById('crumb-view').textContent = m.label;
+  renderNav();
+  const area = document.getElementById('content-area');
+  area.innerHTML = views[id] ? views[id]() : '<div class="card">Tela em construção.</div>';
+}
+
+// ============== VIEWS ==============
+const views = {
+  dashboard: () => {
+    const aprovadas = notas.filter(n => n.status === 'aprovada');
+    const pendentes = notas.filter(n => n.status === 'pendente');
+    const rejeitadas = notas.filter(n => n.status === 'rejeitada' || n.status === 'duplicada');
+    const totalMes = aprovadas.reduce((s, n) => s + n.valor, 0);
+    const taxaDup = (notas.filter(n => n.status === 'duplicada').length / notas.length * 100).toFixed(1);
+
+    // Bar chart by diretoria
+    const byDiretoria = {};
+    aprovadas.forEach(n => { byDiretoria[n.diretoria] = (byDiretoria[n.diretoria]||0) + n.valor; });
+    const bars = Object.entries(byDiretoria).sort((a,b)=>b[1]-a[1]);
+    const maxBar = Math.max(...bars.map(b=>b[1]));
+    let chartHtml = '';
+    if (bars.length === 0) {
+      chartHtml = '<div class="muted small">Sem aprovações no período.</div>';
+    } else {
+      chartHtml = '<svg viewBox="0 0 600 280" style="width:100%;height:280px">';
+      bars.forEach((b, i) => {
+        const barW = 480; const x0 = 110; const y = 30 + i*36; const w = (b[1]/maxBar)*barW;
+        chartHtml += `<text x="105" y="${y+13}" text-anchor="end" font-size="11" fill="#647883">${b[0]}</text>`;
+        chartHtml += `<rect x="${x0}" y="${y}" width="${w}" height="18" rx="2" fill="#27AAE1" opacity="0.85"/>`;
+        chartHtml += `<text x="${x0+w+6}" y="${y+13}" font-size="11" fill="#1F4E79" font-weight="600">${fmtBRL(b[1])}</text>`;
+      });
+      chartHtml += '</svg>';
+    }
+
+    // Line chart - last 12 months (synthetic)
+    const monthly = [42000, 58000, 51000, 67000, 73000, 81000, 76000, 88000, 92000, 95000, 102000, totalMes];
+    const months = ['Jun/25','Jul','Ago','Set','Out','Nov','Dez','Jan/26','Fev','Mar','Abr','Mai'];
+    const maxM = Math.max(...monthly);
+    const points = monthly.map((v,i) => {
+      const x = 40 + i * (520/11);
+      const y = 200 - (v/maxM) * 160;
+      return [x, y];
+    });
+    let lineSvg = '<svg viewBox="0 0 600 240" style="width:100%;height:240px">';
+    [0,0.25,0.5,0.75,1].forEach(p => { const y = 200 - p*160; lineSvg += `<line x1="40" x2="580" y1="${y}" y2="${y}" stroke="#EEF2F5"/>`; });
+    lineSvg += '<polyline fill="none" stroke="#27AAE1" stroke-width="2.5" points="' + points.map(p=>p.join(',')).join(' ') + '"/>';
+    points.forEach((p,i) => { lineSvg += `<circle cx="${p[0]}" cy="${p[1]}" r="3.5" fill="#1F4E79"/>`; lineSvg += `<text x="${p[0]}" y="220" text-anchor="middle" font-size="10" fill="#647883">${months[i]}</text>`; });
+    lineSvg += '</svg>';
+
+    return `
+      <h2>Dashboard Analítico</h2>
+      <div class="view-sub">Visão consolidada de aprovações e indicadores · Maio/2026</div>
+
+      <div class="kpi-row">
+        <div class="kpi"><div class="label">Aprovado no Mês</div><div class="value">${fmtBRL(totalMes)}</div><div class="delta up">▲ 18% vs Abr</div></div>
+        <div class="kpi"><div class="label">NFs Aprovadas</div><div class="value">${aprovadas.length}</div><div class="delta up">▲ 12 NFs</div></div>
+        <div class="kpi"><div class="label">Pendentes</div><div class="value">${pendentes.length}</div><div class="delta small muted">Tempo médio: 6,4h</div></div>
+        <div class="kpi"><div class="label">Duplicidade Evitada</div><div class="value">${taxaDup}%</div><div class="delta up">${rejeitadas.length} NF(s) barradas</div></div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="card">
+          <h3>Valor Aprovado por Diretoria <span class="pill">Maio/2026</span></h3>
+          ${chartHtml}
+        </div>
+        <div class="card">
+          <h3>Distribuição por Unidade</h3>
+          ${pieByUnit(aprovadas)}
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Evolução Mensal de Valor Aprovado <span class="pill">Últimos 12 meses</span></h3>
+        ${lineSvg}
+      </div>
+
+      <div class="card">
+        <h3>Detalhamento Analítico (top 10)</h3>
+        ${analyticsTable(aprovadas.slice(0, 10))}
+        <div style="margin-top:12px;text-align:right">
+          <button class="btn btn-secondary" onclick="exportXlsxStub()">⤓ Exportar Excel</button>
+        </div>
+      </div>
+    `;
+  },
+
+  'fila-aprovacao': () => {
+    if (!window._filtroFila) {
+      window._filtroFila = { nf: '', fornecedor: 'TODOS', unidade: 'TODAS', diretoria: 'TODAS', solicitante: 'TODOS' };
+    }
+    return renderFilaAprovacaoView();
+  },
+
+  'minhas-nfs': () => {
+    const minhas = notas.filter(n => n.lancadoPor === currentPersona.name);
+    return `
+      <h2>Minhas Notas Fiscais</h2>
+      <div class="view-sub">Todas as NFs lançadas por você, em qualquer status.</div>
+      <div class="card">
+        <table class="data">
+          <thead><tr><th>NF</th><th>Fornecedor</th><th>Diretoria</th><th>Vencimento</th><th class="num">Valor</th><th>Status</th><th>Lançada em</th></tr></thead>
+          <tbody>
+            ${minhas.map(n => `
+              <tr>
+                <td><b>${n.id}</b></td>
+                <td>${fornecedorOf(n).razao}</td>
+                <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span> · ${n.diretoria}</td>
+                <td>${fmtDate(n.vencimento)}</td>
+                <td class="num"><b>${fmtBRL(n.valor)}</b></td>
+                <td>${statusPill(n.status)}${n.motivo ? `<br><span class="small muted">${n.motivo}</span>` : ''}</td>
+                <td>${n.lancadoEm}</td>
+              </tr>
+            `).join('') || '<tr><td colspan="7" class="muted center">Você ainda não lançou nenhuma NF.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+  },
+
+  'nova-nf': () => `
+    <h2>Lançamento de Notas Fiscais</h2>
+    <div class="view-sub">Preencha os dados da NF e faça upload do PDF. O sistema fará validação automática.</div>
+    <div class="card">
+      <div class="form-grid">
+        <div class="form-row">
+          <label>Fornecedor *</label>
+          <select id="frm-forn" onchange="onFornChange()">
+            <option value="">— Selecione —</option>
+            ${fornecedores.map((f,i) => ({f,i})).filter(x=>x.f.ativo).sort((a,b) => a.f.razao.localeCompare(b.f.razao) || a.f.unidade.localeCompare(b.f.unidade)).map(({f,i}) => `<option value="${i}">${f.razao} (${f.cnpj}) — ${f.unidade}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Categoria</label>
+          <input id="frm-categoria" readonly placeholder="Auto-preenchido do cadastro">
+        </div>
+
+        <div class="form-row">
+          <label>Unidade *</label>
+          <input id="frm-unidade" readonly placeholder="Auto-preenchido do cadastro">
+        </div>
+        <div class="form-row">
+          <label>Diretoria *</label>
+          <input id="frm-diretoria" readonly placeholder="Auto-preenchido do cadastro">
+        </div>
+
+        <div class="form-row">
+          <label>Número da NF *</label>
+          <input id="frm-numero" placeholder="ex.: 2545">
+        </div>
+        <div class="form-row">
+          <label>Série</label>
+          <input id="frm-serie" placeholder="ex.: 70000">
+        </div>
+
+        <div class="form-row">
+          <label>Valor (R$) *</label>
+          <input id="frm-valor" type="number" step="0.01" placeholder="0,00">
+        </div>
+        <div class="form-row">
+          <label>Vencimento * <span class="small muted" style="font-weight:400">(mínimo: D+5)</span></label>
+          <input id="frm-venc" type="date" onchange="onVencChange()" oninput="onVencChange()">
+          <div id="frm-venc-info" class="small" style="margin-top:4px"></div>
+        </div>
+
+        <div id="frm-venc-fora-prazo" class="form-row full" style="display:none">
+          <div class="alert alert-warning" style="margin:0">
+            <span class="ico">⚠</span>
+            <div style="flex:1">
+              <b>Vencimento fora do prazo padrão (D+5).</b><br>
+              A política do Financeiro exige no mínimo 5 dias úteis entre hoje e o vencimento.
+              <div style="margin-top:10px;padding-top:10px;border-top:1px dashed #D9A800">
+                <b>Já negociou esta NF com o Financeiro?</b>
+                <div style="display:flex;gap:18px;margin-top:8px">
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:500">
+                    <input type="radio" name="frm-negociou" value="sim" onchange="onNegociouChange()"> Sim
+                  </label>
+                  <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:500">
+                    <input type="radio" name="frm-negociou" value="nao" onchange="onNegociouChange()"> Não
+                  </label>
+                </div>
+                <div id="frm-negociou-detalhe" style="display:none;margin-top:10px">
+                  <label class="small" style="font-weight:600;text-transform:uppercase;letter-spacing:0.03em;color:var(--cinza-medio)">Com qual gestor do Financeiro? *</label>
+                  <select id="frm-negociou-com" style="width:100%;padding:8px 12px;border:1.5px solid var(--cinza-borda);border-radius:5px;font-size:14px;margin-top:4px;background:#fff">
+                    <option value="">— Selecione o gestor —</option>
+                    ${gruposEntraID['PRONEP-Financeiro-Gestao'].membros.map(m =>
+                      `<option value="${m.email}">${m.nome} · ${m.cargo}</option>`
+                    ).join('')}
+                  </select>
+                  <div class="small muted" style="margin-top:6px;display:flex;align-items:center;gap:6px">
+                    <span style="color:var(--azul-claro)">⟳</span>
+                    Lista sincronizada do grupo <span class="mono">PRONEP-Financeiro-Gestao</span> via Microsoft Graph
+                    <span class="tag" style="background:var(--verde-bg);color:var(--verde);font-size:10px">${gruposEntraID['PRONEP-Financeiro-Gestao'].membros.length} membros</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-row full">
+          <label>Anexo PDF (máx. 6 MB) *</label>
+          <div class="file-drop" id="file-drop" onclick="fakeFileUpload()">
+            <div class="fd-icon">⬆</div>
+            <div class="fd-main" id="fd-main">Clique para selecionar o PDF da NF</div>
+            <div class="fd-sub" id="fd-sub">ou arraste e solte aqui</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="form-msgs"></div>
+
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="showView('minhas-nfs')">Cancelar</button>
+        <button class="btn btn-primary" id="btn-enviar-nf" onclick="submitNF()">Enviar para aprovação</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>O que acontece quando você envia <span class="pill">Validações automáticas</span></h3>
+      <ol style="margin:0;padding-left:18px;line-height:1.7;font-size:13px;color:var(--cinza-medio)">
+        <li>Cálculo do <b>hash SHA-256</b> do PDF e extração da chave de acesso da NFS-e</li>
+        <li>Verificação de <b>duplicidade</b> (3 camadas: hash, chave NFS-e, tripla CNPJ+Número+Série)</li>
+        <li>Verificação do <b>vencimento mínimo</b> (D+5 a partir de hoje); fora do prazo exige negociação prévia com Financeiro</li>
+        <li>Verificação do <b>tamanho do arquivo</b> (≤ 6 MB)</li>
+        <li>Se tudo passar: arquivo é gravado em <span class="mono">SharePoint/Notas Pendentes/{Unidade}/{Diretoria}</span> e o gestor recebe notificação por <b>e-mail</b> e <b>Teams</b></li>
+      </ol>
+    </div>
+  `,
+
+  aprovadas: () => {
+    // Filtros iniciais — primeiro abrir vem com data de aprovação = hoje
+    if (!window._filtroAprovadas) {
+      window._filtroAprovadas = {
+        unidade: 'TODAS', diretoria: 'TODAS',
+        aprovadoDe: '2026-05-22', aprovadoAte: '2026-05-22',
+        vencimentoDe: '', vencimentoAte: '',
+        busca: ''
+      };
+    }
+    return renderAprovadasView();
+  },
+
+  rejeitadas: () => {
+    const rj = notas.filter(n => n.status === 'rejeitada' || n.status === 'duplicada');
+    return `
+      <h2>Notas Rejeitadas</h2>
+      <div class="view-sub">NFs rejeitadas por gestor ou automaticamente pelo sistema. Quem lançou recebeu e-mail + Teams.</div>
+      <div class="card">
+        <table class="data">
+          <thead><tr><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Status</th><th>Motivo</th><th>Solicitante</th></tr></thead>
+          <tbody>
+            ${rj.map(n => `
+              <tr>
+                <td><b>${n.id}</b></td>
+                <td>${fornecedorOf(n).razao}</td>
+                <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
+                <td>${n.diretoria}</td>
+                <td class="num"><b>${fmtBRL(n.valor)}</b></td>
+                <td>${statusPill(n.status)}</td>
+                <td>${n.motivo || '—'}</td>
+                <td>${n.lancadoPor}<br><span class="small muted">${n.lancadoEm}</span></td>
+              </tr>
+            `).join('') || '<tr><td colspan="8" class="muted center">Sem rejeições recentes.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    `;
+  },
+
+  'rejeitadas-minhas': () => {
+    const rj = notas.filter(n => (n.status === 'rejeitada' || n.status === 'duplicada') && n.lancadoPor === currentPersona.name);
+    return `
+      <h2>Minhas Notas Rejeitadas</h2>
+      <div class="view-sub">NFs suas que precisam ser revisadas e reenviadas.</div>
+      ${rj.length === 0 ? '<div class="alert alert-success"><span class="ico">✓</span><div>Você não tem NFs rejeitadas pendentes de correção.</div></div>' :
+        '<div class="card"><table class="data"><thead><tr><th>NF</th><th>Fornecedor</th><th class="num">Valor</th><th>Motivo da rejeição</th><th class="center">Ação</th></tr></thead><tbody>' +
+        rj.map(n => `<tr><td><b>${n.id}</b></td><td>${fornecedorOf(n).razao}</td><td class="num">${fmtBRL(n.valor)}</td><td>${n.motivo}</td><td class="center"><button class="icon-btn" onclick="toast(\'Funcionalidade: relançar com correção\')">Reenviar</button></td></tr>`).join('') +
+        '</tbody></table></div>'
+      }
+    `;
+  },
+
+  fornecedores: () => {
+    if (!window._filtroFornecedores) {
+      window._filtroFornecedores = { busca: '', status: 'TODOS' };
+    }
+    return renderFornecedoresView();
+  },
+
+  auditoria: () => `
+    <h2>Trilha de Auditoria</h2>
+    <div class="view-sub">Registro imutável de todas as ações no sistema. Retenção: 5 anos em Azure Log Analytics.</div>
+    <div class="filter-bar">
+      <span class="label">Tipo</span>
+      <select><option>Todas as ações</option><option>Lançamento</option><option>Aprovação</option><option>Rejeição</option><option>Cadastro</option><option>Login</option></select>
+      <span class="label">Usuário</span>
+      <input type="search" placeholder="Buscar usuário…">
+      <span class="label">Período</span>
+      <select><option>Últimas 24h</option><option>Últimos 7 dias</option><option>Últimos 30 dias</option></select>
+    </div>
+    <div class="card">
+      <table class="data">
+        <thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Objeto</th><th>IP</th><th>Resultado</th></tr></thead>
+        <tbody>
+          <tr><td>22/05 14:08:32</td><td>Rafaella Santos</td><td>APROVAÇÃO</td><td>NF-2026-0448</td><td>189.4.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
+          <tr><td>22/05 11:15:08</td><td>Carla Souza</td><td>LANÇAMENTO</td><td>NF-2026-0444</td><td>189.4.x.x</td><td><span class="status-pill status-duplicada">DUP. BARRADA</span></td></tr>
+          <tr><td>22/05 09:34:12</td><td>Carla Souza</td><td>LANÇAMENTO</td><td>NF-2026-0451</td><td>189.4.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
+          <tr><td>21/05 16:18:00</td><td>Tiago Lima</td><td>LANÇAMENTO</td><td>NF-2026-0449</td><td>200.18.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
+          <tr><td>21/05 14:09:11</td><td>Bruno Hioka</td><td>APROVAÇÃO</td><td>NF-2026-0447</td><td>200.18.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
+          <tr><td>21/05 11:02:55</td><td>Carla Souza</td><td>LANÇAMENTO</td><td>NF-2026-0450</td><td>189.4.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
+          <tr><td>20/05 17:32:40</td><td>Bruno Hioka</td><td>APROVAÇÃO</td><td>NF-2026-0447</td><td>200.18.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
+          <tr><td>20/05 09:00:01</td><td>Rafael Machado</td><td>LOGIN</td><td>SSO Entra ID</td><td>187.84.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
+          <tr><td>19/05 18:05:55</td><td>Rafaella Santos</td><td>APROVAÇÃO</td><td>NF-2026-0446</td><td>189.4.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
+          <tr><td>19/05 14:22:08</td><td>Marcelo Vianna</td><td>LANÇAMENTO</td><td>NF-2026-0446</td><td>177.32.x.x</td><td><span class="status-pill status-aprovada">OK</span></td></tr>
+          <tr><td>12/05 09:33:55</td><td>Carla Souza</td><td>LANÇAMENTO</td><td>NF-2026-0445</td><td>189.4.x.x</td><td><span class="status-pill status-rejeitada">AUTO-REJ.</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  `,
+
+  'mapa-aprovadores': () => {
+    // Calcular estatísticas
+    const aprovadores = {};
+    Object.entries(aprovadoresReais).forEach(([k, v]) => {
+      const [unidade, diretoria] = k.split('|');
+      if (!aprovadores[v.email]) aprovadores[v.email] = { nome: v.nome, combos: [] };
+      aprovadores[v.email].combos.push({ unidade, diretoria });
+    });
+
+    // Matriz HTML
+    let matriz = '<table class="data" style="font-size:12px"><thead><tr><th>Diretoria</th>';
+    unidades.forEach(u => matriz += `<th class="center"><span class="tag tag-${u.toLowerCase()}">${u}</span></th>`);
+    matriz += '<th class="num">Pendentes</th></tr></thead><tbody>';
+    diretorias.forEach(d => {
+      matriz += `<tr><td><b>${d}</b></td>`;
+      unidades.forEach(u => {
+        const ap = aprovadoresReais[`${u}|${d}`];
+        if (ap) {
+          const prefix = ap.email.split('@')[0];
+          matriz += `<td class="center"><div style="font-weight:600;color:var(--azul-escuro);font-size:12px">${ap.nome.split(' ')[0]}</div><div class="small muted mono" style="font-size:10px">${prefix}</div></td>`;
+        } else {
+          matriz += '<td class="center muted">—</td>';
+        }
+      });
+      const pend = notas.filter(n => n.diretoria === d && n.status === 'pendente').length;
+      matriz += `<td class="num">${pend > 0 ? `<b style="color:var(--amarelo)">${pend}</b>` : '<span class="muted">0</span>'}</td></tr>`;
+    });
+    matriz += '</tbody></table>';
+
+    // Resumo por aprovador
+    let resumoAprov = '<table class="data" style="font-size:13px"><thead><tr><th>Aprovador</th><th>E-mail</th><th class="num">Combos</th><th>Diretorias / Unidades</th></tr></thead><tbody>';
+    Object.entries(aprovadores).sort((a,b) => b[1].combos.length - a[1].combos.length).forEach(([email, info]) => {
+      const grupos = {};
+      info.combos.forEach(c => { if (!grupos[c.diretoria]) grupos[c.diretoria] = []; grupos[c.diretoria].push(c.unidade); });
+      const desc = Object.entries(grupos).map(([d, us]) => `${d} (${us.join('/')})`).join(' · ');
+      resumoAprov += `<tr><td><b>${info.nome}</b></td><td class="mono small">${email}</td><td class="num"><b>${info.combos.length}</b> de 27</td><td>${desc}</td></tr>`;
+    });
+    resumoAprov += '</tbody></table>';
+
+    return `
+      <h2>Mapa de Aprovadores</h2>
+      <div class="view-sub">
+        Roteamento extraído diretamente do Power Automate atual.
+        <b>${Object.keys(aprovadores).length} aprovadores</b> cobrem as <b>${Object.keys(aprovadoresReais).length}</b> combinações
+        de Unidade × Diretoria. Useful para validar lacunas e sobreposições.
+      </div>
+
+      <div class="alert alert-info"><span class="ico">ℹ</span><div>
+        <b>Observação importante:</b> alguns aprovadores acumulam várias diretorias
+        (ex.: <b>Janilene Santos</b> aprova RH-DP <i>e</i> Fiscal-Contábil em todas as unidades;
+        <b>Rafaella Santos</b> aprova Jurídica <i>e</i> Administrativa em todas as unidades).
+        SP-Técnica é a única exceção do padrão: aprovada por <b>Nicolle Boas</b> em vez de Vitor Amaral (RJ/ES).
+      </div></div>
+
+      <div class="card">
+        <h3>Matriz Unidade × Diretoria <span class="pill">${Object.keys(aprovadoresReais).length} combinações ativas</span></h3>
+        ${matriz}
+      </div>
+
+      <div class="card">
+        <h3>Resumo por Aprovador <span class="pill">${Object.keys(aprovadores).length} pessoas</span></h3>
+        ${resumoAprov}
+      </div>
+
+      ${currentPersona.shortRole === 'Admin' ? `
+      <div class="card">
+        <h3>Ações administrativas</h3>
+        <div class="btn-row" style="justify-content:flex-start">
+          <button class="btn btn-secondary" onclick="toast('Adicionar/remover/trocar aprovador (modal)')">＋ Cadastrar Aprovador</button>
+          <button class="btn btn-secondary" onclick="toast('Exportar como Excel para validação')">⤓ Exportar Matriz</button>
+          <button class="btn btn-secondary" onclick="toast('Histórico de alterações na matriz')">⏱ Ver Histórico</button>
+        </div>
+      </div>` : ''}
+    `;
+  },
+
+  arquitetura: () => `
+    <h2>Arquitetura do Sistema</h2>
+    <div class="view-sub">Visão simplificada dos componentes e fluxo de dados. Detalhamento completo no documento Word de arquitetura.</div>
+    <div class="arch-diagram">${archDiagramSVG()}</div>
+    <div class="card">
+      <h3>Fluxo resumido</h3>
+      <ol style="margin:0;padding-left:18px;line-height:1.7;font-size:14px">
+        <li>Colaborador acessa o portal → autenticação via <b>Entra ID</b> (SSO + MFA).</li>
+        <li>Front-end (React) chama a <b>API REST</b> em Azure Functions com token JWT.</li>
+        <li>Backend valida (hash, chave NFS-e, vencimento, tamanho) e grava o PDF no <b>SharePoint via Graph API</b>.</li>
+        <li>Metadados são salvos em <b>Lista SharePoint</b> (Fornecedores, NotasFiscais, Diretorias).</li>
+        <li>Notificações disparadas via <b>Microsoft Graph (e-mail)</b> + <b>Teams Webhook</b> com Adaptive Card.</li>
+        <li>Aprovação aplica <b>watermark</b> via PdfSharpCore e move o PDF para a pasta de aprovadas com subpasta diária.</li>
+        <li>Toda ação é registrada em <b>Application Insights / Log Analytics</b> para auditoria.</li>
+      </ol>
+    </div>
+  `
+};
+
+// Dado um e-mail de gestor, retorna a lista de combinações Unidade × Diretoria que ele aprova
+// (extraído da matriz real do Power Automate)
+function escopoDoGestor(email) {
+  const escopo = [];
+  Object.entries(aprovadoresReais).forEach(([key, val]) => {
+    if (val.email === email) {
+      const [unidade, diretoria] = key.split('|');
+      escopo.push({ unidade, diretoria });
+    }
+  });
+  return escopo;
+}
+
+function descreveEscopoGestor(escopo) {
+  // Agrupa por diretoria e lista unidades
+  const grupos = {};
+  escopo.forEach(({unidade, diretoria}) => {
+    if (!grupos[diretoria]) grupos[diretoria] = [];
+    grupos[diretoria].push(unidade);
+  });
+  return Object.entries(grupos).map(([d, us]) => `<b>${d}</b> em ${us.join(', ')}`).join(' · ');
+}
+
+function renderFornecedoresView() {
+  const f = window._filtroFornecedores;
+  let lista = fornecedores.slice();
+  if (f.busca) {
+    const q = f.busca.toLowerCase();
+    lista = lista.filter(x => x.razao.toLowerCase().includes(q) || x.cnpj.toLowerCase().includes(q) || (x.nomeFantasia||'').toLowerCase().includes(q));
+  }
+  if (f.status === 'ATIVOS')   lista = lista.filter(x => x.ativo);
+  if (f.status === 'INATIVOS') lista = lista.filter(x => !x.ativo);
+
+  return `
+    <h2>Cadastro de Fornecedores</h2>
+    <div class="view-sub">Cadastro centralizado. A unidade e diretoria padrão definidas aqui são usadas para roteamento automático no lançamento de NF.</div>
+
+    <div class="filter-bar" style="display:flex;gap:12px;align-items:end">
+      <div style="flex:1">
+        <div class="label">Buscar</div>
+        <input id="ffr-busca" type="search" placeholder="Razão social, nome fantasia ou CNPJ…" value="${f.busca}" oninput="aplicaFiltroFornecedores()">
+      </div>
+      <div>
+        <div class="label">Status</div>
+        <select id="ffr-status" onchange="aplicaFiltroFornecedores()">
+          <option value="TODOS"${f.status==='TODOS'?' selected':''}>Todos</option>
+          <option value="ATIVOS"${f.status==='ATIVOS'?' selected':''}>Apenas ativos</option>
+          <option value="INATIVOS"${f.status==='INATIVOS'?' selected':''}>Apenas inativos</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" onclick="openImportFornecedores()" title="Importar lista de fornecedores via arquivo">⬆ Importar</button>
+        <button class="btn btn-primary" onclick="openNovoFornecedor()">＋ Novo Fornecedor</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="small muted" style="margin-bottom:8px"><b>${lista.length}</b> de ${fornecedores.length} fornecedor(es)</div>
+      <table class="data">
+        <thead><tr><th>CNPJ</th><th>Razão Social</th><th>Nome Fantasia</th><th>UF</th><th>Diretoria</th><th>Categoria</th><th>Status</th><th class="center">Ações</th></tr></thead>
+        <tbody>
+          ${lista.length === 0 ? `<tr><td colspan="8" class="center muted" style="padding:30px">Nenhum fornecedor encontrado.</td></tr>` :
+          lista.map((x,i) => `
+            <tr>
+              <td class="mono">${x.cnpj}</td>
+              <td>${x.razao}</td>
+              <td>${x.nomeFantasia || '—'}</td>
+              <td><span class="tag tag-${x.unidade.toLowerCase()}">${x.unidade}</span></td>
+              <td>${x.diretoria}</td>
+              <td>${x.categoria}</td>
+              <td>${x.ativo ? '<span class="status-pill status-aprovada">ATIVO</span>' : '<span class="status-pill status-rejeitada">INATIVO</span>'}</td>
+              <td class="center"><button class="icon-btn" onclick="openEditarFornecedor(${fornecedores.indexOf(x)})">Editar</button></td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function aplicaFiltroFornecedores() {
+  const f = window._filtroFornecedores;
+  f.busca  = document.getElementById('ffr-busca').value;
+  f.status = document.getElementById('ffr-status').value;
+  document.getElementById('content-area').innerHTML = renderFornecedoresView();
+}
+
+function openNovoFornecedor() {
+  abrirModalFornecedor(null);
+}
+
+function openEditarFornecedor(idx) {
+  abrirModalFornecedor(idx);
+}
+
+function abrirModalFornecedor(idx) {
+  const isEdit = idx !== null && idx !== undefined;
+  const x = isEdit ? fornecedores[idx] : { cnpj: '', razao: '', nomeFantasia: '', unidade: '', diretoria: '', categoria: 'Serviços', ativo: true };
+  const titulo = isEdit ? 'Editar Fornecedor' : 'Novo Fornecedor';
+  openModal(`
+    <span class="close-x" onclick="closeModal()">×</span>
+    <h3>${titulo}</h3>
+    <div class="form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div class="form-row" style="grid-column:1/-1">
+        <label>Razão Social *</label>
+        <input id="frn-razao" value="${x.razao}" placeholder="Ex.: Olá Tecnologia em Saúde">
+      </div>
+      <div class="form-row" style="grid-column:1/-1">
+        <label>Nome Fantasia</label>
+        <input id="frn-fantasia" value="${x.nomeFantasia||''}" placeholder="Opcional">
+      </div>
+      <div class="form-row">
+        <label>CNPJ *</label>
+        <input id="frn-cnpj" value="${x.cnpj}" placeholder="00.000.000/0000-00" ${isEdit?'readonly':''}>
+      </div>
+      <div class="form-row">
+        <label>Categoria *</label>
+        <select id="frn-categoria">
+          ${['Serviços','Materiais','Locação','Reembolso','Medicamentos','Outros'].map(c => `<option${x.categoria===c?' selected':''}>${c}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row">
+        <label>UF de Atendimento *</label>
+        <select id="frn-unidade">
+          <option value="">— Selecione —</option>
+          ${unidades.map(u => `<option value="${u}"${x.unidade===u?' selected':''}>${u}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Diretoria Padrão *</label>
+        <select id="frn-diretoria">
+          <option value="">— Selecione —</option>
+          ${diretorias.map(d => `<option value="${d}"${x.diretoria===d?' selected':''}>${d}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-row" style="grid-column:1/-1">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:500;text-transform:none">
+          <input id="frn-ativo" type="checkbox" ${x.ativo?'checked':''} style="width:auto"> Fornecedor ativo (permite lançamento de NF)
+        </label>
+      </div>
+    </div>
+    <div class="small muted" style="margin-top:10px"><b>Diretoria padrão:</b> determina automaticamente para qual gestor a NF será roteada quando este fornecedor for selecionado no lançamento.</div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      ${isEdit ? `<button class="btn btn-danger" onclick="excluirFornecedor(${idx})">Excluir</button>` : ''}
+      <button class="btn btn-primary" onclick="salvarFornecedor(${isEdit ? idx : 'null'})">${isEdit ? 'Salvar alterações' : 'Cadastrar'}</button>
+    </div>
+  `);
+}
+
+function salvarFornecedor(idx) {
+  const razao = document.getElementById('frn-razao').value.trim();
+  const fantasia = document.getElementById('frn-fantasia').value.trim();
+  const cnpj = document.getElementById('frn-cnpj').value.trim();
+  const categoria = document.getElementById('frn-categoria').value;
+  const unidade = document.getElementById('frn-unidade').value;
+  const diretoria = document.getElementById('frn-diretoria').value;
+  const ativo = document.getElementById('frn-ativo').checked;
+  if (!razao || !cnpj || !unidade || !diretoria) {
+    toast('Preencha todos os campos obrigatórios (Razão, CNPJ, UF e Diretoria).', 'error');
+    return;
+  }
+  if (idx === null) {
+    if (fornecedores.some(x => x.cnpj === cnpj)) {
+      toast('Já existe um fornecedor cadastrado com este CNPJ.', 'error');
+      return;
+    }
+    fornecedores.push({ cnpj, razao, nomeFantasia: fantasia, unidade, diretoria, categoria, ativo });
+    toast(`Fornecedor "${razao}" cadastrado.`, 'success');
+  } else {
+    Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, unidade, diretoria, categoria, ativo });
+    toast(`Fornecedor "${razao}" atualizado.`, 'success');
+  }
+  closeModal();
+  showView('fornecedores');
+}
+
+function excluirFornecedor(idx) {
+  if (!confirm('Tem certeza que deseja excluir este fornecedor? Se preferir, marque como inativo.')) return;
+  const x = fornecedores[idx];
+  fornecedores.splice(idx, 1);
+  toast(`Fornecedor "${x.razao}" removido.`, 'success');
+  closeModal();
+  showView('fornecedores');
+}
+
+function openImportFornecedores() {
+  openModal(`
+    <span class="close-x" onclick="closeModal()">×</span>
+    <h3>Importar Lista de Fornecedores</h3>
+    <p class="small muted" style="margin-bottom:14px">Suba uma planilha (.xlsx ou .csv) com a lista de fornecedores. O sistema valida CNPJ, evita duplicados e mostra um preview antes de gravar.</p>
+
+    <div class="card" style="background:var(--azul-bg);box-shadow:none;padding:14px 18px;margin-bottom:14px">
+      <h3 style="margin-top:0;font-size:14px">Estrutura esperada do arquivo</h3>
+      <table class="data" style="font-size:12px">
+        <thead><tr><th>Coluna</th><th>Obrigatório</th><th>Valores aceitos / Observação</th></tr></thead>
+        <tbody>
+          <tr><td><b>RazaoSocial</b></td><td>Sim</td><td>Texto livre (até 200 caracteres)</td></tr>
+          <tr><td><b>NomeFantasia</b></td><td>Não</td><td>Texto livre</td></tr>
+          <tr><td><b>CNPJ</b></td><td>Sim</td><td>Formato 00.000.000/0000-00 ou 14 dígitos. Validação de DV automática. Não pode estar duplicado.</td></tr>
+          <tr><td><b>Categoria</b></td><td>Sim</td><td>Serviços · Materiais · Locação · Reembolso · Medicamentos · Outros</td></tr>
+          <tr><td><b>UF</b></td><td>Sim</td><td>SP · RJ · ES (UF de atendimento)</td></tr>
+          <tr><td><b>Diretoria</b></td><td>Sim</td><td>Suprimentos · Técnica · Financeira · RH-DP · Tecnologia · Fiscal-Contábil · Jurídica · Administrativa · Qualidade</td></tr>
+          <tr><td><b>Ativo</b></td><td>Não</td><td>Sim/Não (default: Sim)</td></tr>
+        </tbody>
+      </table>
+      <div style="margin-top:10px">
+        <button class="btn btn-secondary" onclick="baixarTemplateFornecedores()">⤓ Baixar template (.csv)</button>
+        <span class="small muted" style="margin-left:8px">Use o template para evitar erros de cabeçalho.</span>
+      </div>
+    </div>
+
+    <div class="file-drop" id="frn-file-drop" onclick="fakeImportUpload()">
+      <div class="fd-icon">⬆</div>
+      <div class="fd-main" id="frn-fd-main">Clique para selecionar o arquivo (.xlsx ou .csv)</div>
+      <div class="fd-sub" id="frn-fd-sub">ou arraste e solte aqui · máx. 5 MB</div>
+    </div>
+
+    <div id="frn-import-preview" style="display:none;margin-top:14px"></div>
+
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" id="frn-import-btn" disabled onclick="confirmarImportacao()">Importar fornecedores</button>
+    </div>
+  `);
+}
+
+function baixarTemplateFornecedores() {
+  const header = 'RazaoSocial;NomeFantasia;CNPJ;Categoria;UF;Diretoria;Ativo';
+  const exemplo = [
+    'Exemplo Serviços Médicos LTDA;Exemplo Med;00.111.222/0001-33;Serviços;SP;Suprimentos;Sim',
+    'Distribuidora ABC LTDA;ABC Hospitalar;11.222.333/0001-44;Materiais;RJ;Suprimentos;Sim',
+    'Construtora Reforma & Cia;Reforma Cia;22.333.444/0001-55;Serviços;ES;Administrativa;Sim'
+  ];
+  const csv = '﻿' + header + '\n' + exemplo.join('\n');
+  const blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'template_fornecedores_pronep.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Template baixado. Preencha e suba novamente neste modal.', 'success');
+}
+
+function fakeImportUpload() {
+  // Simula leitura — em produção: SheetJS lê .xlsx, papaparse lê .csv
+  const linhasMock = [
+    { ok: true,  razao: 'Hospital Vida Plena LTDA',         fantasia: 'Vida Plena',     cnpj: '45.678.901/0001-23', categoria: 'Serviços',     uf: 'RJ', diretoria: 'Técnica',     ativo: 'Sim' },
+    { ok: true,  razao: 'TecnoLab Manutenção',              fantasia: 'TecnoLab',       cnpj: '78.901.234/0001-56', categoria: 'Serviços',     uf: 'SP', diretoria: 'Tecnologia',  ativo: 'Sim' },
+    { ok: true,  razao: 'Farma Solutions Distribuidora',    fantasia: 'Farma Solutions',cnpj: '89.012.345/0001-67', categoria: 'Medicamentos', uf: 'ES', diretoria: 'Suprimentos', ativo: 'Sim' },
+    { ok: true,  razao: 'Limpa Mais Higienização',          fantasia: 'Limpa Mais',     cnpj: '90.123.456/0001-78', categoria: 'Serviços',     uf: 'RJ', diretoria: 'Suprimentos', ativo: 'Sim' },
+    { ok: false, razao: 'CNPJ inválido (DV errado)',        fantasia: 'XYZ',            cnpj: '11.111.111/1111-11', categoria: 'Outros',       uf: 'SP', diretoria: 'Outros',      ativo: 'Sim', erro: 'CNPJ com dígito verificador inválido' },
+    { ok: false, razao: 'TNC-GAN Terapia Nutricional',      fantasia: 'TNC-GAN',        cnpj: '32.554.883/0001-78', categoria: 'Serviços',     uf: 'RJ', diretoria: 'Técnica',     ativo: 'Sim', erro: 'CNPJ já cadastrado no sistema' },
+  ];
+  document.getElementById('frn-file-drop').classList.add('has-file');
+  document.getElementById('frn-fd-main').textContent = '✓ fornecedores_pronep.xlsx';
+  document.getElementById('frn-fd-sub').textContent = '128 KB · 6 linhas detectadas · clique para trocar';
+  window._importPreview = linhasMock;
+  document.getElementById('frn-import-btn').disabled = false;
+
+  const okCount = linhasMock.filter(l => l.ok).length;
+  const erroCount = linhasMock.filter(l => !l.ok).length;
+  document.getElementById('frn-import-preview').style.display = 'block';
+  document.getElementById('frn-import-preview').innerHTML = `
+    <h3 style="font-size:14px;margin-bottom:8px;color:var(--azul-escuro)">Preview da importação</h3>
+    <div class="alert ${erroCount > 0 ? 'alert-warning' : 'alert-success'}" style="margin-bottom:10px">
+      <span class="ico">${erroCount > 0 ? '⚠' : '✓'}</span>
+      <div><b>${okCount}</b> linha(s) prontas para importar · <b>${erroCount}</b> com erro (serão ignoradas)</div>
+    </div>
+    <div style="max-height:240px;overflow-y:auto">
+      <table class="data" style="font-size:12px">
+        <thead><tr><th></th><th>Razão</th><th>CNPJ</th><th>UF</th><th>Diretoria</th><th>Categoria</th><th>Status</th></tr></thead>
+        <tbody>
+          ${linhasMock.map(l => `
+            <tr style="background:${l.ok?'var(--verde-bg)':'var(--vermelho-bg)'}">
+              <td>${l.ok?'✓':'✕'}</td>
+              <td>${l.razao}</td>
+              <td class="mono">${l.cnpj}</td>
+              <td>${l.uf}</td>
+              <td>${l.diretoria}</td>
+              <td>${l.categoria}</td>
+              <td>${l.ok ? '<span class="small" style="color:var(--verde)">Pronto</span>' : `<span class="small" style="color:var(--vermelho)">${l.erro}</span>`}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function confirmarImportacao() {
+  const linhas = window._importPreview || [];
+  const validas = linhas.filter(l => l.ok);
+  validas.forEach(l => {
+    fornecedores.push({
+      cnpj: l.cnpj, razao: l.razao, nomeFantasia: l.fantasia,
+      unidade: l.uf, diretoria: l.diretoria, categoria: l.categoria,
+      ativo: (l.ativo||'Sim').toLowerCase().startsWith('s')
+    });
+  });
+  toast(`${validas.length} fornecedor(es) importado(s) com sucesso.`, 'success');
+  closeModal();
+  showView('fornecedores');
+}
+
+function renderFilaAprovacaoView() {
+  const f = window._filtroFila;
+  // Base: todas pendentes
+  let base = notas.filter(n => n.status === 'pendente');
+
+  // RBAC: contexto inicial por perfil
+  let escopoLabel = '';
+  if (currentPersona.shortRole === 'Gestor') {
+    const escopo = escopoDoGestor(currentPersona.email);
+    if (escopo.length === 0) {
+      escopoLabel = `Nenhum mapeamento de aprovação para o seu usuário. Procure o admin.`;
+      base = [];
+    } else {
+      base = base.filter(n => escopo.some(e => e.unidade === n.unidade && e.diretoria === n.diretoria));
+      escopoLabel = `Seu escopo de aprovação: ${descreveEscopoGestor(escopo)}`;
+    }
+  } else if (currentPersona.shortRole === 'Submitter') {
+    base = base.filter(n => n.lancadoPor === currentPersona.name);
+    escopoLabel = `Suas NFs pendentes de aprovação`;
+  } else {
+    escopoLabel = `Todas as NFs pendentes nas 3 unidades`;
+  }
+
+  let lista = base.slice();
+  // Filtros do usuário
+  if (f.nf) lista = lista.filter(n => (n.id + ' ' + n.numero).toLowerCase().includes(f.nf.toLowerCase()));
+  if (f.fornecedor !== 'TODOS') lista = lista.filter(n => fornecedorOf(n).cnpj === f.fornecedor);
+  if (f.unidade !== 'TODAS') lista = lista.filter(n => n.unidade === f.unidade);
+  if (f.diretoria !== 'TODAS') lista = lista.filter(n => n.diretoria === f.diretoria);
+  if (f.solicitante !== 'TODOS') lista = lista.filter(n => n.lancadoPor === f.solicitante);
+
+  // Opções dinâmicas baseadas no escopo (base = antes dos filtros do usuário)
+  const fornecedoresDoEscopo = Array.from(new Map(base.map(n => [fornecedorOf(n).cnpj, fornecedorOf(n)])).values());
+  const solicitantesDoEscopo = Array.from(new Set(base.map(n => n.lancadoPor))).sort();
+  // Para Gestor: lista apenas o que está no seu mapeamento (mesmo que ainda não tenha NF pendente)
+  let unidadesDoEscopo = unidades;
+  let diretoriasDoEscopo = diretorias;
+  if (currentPersona.shortRole === 'Gestor') {
+    const escopo = escopoDoGestor(currentPersona.email);
+    unidadesDoEscopo  = Array.from(new Set(escopo.map(e => e.unidade)));
+    diretoriasDoEscopo = Array.from(new Set(escopo.map(e => e.diretoria)));
+  }
+
+  const algumFiltroAtivo = f.nf || f.fornecedor !== 'TODOS' || f.unidade !== 'TODAS' || f.diretoria !== 'TODAS' || f.solicitante !== 'TODOS';
+
+  return `
+    <h2>Fila de Aprovação</h2>
+    <div class="view-sub">${escopoLabel}.</div>
+
+    <div class="filter-bar" style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;align-items:end">
+      <div>
+        <div class="label">NF (nº ou ID)</div>
+        <input id="ffl-nf" type="search" placeholder="Ex.: 2545 ou NF-2026-0451" value="${f.nf}" oninput="aplicaFiltroFila()">
+      </div>
+      <div>
+        <div class="label">Fornecedor</div>
+        <select id="ffl-fornecedor" onchange="aplicaFiltroFila()">
+          <option value="TODOS"${f.fornecedor==='TODOS'?' selected':''}>Todos</option>
+          ${fornecedoresDoEscopo.map(fr => `<option value="${fr.cnpj}"${f.fornecedor===fr.cnpj?' selected':''}>${fr.razao}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div class="label">Unidade</div>
+        <select id="ffl-unidade" onchange="aplicaFiltroFila()">
+          <option value="TODAS"${f.unidade==='TODAS'?' selected':''}>Todas</option>
+          ${unidadesDoEscopo.map(u => `<option value="${u}"${f.unidade===u?' selected':''}>${u}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div class="label">Diretoria</div>
+        <select id="ffl-diretoria" onchange="aplicaFiltroFila()" ${diretoriasDoEscopo.length === 1 ? 'disabled' : ''}>
+          <option value="TODAS"${f.diretoria==='TODAS'?' selected':''}>Todas</option>
+          ${diretoriasDoEscopo.map(d => `<option value="${d}"${f.diretoria===d?' selected':''}>${d}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div class="label">Solicitante</div>
+        <select id="ffl-solicitante" onchange="aplicaFiltroFila()">
+          <option value="TODOS"${f.solicitante==='TODOS'?' selected':''}>Todos</option>
+          ${solicitantesDoEscopo.map(s => `<option value="${s}"${f.solicitante===s?' selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+        <div class="small muted">
+          ${algumFiltroAtivo
+            ? `<b style="color:var(--azul-escuro)">${lista.length}</b> NF(s) com os filtros aplicados <span class="muted">(de ${base.length} no escopo)</span>`
+            : `<b style="color:var(--azul-escuro)">${lista.length}</b> NF(s) pendente(s)`}
+        </div>
+        ${algumFiltroAtivo ? '<button class="btn btn-secondary" onclick="limpaFiltroFila()">✕ Limpar filtros</button>' : ''}
+      </div>
+    </div>
+
+    ${lista.length === 0 && !algumFiltroAtivo
+      ? '<div class="alert alert-success"><span class="ico">✓</span><div>Não há NFs pendentes no escopo atual.</div></div>'
+      : ''}
+
+    ${lista.length > 0 ? `
+    <div class="card">
+      <table class="data">
+        <thead><tr>
+          <th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th>Vencimento</th><th class="num">Valor</th><th>Solicitante</th><th class="center">Status</th>${currentPersona.shortRole !== 'Submitter' ? '<th class="center">Ações</th>' : ''}
+        </tr></thead>
+        <tbody>
+          ${lista.map(n => `
+            <tr>
+              <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero}/${n.serie}</span></td>
+              <td>${fornecedorOf(n).razao}<br><span class="small muted mono">${fornecedorOf(n).cnpj}</span></td>
+              <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
+              <td>${n.diretoria}</td>
+              <td>${fmtDate(n.vencimento)}${n.foraPrazo ? '<br><span class="small" style="color:var(--vermelho)">⚠ fora do prazo</span>' : ''}</td>
+              <td class="num"><b>${fmtBRL(n.valor)}</b></td>
+              <td><b style="color:var(--azul-escuro)">${n.lancadoPor}</b><br><span class="small muted">em ${n.lancadoEm}</span></td>
+              <td class="center"><span class="status-pill status-pendente">⏱ PENDENTE</span></td>
+              ${currentPersona.shortRole !== 'Submitter' ? `
+                <td class="center">
+                  <button class="icon-btn" onclick="openNFDetail('${n.id}')">Abrir</button>
+                  <button class="icon-btn success" onclick="confirmApprove('${n.id}')">✓</button>
+                  <button class="icon-btn danger" onclick="confirmReject('${n.id}')">✕</button>
+                </td>` : ''}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+    ` : (algumFiltroAtivo ? '<div class="card"><div class="muted center" style="padding:30px">Nenhuma NF encontrada com os filtros atuais. <a href="#" onclick="event.preventDefault();limpaFiltroFila()">Limpar filtros →</a></div></div>' : '')}
+  `;
+}
+
+function aplicaFiltroFila() {
+  const f = window._filtroFila;
+  f.nf          = document.getElementById('ffl-nf').value;
+  f.fornecedor  = document.getElementById('ffl-fornecedor').value;
+  f.unidade     = document.getElementById('ffl-unidade').value;
+  f.diretoria   = document.getElementById('ffl-diretoria').value;
+  f.solicitante = document.getElementById('ffl-solicitante').value;
+  document.getElementById('content-area').innerHTML = renderFilaAprovacaoView();
+}
+
+function limpaFiltroFila() {
+  window._filtroFila = { nf: '', fornecedor: 'TODOS', unidade: 'TODAS', diretoria: 'TODAS', solicitante: 'TODOS' };
+  document.getElementById('content-area').innerHTML = renderFilaAprovacaoView();
+}
+
+function renderAprovadasView() {
+  const f = window._filtroAprovadas;
+  let lista = notas.filter(n => n.status === 'aprovada');
+
+  // Aplica filtros
+  if (f.unidade !== 'TODAS') lista = lista.filter(n => n.unidade === f.unidade);
+  if (f.diretoria !== 'TODAS') lista = lista.filter(n => n.diretoria === f.diretoria);
+  if (f.aprovadoDe) lista = lista.filter(n => n.aprovadoEm && n.aprovadoEm.substring(0,10) >= f.aprovadoDe);
+  if (f.aprovadoAte) lista = lista.filter(n => n.aprovadoEm && n.aprovadoEm.substring(0,10) <= f.aprovadoAte);
+  if (f.vencimentoDe) lista = lista.filter(n => n.vencimento >= f.vencimentoDe);
+  if (f.vencimentoAte) lista = lista.filter(n => n.vencimento <= f.vencimentoAte);
+  if (f.busca) {
+    const q = f.busca.toLowerCase();
+    lista = lista.filter(n =>
+      n.id.toLowerCase().includes(q) ||
+      n.numero.toLowerCase().includes(q) ||
+      fornecedorOf(n).razao.toLowerCase().includes(q) ||
+      n.valor.toString().includes(q)
+    );
+  }
+  lista.sort((a,b) => b.aprovadoEm.localeCompare(a.aprovadoEm));
+
+  const algumFiltroAtivo = f.unidade !== 'TODAS' || f.diretoria !== 'TODAS' || f.aprovadoDe || f.aprovadoAte || f.vencimentoDe || f.vencimentoAte || f.busca;
+  const totalSemFiltro = notas.filter(n => n.status === 'aprovada').length;
+
+  return `
+    <h2>Notas Aprovadas</h2>
+    <div class="view-sub">Documentos aprovados e arquivados em <span class="mono">SharePoint/Notas Aprovadas/{Unidade}/{Data}/</span>. Por padrão exibe apenas as aprovações do dia atual — limpe os filtros para ver o histórico completo.</div>
+
+    <div class="filter-bar" style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:end">
+      <div>
+        <div class="label">Unidade</div>
+        <select id="fap-unidade" onchange="aplicaFiltroAprovadas()">
+          <option value="TODAS"${f.unidade==='TODAS'?' selected':''}>Todas</option>
+          ${unidades.map(u => `<option value="${u}"${f.unidade===u?' selected':''}>${u}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div class="label">Diretoria</div>
+        <select id="fap-diretoria" onchange="aplicaFiltroAprovadas()">
+          <option value="TODAS"${f.diretoria==='TODAS'?' selected':''}>Todas</option>
+          ${diretorias.map(d => `<option value="${d}"${f.diretoria===d?' selected':''}>${d}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div class="label">Aprovado de</div>
+        <input id="fap-aprovDe" type="date" value="${f.aprovadoDe}" onchange="aplicaFiltroAprovadas()">
+      </div>
+      <div>
+        <div class="label">Aprovado até</div>
+        <input id="fap-aprovAte" type="date" value="${f.aprovadoAte}" onchange="aplicaFiltroAprovadas()">
+      </div>
+      <div>
+        <div class="label">Vencimento de</div>
+        <input id="fap-vencDe" type="date" value="${f.vencimentoDe}" onchange="aplicaFiltroAprovadas()">
+      </div>
+      <div>
+        <div class="label">Vencimento até</div>
+        <input id="fap-vencAte" type="date" value="${f.vencimentoAte}" onchange="aplicaFiltroAprovadas()">
+      </div>
+      <div style="grid-column:span 2">
+        <div class="label">Buscar</div>
+        <input id="fap-busca" type="search" placeholder="Nº NF, fornecedor, valor…" value="${f.busca}" oninput="aplicaFiltroAprovadas()">
+      </div>
+      <div style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+        <div class="small muted">
+          ${algumFiltroAtivo
+            ? `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s) com os filtros aplicados <span class="muted">(de ${totalSemFiltro} no total)</span>`
+            : `<b style="color:var(--azul-escuro)">${lista.length}</b> nota(s)`}
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-secondary" onclick="limpaFiltroAprovadas()">✕ Limpar filtros</button>
+          <button class="btn btn-secondary" onclick="exportXlsxStub()">⤓ Excel</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <table class="data">
+        <thead><tr><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Solicitante</th><th>Aprovador</th><th>Aprovado em</th><th>Vencimento</th><th class="center">PDF</th></tr></thead>
+        <tbody>
+          ${lista.length === 0 ? `<tr><td colspan="10" style="text-align:center;padding:30px" class="muted">Nenhuma nota encontrada com os filtros atuais. <a href="#" onclick="event.preventDefault();limpaFiltroAprovadas()">Limpar filtros →</a></td></tr>` :
+          lista.map(n => {
+            // Sinalização: vencimento < D+5 a partir da data de aprovação
+            const apData = new Date(n.aprovadoEm.substring(0,10) + 'T00:00:00');
+            const vencData = new Date(n.vencimento + 'T00:00:00');
+            const diasAteVenc = Math.round((vencData - apData) / (1000*60*60*24));
+            const vencForaPrazo = diasAteVenc < 5;
+            return `
+              <tr${vencForaPrazo ? ' style="background:#FFF5F5"' : ''}>
+                <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero}</span></td>
+                <td>${fornecedorOf(n).razao}</td>
+                <td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td>
+                <td>${n.diretoria}</td>
+                <td class="num"><b>${fmtBRL(n.valor)}</b></td>
+                <td><b>${n.lancadoPor}</b><br><span class="small muted">${n.lancadoEm}</span></td>
+                <td>${n.aprovadoPor}</td>
+                <td>${n.aprovadoEm}</td>
+                <td>
+                  ${vencForaPrazo
+                    ? `<b style="color:var(--vermelho)" title="Vencimento ${diasAteVenc} dia(s) após aprovação — fora do prazo D+5">⚠ ${fmtDate(n.vencimento)}</b><br><span class="small" style="color:var(--vermelho)">${diasAteVenc} dia(s) após aprov.</span>`
+                    : `${fmtDate(n.vencimento)}<br><span class="small muted">${diasAteVenc} dia(s) após aprov.</span>`}
+                </td>
+                <td class="center"><button class="icon-btn" onclick="openApprovedPdf('${n.id}')">Ver</button></td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function aplicaFiltroAprovadas() {
+  const f = window._filtroAprovadas;
+  f.unidade      = document.getElementById('fap-unidade').value;
+  f.diretoria    = document.getElementById('fap-diretoria').value;
+  f.aprovadoDe   = document.getElementById('fap-aprovDe').value;
+  f.aprovadoAte  = document.getElementById('fap-aprovAte').value;
+  f.vencimentoDe  = document.getElementById('fap-vencDe').value;
+  f.vencimentoAte = document.getElementById('fap-vencAte').value;
+  f.busca        = document.getElementById('fap-busca').value;
+  document.getElementById('content-area').innerHTML = renderAprovadasView();
+}
+
+function limpaFiltroAprovadas() {
+  window._filtroAprovadas = { unidade: 'TODAS', diretoria: 'TODAS', aprovadoDe: '', aprovadoAte: '', vencimentoDe: '', vencimentoAte: '', busca: '' };
+  document.getElementById('content-area').innerHTML = renderAprovadasView();
+}
+
+function pieByUnit(aprovadas) {
+  const byUnit = {};
+  aprovadas.forEach(n => byUnit[n.unidade] = (byUnit[n.unidade]||0) + n.valor);
+  const total = Object.values(byUnit).reduce((s,v)=>s+v, 0);
+  if (total === 0) return '<div class="muted small">Sem dados.</div>';
+  const colors = { RJ: '#27AAE1', SP: '#7B61C6', ES: '#F09030' };
+  let cum = 0;
+  let svg = '<svg viewBox="0 0 220 180" style="width:100%;height:200px">';
+  Object.entries(byUnit).forEach(([u, v]) => {
+    const ang0 = (cum / total) * Math.PI * 2 - Math.PI/2;
+    cum += v;
+    const ang1 = (cum / total) * Math.PI * 2 - Math.PI/2;
+    const x0 = 90 + 60*Math.cos(ang0), y0 = 90 + 60*Math.sin(ang0);
+    const x1 = 90 + 60*Math.cos(ang1), y1 = 90 + 60*Math.sin(ang1);
+    const large = (ang1 - ang0) > Math.PI ? 1 : 0;
+    svg += `<path d="M 90 90 L ${x0} ${y0} A 60 60 0 ${large} 1 ${x1} ${y1} Z" fill="${colors[u]||'#888'}" stroke="#fff" stroke-width="2"/>`;
+  });
+  // legend
+  let ly = 30;
+  Object.entries(byUnit).forEach(([u, v]) => {
+    const pct = (v / total * 100).toFixed(1);
+    svg += `<rect x="165" y="${ly}" width="12" height="12" rx="2" fill="${colors[u]||'#888'}"/>`;
+    svg += `<text x="183" y="${ly+10}" font-size="11" fill="#2C3E50">${u} · ${pct}%</text>`;
+    ly += 22;
+  });
+  svg += '</svg>';
+  return svg;
+}
+
+function analyticsTable(rows) {
+  return `<table class="data">
+    <thead><tr><th>NF</th><th>Fornecedor</th><th>Unid.</th><th>Diretoria</th><th class="num">Valor</th><th>Solicitante</th><th>Aprovador</th><th>Aprovado em</th></tr></thead>
+    <tbody>${rows.map(n => `
+      <tr><td>${n.id}</td><td>${fornecedorOf(n).razao}</td><td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span></td><td>${n.diretoria}</td><td class="num">${fmtBRL(n.valor)}</td><td>${n.lancadoPor}</td><td>${n.aprovadoPor || '—'}</td><td>${n.aprovadoEm || '—'}</td></tr>
+    `).join('')}</tbody>
+  </table>`;
+}
+
+function archDiagramSVG() {
+  return `<svg viewBox="0 0 900 540" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1F4E79"/></marker>
+      <linearGradient id="topgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#27AAE1"/><stop offset="1" stop-color="#1F4E79"/></linearGradient>
+    </defs>
+    <style>
+      .b-title { font: 600 13px 'Segoe UI', sans-serif; fill: #1F4E79; }
+      .b-sub   { font: 11px 'Segoe UI', sans-serif; fill: #647883; }
+      .b-white { fill: #ffffff; font: 600 13px 'Segoe UI', sans-serif; }
+      .b-white-sm { fill: #ffffff; font: 11px 'Segoe UI', sans-serif; opacity: 0.9; }
+      .lyr { font: 600 10px 'Segoe UI', sans-serif; fill: #1F4E79; text-transform: uppercase; letter-spacing: 0.1em; }
+    </style>
+
+    <!-- Background layers -->
+    <rect x="20" y="50"  width="860" height="80"  rx="6" fill="#F4F8FB" stroke="#DCE3E9"/>
+    <rect x="20" y="150" width="860" height="120" rx="6" fill="#F4F8FB" stroke="#DCE3E9"/>
+    <rect x="20" y="290" width="860" height="120" rx="6" fill="#F4F8FB" stroke="#DCE3E9"/>
+    <rect x="20" y="430" width="860" height="80"  rx="6" fill="#F4F8FB" stroke="#DCE3E9"/>
+    <text x="34" y="68" class="lyr">Usuários</text>
+    <text x="34" y="168" class="lyr">Frontend &amp; identidade</text>
+    <text x="34" y="308" class="lyr">Backend / API</text>
+    <text x="34" y="448" class="lyr">Dados &amp; integrações</text>
+
+    <!-- Users -->
+    <g transform="translate(40, 80)">
+      <rect width="170" height="45" rx="5" fill="#ffffff" stroke="#27AAE1" stroke-width="1.5"/>
+      <text x="14" y="20" class="b-title">Colaborador (Submitter)</text>
+      <text x="14" y="35" class="b-sub">Lança NF · Vê suas próprias</text>
+    </g>
+    <g transform="translate(230, 80)">
+      <rect width="170" height="45" rx="5" fill="#ffffff" stroke="#27AAE1" stroke-width="1.5"/>
+      <text x="14" y="20" class="b-title">Gestor / Diretor</text>
+      <text x="14" y="35" class="b-sub">Aprova ou rejeita</text>
+    </g>
+    <g transform="translate(420, 80)">
+      <rect width="170" height="45" rx="5" fill="#ffffff" stroke="#27AAE1" stroke-width="1.5"/>
+      <text x="14" y="20" class="b-title">Financeiro</text>
+      <text x="14" y="35" class="b-sub">Vê tudo · Dashboard · Exporta</text>
+    </g>
+    <g transform="translate(610, 80)">
+      <rect width="240" height="45" rx="5" fill="#ffffff" stroke="#27AAE1" stroke-width="1.5"/>
+      <text x="14" y="20" class="b-title">Admin / Presidência</text>
+      <text x="14" y="35" class="b-sub">Tudo + cadastros + auditoria</text>
+    </g>
+
+    <!-- Frontend layer -->
+    <g transform="translate(60, 185)">
+      <rect width="240" height="70" rx="6" fill="url(#topgrad)"/>
+      <text x="16" y="26" class="b-white">React 18 SPA (Vite)</text>
+      <text x="16" y="46" class="b-white-sm">Fluent UI v9 · Recharts · TanStack Q.</text>
+      <text x="16" y="62" class="b-white-sm">Hospedado em Azure Static Web Apps</text>
+    </g>
+    <g transform="translate(330, 185)">
+      <rect width="220" height="70" rx="6" fill="#ffffff" stroke="#1F4E79"/>
+      <text x="16" y="26" class="b-title">MSAL.js v3</text>
+      <text x="16" y="44" class="b-sub">Auth Code + PKCE</text>
+      <text x="16" y="60" class="b-sub">Tokens JWT</text>
+    </g>
+    <g transform="translate(580, 185)">
+      <rect width="270" height="70" rx="6" fill="#0078D4"/>
+      <text x="16" y="26" class="b-white">Microsoft Entra ID</text>
+      <text x="16" y="44" class="b-white-sm">SSO · MFA · Grupos de segurança</text>
+      <text x="16" y="60" class="b-white-sm">PRONEP-NF-Submitter/Gestor/Fin/Admin</text>
+    </g>
+
+    <!-- Backend layer -->
+    <g transform="translate(60, 320)">
+      <rect width="220" height="80" rx="6" fill="url(#topgrad)"/>
+      <text x="16" y="26" class="b-white">Azure Functions (.NET 8)</text>
+      <text x="16" y="44" class="b-white-sm">API REST · MediatR · FluentValidation</text>
+      <text x="16" y="60" class="b-white-sm">Microsoft.Graph SDK</text>
+      <text x="16" y="74" class="b-white-sm">PdfSharpCore (watermark)</text>
+    </g>
+    <g transform="translate(310, 320)">
+      <rect width="200" height="80" rx="6" fill="#ffffff" stroke="#1F4E79"/>
+      <text x="16" y="26" class="b-title">Validações</text>
+      <text x="16" y="44" class="b-sub">Hash SHA-256</text>
+      <text x="16" y="58" class="b-sub">Chave NFS-e (regex)</text>
+      <text x="16" y="72" class="b-sub">D+5 · 6MB · CNPJ</text>
+    </g>
+    <g transform="translate(540, 320)">
+      <rect width="200" height="80" rx="6" fill="#ffffff" stroke="#1F4E79"/>
+      <text x="16" y="26" class="b-title">Watermark</text>
+      <text x="16" y="44" class="b-sub">PdfSharpCore</text>
+      <text x="16" y="58" class="b-sub">Texto diagonal</text>
+      <text x="16" y="72" class="b-sub">"APROVADO {data} · Por {Nome}"</text>
+    </g>
+    <g transform="translate(770, 320)">
+      <rect width="80" height="80" rx="6" fill="#7B61C6"/>
+      <text x="10" y="30" class="b-white">App</text>
+      <text x="10" y="48" class="b-white">Insights</text>
+      <text x="10" y="68" class="b-white-sm">Telemetria</text>
+    </g>
+
+    <!-- Data layer -->
+    <g transform="translate(60, 458)">
+      <rect width="240" height="42" rx="6" fill="#107C10"/>
+      <text x="16" y="22" class="b-white">SharePoint Online (Graph API)</text>
+      <text x="16" y="36" class="b-white-sm">Pastas: Pendentes / Aprovadas / Rejeitadas</text>
+    </g>
+    <g transform="translate(320, 458)">
+      <rect width="200" height="42" rx="6" fill="#107C10"/>
+      <text x="16" y="22" class="b-white">Listas SharePoint</text>
+      <text x="16" y="36" class="b-white-sm">Fornecedores · NotasFiscais · Diretorias</text>
+    </g>
+    <g transform="translate(540, 458)">
+      <rect width="140" height="42" rx="6" fill="#5059C9"/>
+      <text x="16" y="22" class="b-white">MS Teams</text>
+      <text x="16" y="36" class="b-white-sm">Adaptive Cards</text>
+    </g>
+    <g transform="translate(700, 458)">
+      <rect width="150" height="42" rx="6" fill="#0078D4"/>
+      <text x="16" y="22" class="b-white">Graph: Mail.Send</text>
+      <text x="16" y="36" class="b-white-sm">E-mail transacional</text>
+    </g>
+
+    <!-- Arrows -->
+    <line x1="125" y1="125" x2="160" y2="180" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="315" y1="125" x2="220" y2="180" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="505" y1="125" x2="240" y2="180" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="730" y1="125" x2="280" y2="180" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="180" y1="255" x2="170" y2="315" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="440" y1="220" x2="440" y2="180" stroke="#1F4E79" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+    <line x1="715" y1="220" x2="555" y2="220" stroke="#1F4E79" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <line x1="170" y1="400" x2="170" y2="455" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="410" y1="400" x2="410" y2="455" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="610" y1="400" x2="610" y2="455" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="770" y1="400" x2="775" y2="455" stroke="#1F4E79" stroke-width="1.5" marker-end="url(#ah)"/>
+
+    <!-- Footnote -->
+    <text x="22" y="528" font-size="11" fill="#647883" font-family="Segoe UI">Tenant Microsoft Pronep · Zero dado em terceiros · Managed Identity + Key Vault para acesso ao Graph</text>
+  </svg>`;
+}
+
+// ============== ACTIONS ==============
+const HOJE = new Date('2026-05-22T00:00:00');  // Data "atual" do protótipo
+
+function onFornChange() {
+  const idx = document.getElementById('frm-forn').value;
+  if (idx === '') return;
+  const f = fornecedores[parseInt(idx)];
+  document.getElementById('frm-categoria').value = f.categoria;
+  document.getElementById('frm-unidade').value = f.unidade;
+  document.getElementById('frm-diretoria').value = f.diretoria;
+}
+
+function diasEntre(d1, d2) {
+  return Math.round((d2 - d1) / (1000*60*60*24));
+}
+
+function onVencChange() {
+  const vencEl = document.getElementById('frm-venc');
+  const info = document.getElementById('frm-venc-info');
+  const blocoForaPrazo = document.getElementById('frm-venc-fora-prazo');
+  if (!vencEl.value) {
+    vencEl.style.color = '';
+    vencEl.style.borderColor = '';
+    info.innerHTML = '';
+    blocoForaPrazo.style.display = 'none';
+    return;
+  }
+  const venc = new Date(vencEl.value + 'T00:00:00');
+  const dias = diasEntre(HOJE, venc);
+
+  if (dias < 5) {
+    vencEl.style.color = 'var(--vermelho)';
+    vencEl.style.borderColor = 'var(--vermelho)';
+    vencEl.style.fontWeight = '600';
+    info.innerHTML = `<span style="color:var(--vermelho);font-weight:600">⚠ ${dias < 0 ? 'Data passada' : 'Apenas '+dias+' dia(s) até o vencimento'} — fora do prazo padrão (D+5)</span>`;
+    blocoForaPrazo.style.display = 'block';
+  } else {
+    vencEl.style.color = 'var(--verde)';
+    vencEl.style.borderColor = 'var(--cinza-borda)';
+    vencEl.style.fontWeight = '500';
+    info.innerHTML = `<span style="color:var(--verde);font-weight:500">✓ ${dias} dia(s) até o vencimento — dentro do prazo</span>`;
+    blocoForaPrazo.style.display = 'none';
+    // limpa rádios
+    document.querySelectorAll('input[name="frm-negociou"]').forEach(r => r.checked = false);
+    document.getElementById('frm-negociou-detalhe').style.display = 'none';
+  }
+}
+
+function onNegociouChange() {
+  const sim = document.querySelector('input[name="frm-negociou"][value="sim"]');
+  const detalhe = document.getElementById('frm-negociou-detalhe');
+  if (sim && sim.checked) {
+    detalhe.style.display = 'block';
+  } else {
+    detalhe.style.display = 'none';
+  }
+}
+
+let fakeFile = null;
+function fakeFileUpload() {
+  fakeFile = { name: `NFSe_${Math.floor(Math.random()*9000+1000)}.pdf`, size: Math.floor(Math.random()*5+1)*1024*1024 };
+  document.getElementById('file-drop').classList.add('has-file');
+  document.getElementById('fd-main').textContent = '✓ ' + fakeFile.name;
+  document.getElementById('fd-sub').textContent = (fakeFile.size/1024/1024).toFixed(2) + ' MB · clique para trocar';
+}
+
+function submitNF() {
+  const msgs = document.getElementById('form-msgs');
+  msgs.innerHTML = '';
+  const fornIdx = document.getElementById('frm-forn').value;
+  const numero = document.getElementById('frm-numero').value;
+  const valor = parseFloat(document.getElementById('frm-valor').value);
+  const venc = document.getElementById('frm-venc').value;
+
+  if (!fornIdx || !numero || !valor || !venc || !fakeFile) {
+    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">✕</span><div><b>Campos obrigatórios faltando.</b> Verifique fornecedor, número, valor, vencimento e o anexo PDF.</div></div>';
+    return;
+  }
+
+  // Tamanho
+  if (fakeFile.size > 6 * 1024 * 1024) {
+    msgs.innerHTML = '<div class="alert alert-error"><span class="ico">✕</span><div><b>Arquivo maior que 6 MB.</b> O sistema rejeitou o upload. Comprima o PDF e tente novamente.</div></div>';
+    return;
+  }
+
+  // Vencimento — fora de D+5 só é permitido SE houve negociação com Financeiro
+  const dVenc = new Date(venc + 'T00:00:00');
+  const diff = diasEntre(HOJE, dVenc);
+  if (diff < 5) {
+    const negociouRadio = document.querySelector('input[name="frm-negociou"]:checked');
+    if (!negociouRadio) {
+      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">✕</span><div><b>Vencimento fora do prazo (D+5).</b> Para prosseguir, responda se a NF já foi negociada com o Financeiro.</div></div>`;
+      return;
+    }
+    if (negociouRadio.value === 'nao') {
+      const membros = gruposEntraID['PRONEP-Financeiro-Gestao'].membros;
+      const sugestao = membros.map(m => `<li>${m.nome} (${m.cargo}) — <span class="mono">${m.email}</span></li>`).join('');
+      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">✕</span><div><b>Lançamento bloqueado.</b> Vencimento de ${diff} dia(s) está fora do prazo D+5 e a NF ainda não foi negociada com o Financeiro. Procure um gestor do Financeiro antes de lançar:<ul style="margin:8px 0 0 16px;padding:0">${sugestao}</ul></div></div>`;
+      return;
+    }
+    // Negociou == sim: exige a seleção do gestor no dropdown
+    var negociouComEmail = document.getElementById('frm-negociou-com').value;
+    if (!negociouComEmail) {
+      msgs.innerHTML = `<div class="alert alert-error"><span class="ico">✕</span><div><b>Selecione o gestor do Financeiro com quem você negociou.</b> A lista é puxada do grupo <span class="mono">PRONEP-Financeiro-Gestao</span> do Entra ID.</div></div>`;
+      return;
+    }
+    var negociouComNome = gruposEntraID['PRONEP-Financeiro-Gestao'].membros.find(m => m.email === negociouComEmail).nome;
+  }
+
+  // Duplicidade — simula match com NF-2026-0451
+  const forn = fornecedores[parseInt(fornIdx)];
+  if (forn.cnpj === '32.554.883/0001-78' && numero === '2545') {
+    msgs.innerHTML = `<div class="alert alert-error"><span class="ico">⚠</span><div><b>Duplicidade detectada.</b> Esta NF já foi lançada por <b>Carla Souza</b> em <b>21/05/2026 09:34</b> (NF-2026-0451) e está atualmente <b>PENDENTE</b> na diretoria Técnica. O lançamento foi bloqueado e o arquivo NÃO foi gravado no SharePoint.<br><br><b>Camada que pegou:</b> tripla CNPJ + Número + Série.</div></div>`;
+    return;
+  }
+
+  // Sucesso — gravar a NF na lista de pendentes (para o Submitter conseguir acompanhar)
+  const novoId = 'NF-2026-' + String(Math.floor(Math.random()*900+500));
+  const agora = '2026-05-22 ' + new Date().toTimeString().substring(0,8);
+  const fornIdxInt = parseInt(fornIdx);
+  notas.unshift({
+    id: novoId,
+    numero: numero,
+    serie: document.getElementById('frm-serie').value || '1',
+    fornecedorIdx: fornIdxInt,
+    valor: valor,
+    vencimento: venc,
+    emissao: '2026-05-22',
+    unidade: forn.unidade,
+    diretoria: forn.diretoria,
+    status: 'pendente',
+    foraPrazo: diff < 5,
+    negociouCom: diff < 5 ? negociouComNome : null,
+    negociouComEmail: diff < 5 ? negociouComEmail : null,
+    lancadoPor: currentPersona.name,
+    lancadoEm: agora,
+    aprovadoPor: null,
+    aprovadoEm: null,
+    hash: Math.random().toString(36).substring(2,8) + '...' + Math.random().toString(36).substring(2,6)
+  });
+
+  toast(`NF ${novoId} enviada — gestor da ${forn.diretoria}/${forn.unidade} notificado`, 'success');
+
+  // Modal — Enviar outra NF? Sim / Não
+  const extraInfo = diff < 5
+    ? `<div style="margin-top:10px;padding:10px;background:var(--amarelo-bg);border-left:3px solid var(--amarelo);border-radius:4px;font-size:13px;color:#6D4C00"><b>⚠ Vencimento fora do prazo</b> — negociação confirmada com <b>${negociouComNome}</b> (<span class="mono">${negociouComEmail}</span>). Esta pessoa será copiada na notificação ao gestor.</div>`
+    : '';
+
+  openModal(`
+    <div style="text-align:center;padding:8px 0 4px">
+      <div style="width:64px;height:64px;border-radius:50%;background:var(--verde-bg);color:var(--verde);display:inline-grid;place-items:center;font-size:34px;margin-bottom:14px">✓</div>
+      <h3 style="margin-bottom:6px">Nota enviada com sucesso!</h3>
+      <div class="muted" style="font-size:14px;margin-bottom:6px">Identificador: <b style="color:var(--azul-escuro);font-family:monospace">${novoId}</b></div>
+      <div class="small muted">Arquivo salvo em <span class="mono">SharePoint/Notas Pendentes/${forn.unidade}/${forn.diretoria}/</span></div>
+      <div class="small muted" style="margin-top:4px">O gestor responsável já recebeu e-mail e card no Teams.</div>
+      ${extraInfo}
+    </div>
+    <hr>
+    <div style="text-align:center">
+      <div style="font-weight:600;color:var(--azul-escuro);font-size:15px;margin-bottom:14px">Deseja enviar outra NF?</div>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button class="btn btn-secondary" onclick="afterSubmitNF(false)" style="min-width:140px">Não — ir para Fila</button>
+        <button class="btn btn-primary" onclick="afterSubmitNF(true)" style="min-width:140px">Sim — nova NF</button>
+      </div>
+    </div>
+  `);
+}
+
+function afterSubmitNF(maisUma) {
+  closeModal();
+  if (maisUma) {
+    // Limpa form e fica na mesma tela
+    showView('nova-nf');
+  } else {
+    // Vai para Fila de Aprovação para o Submitter acompanhar
+    showView('fila-aprovacao');
+  }
+}
+
+function openNFDetail(id) {
+  const n = notas.find(x => x.id === id);
+  if (!n) return;
+  const f = fornecedorOf(n);
+  openModal(`
+    <span class="close-x" onclick="closeModal()">×</span>
+    <h3>${n.id} · ${f.razao}</h3>
+    <table class="data" style="margin-bottom:14px">
+      <tr><th>Número/Série</th><td>${n.numero} / ${n.serie}</td></tr>
+      <tr><th>CNPJ</th><td class="mono">${f.cnpj}</td></tr>
+      <tr><th>Unidade · Diretoria</th><td><span class="tag tag-${n.unidade.toLowerCase()}">${n.unidade}</span> · ${n.diretoria}</td></tr>
+      <tr><th>Vencimento</th><td>${fmtDate(n.vencimento)}</td></tr>
+      <tr><th>Valor</th><td><b>${fmtBRL(n.valor)}</b></td></tr>
+      <tr><th>Status</th><td>${statusPill(n.status)}</td></tr>
+      <tr><th>Lançado por</th><td>${n.lancadoPor} em ${n.lancadoEm}</td></tr>
+      <tr><th>Hash SHA-256</th><td class="mono small">${n.hash}</td></tr>
+    </table>
+    <div class="modal-pdf-preview">
+      [ Preview do PDF da NF — em produção renderizado via iframe do Graph API ]
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
+      <button class="btn btn-danger" onclick="closeModal();confirmReject('${id}')">✕ Rejeitar</button>
+      <button class="btn btn-success" onclick="closeModal();confirmApprove('${id}')">✓ Aprovar</button>
+    </div>
+  `);
+}
+
+function confirmApprove(id) {
+  const n = notas.find(x => x.id === id);
+  if (!n) return;
+  const now = new Date('2026-05-22T15:42:00');
+  const stamp = now.toLocaleDateString('pt-BR') + ' ' + now.toLocaleTimeString('pt-BR', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const emailPrefix = currentPersona.name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ /g,'.');
+  openModal(`
+    <span class="close-x" onclick="closeModal()">×</span>
+    <h3>Aprovação da ${id}</h3>
+    <p>Ao confirmar, o backend aplicará a marca d'água abaixo (3 linhas, azul, transparência 70% — idêntica ao PA atual via PDF Blocks) e moverá o arquivo para
+    <span class="mono">SharePoint/Notas Aprovadas/${n.unidade}/${now.toISOString().substring(0,10)}/</span>.</p>
+    <div class="modal-pdf-preview" style="min-height:280px">
+      [ Preview do PDF da NF ]
+      <div class="watermark-overlay">
+        <div>
+          <div class="l1">APROVADO</div>
+          <div>${stamp}</div>
+          <div>Por: ${emailPrefix}</div>
+        </div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-success" onclick="doApprove('${id}')">✓ Confirmar aprovação</button>
+    </div>
+  `);
+}
+
+function doApprove(id) {
+  const n = notas.find(x => x.id === id);
+  if (!n) return;
+  n.status = 'aprovada';
+  n.aprovadoPor = currentPersona.name;
+  n.aprovadoEm = '2026-05-22 15:42';
+  closeModal();
+  toast(`${id} aprovada · PDF movido para SharePoint`, 'success');
+  showView(currentView);
+}
+
+function confirmReject(id) {
+  openModal(`
+    <span class="close-x" onclick="closeModal()">×</span>
+    <h3>Rejeitar ${id}</h3>
+    <div class="form-row" style="margin-bottom:12px">
+      <label>Motivo da rejeição *</label>
+      <select id="rej-motivo">
+        <option>Vencimento errado (anterior a D+5)</option>
+        <option>Valor errado</option>
+        <option>NF duplicada (não detectada automaticamente)</option>
+        <option>Documento ilegível</option>
+        <option>Outros</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Observação (opcional)</label>
+      <textarea rows="3" placeholder="Detalhe que ajudará quem lançou a corrigir e reenviar…"></textarea>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-danger" onclick="doReject('${id}')">✕ Confirmar rejeição</button>
+    </div>
+  `);
+}
+
+function doReject(id) {
+  const n = notas.find(x => x.id === id);
+  if (!n) return;
+  n.status = 'rejeitada';
+  n.motivo = document.getElementById('rej-motivo').value;
+  closeModal();
+  toast(`${id} rejeitada · ${n.lancadoPor} foi notificado por e-mail + Teams`, 'error');
+  showView(currentView);
+}
+
+function openApprovedPdf(id) {
+  const n = notas.find(x => x.id === id);
+  const stamp = n.aprovadoEm + '';
+  const emailPrefix = n.aprovadoPor.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/ /g,'.');
+  openModal(`
+    <span class="close-x" onclick="closeModal()">×</span>
+    <h3>${n.id} — Aprovada</h3>
+    <p class="muted small">PDF arquivado em <span class="mono">SharePoint/Notas Aprovadas/${n.unidade}/${n.aprovadoEm.substring(0,10).replace(' ','')}/</span></p>
+    <div class="modal-pdf-preview" style="min-height:280px">
+      [ PDF aprovado com watermark ]
+      <div class="watermark-overlay">
+        <div>
+          <div class="l1">APROVADO</div>
+          <div>${stamp}</div>
+          <div>Por: ${emailPrefix}</div>
+        </div>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
+      <button class="btn btn-primary" onclick="toast('Download iniciaria via Graph API')">⤓ Baixar PDF</button>
+    </div>
+  `);
+}
+
+function exportXlsxStub() {
+  toast('Exportando para Excel… (em produção: ClosedXML no backend gera o .xlsx)', 'success');
+}
+</script>
+</body>
+</html>
