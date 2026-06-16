@@ -124,29 +124,45 @@ module.exports = async function (context, req) {
       }
     }
 
-    // 5. Acesso ao arquivo: redireciona pra webUrl SP (mais simples e seguro)
-    //    Se quiser stream do PDF inline, descomente o bloco "stream" abaixo.
-    if (caminhoSP) {
-      context.res = {
-        status: 302,
-        headers: { Location: caminhoSP }
-      };
-      return;
-    }
-
-    // Fallback: tenta resolver via DriveItemId no site de Contratos
+    // 5. Serve o arquivo PELO SISTEMA (identidade do app, que tem Sites.Read.All), pra
+    //    NAO depender da permissao do usuario no SharePoint — o acesso e 100% controlado
+    //    pelo Controle de Acessos. Sem driveItemId (sync antigo), cai no redirect (legado).
     if (!driveItemId) {
-      context.res = { status: 404, body: { error: 'Sem CaminhoSharepoint nem DriveItemId no registro' } };
+      if (caminhoSP) { context.res = { status: 302, headers: { Location: caminhoSP } }; return; }
+      context.res = { status: 404, body: { error: 'Registro sem DriveItemId nem CaminhoSharepoint' } };
       return;
     }
 
     const { driveId } = await resolveContratosSite(client);
-    const driveItem = await client.api('/drives/' + driveId + '/items/' + driveItemId).get();
-    if (driveItem.webUrl) {
-      context.res = { status: 302, headers: { Location: driveItem.webUrl } };
+    const meta = await client.api('/drives/' + driveId + '/items/' + driveItemId).get();
+    const dlUrl = meta && meta['@microsoft.graph.downloadUrl'];
+    const nomeArq = (meta && meta.name) || f.NomeArquivo || 'contrato';
+    const mime = (meta && meta.file && meta.file.mimeType) || 'application/octet-stream';
+
+    if (!dlUrl) {
+      // Sem downloadUrl: ultimo fallback no webUrl (requer permissao SP).
+      if (meta && meta.webUrl) { context.res = { status: 302, headers: { Location: meta.webUrl } }; return; }
+      context.res = { status: 404, body: { error: 'Nao foi possivel obter o conteudo do arquivo' } };
       return;
     }
-    context.res = { status: 404, body: { error: 'Nao foi possivel resolver URL do arquivo' } };
+
+    require('isomorphic-fetch');
+    const dlResp = await fetch(dlUrl);
+    if (!dlResp.ok) {
+      context.res = { status: 502, body: { error: 'Falha ao baixar o arquivo do SharePoint (HTTP ' + dlResp.status + ')' } };
+      return;
+    }
+    const buf = Buffer.from(await dlResp.arrayBuffer());
+    context.res = {
+      status: 200,
+      headers: {
+        'Content-Type': mime,
+        'Content-Disposition': 'inline; filename="' + encodeURIComponent(nomeArq) + '"',
+        'Cache-Control': 'private, no-store'
+      },
+      isRaw: true,
+      body: buf
+    };
   } catch (err) {
     context.log && context.log.error && context.log.error('AbrirContrato error:', err);
     context.res = {

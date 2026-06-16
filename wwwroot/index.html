@@ -4658,9 +4658,64 @@ function renderContratosView() {
     </div>
 
     <div id="contratos-arvore">
-      ${renderArvoreContratos(arvore)}
+      ${renderArvoreContratosV2(arvore)}
     </div>
   `;
+}
+
+// ===== Arvore de contratos ESPELHANDO o SharePoint (aninhada por subpasta real) =====
+// Usa o caminho salvo (pathSP) pra reconstruir a hierarquia: Diretoria -> Unidade ->
+// Prestador -> VIGENTE/HISTORICO -> arquivos. Cada contrato dentro da sua pasta.
+function _ctNorm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]/g, ''); }
+function _ctSubpastas(c) {
+  const ROOTN = 'contratosedocumentosprestadores';
+  let segs = String(c.pathSP || '').split('/').filter(Boolean);
+  const i = segs.findIndex(function (s) { return _ctNorm(s) === ROOTN; });
+  if (i >= 0) segs = segs.slice(i + 1);
+  if (segs.length) segs = segs.slice(0, -1); // remove o nome do arquivo
+  if (segs.length) segs = segs.slice(1);     // remove a diretoria-raw (o topo ja e a diretoria)
+  return segs;
+}
+function _ctContar(node) { let n = node.contratos.length; for (const k in node.filhos) n += _ctContar(node.filhos[k]); return n; }
+function _ctRenderPasta(node, idPath) {
+  const keys = Object.keys(node.filhos).sort(function (a, b) { return a.localeCompare(b, 'pt'); });
+  let html = '';
+  for (const k of keys) {
+    const ch = node.filhos[k];
+    const key = idPath + '|' + k;
+    const id = 'ctp-' + key.replace(/[^A-Za-z0-9|]/g, '_');
+    html += '<details id="' + id + '" data-det-key="' + escAttr(key) + '" style="margin-top:6px">' +
+      '<summary style="padding:6px 10px;cursor:pointer;font-weight:500;color:#374151;background:#F1F5F9;border-radius:4px">' +
+      iconePasta('#3B82F6') + ' ' + escHtml(k) + ' <span class="small muted">(' + _ctContar(ch) + ')</span></summary>' +
+      '<div style="padding:6px 6px 6px 14px">' + _ctRenderPasta(ch, key) + '</div>' +
+    '</details>';
+  }
+  if (node.contratos.length) {
+    html += '<div style="padding:6px 0;display:flex;flex-direction:column;gap:6px">' +
+      node.contratos.map(function (c) { return renderCardContrato(c); }).join('') + '</div>';
+  }
+  return html;
+}
+function renderArvoreContratosV2(arvore) {
+  if (!arvore || !arvore.length) {
+    return '<div class="card" style="text-align:center;padding:30px"><div class="muted">Nenhum contrato encontrado com esses filtros.</div></div>';
+  }
+  return arvore.map(function (dir) {
+    const todos = [];
+    (dir.unidades || []).forEach(function (u) { (u.fornecedores || []).forEach(function (fr) { (fr.contratos || []).forEach(function (c) { todos.push(c); }); }); });
+    const root = { nome: dir.diretoria, contratos: [], filhos: {} };
+    todos.forEach(function (c) {
+      let node = root;
+      _ctSubpastas(c).forEach(function (seg) { if (!node.filhos[seg]) node.filhos[seg] = { nome: seg, contratos: [], filhos: {} }; node = node.filhos[seg]; });
+      node.contratos.push(c);
+    });
+    const idDir = 'ctp-' + String(dir.diretoria).replace(/[^A-Za-z0-9]/g, '_');
+    return '<details id="' + idDir + '" data-det-key="' + escAttr(dir.diretoria) + '" style="background:#fff;border:1px solid var(--cinza-borda);border-radius:6px;margin-bottom:10px">' +
+      '<summary style="padding:12px 14px;cursor:pointer;font-weight:600;color:var(--azul-escuro);background:#F8FAFC">' +
+      iconePasta('#3B82F6') + ' ' + escHtml(dir.diretoria) + ' <span class="small muted">(' + (dir.total || todos.length) + ')</span></summary>' +
+      '<div style="padding:8px 14px 14px">' + _ctRenderPasta(root, dir.diretoria) + '</div>' +
+    '</details>';
+  }).join('');
 }
 
 function renderArvoreContratos(arvore) {
