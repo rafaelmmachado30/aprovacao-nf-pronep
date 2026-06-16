@@ -4654,6 +4654,7 @@ function renderContratosView() {
       <div style="display:flex;gap:6px">
         <button class="btn btn-secondary" onclick="abrirSincronizarContratos()">Sincronizar pasta</button>
         <button class="btn btn-primary" onclick="abrirSincronizarTudo()" title="Varre as 10 diretorias da Pronep em sequencia">⚡ Sincronizar TUDO</button>
+        ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="limparDuplicatasContratos()" title="Remove contratos duplicados (mesmo arquivo repetido), mantendo 1 de cada">🧹 Limpar duplicatas</button>' : ''}
       </div>
     </div>
 
@@ -4716,6 +4717,61 @@ function renderArvoreContratosV2(arvore) {
       '<div style="padding:8px 14px 14px">' + _ctRenderPasta(root, dir.diretoria) + '</div>' +
     '</details>';
   }).join('');
+}
+
+// Limpa contratos duplicados (admin) — dry-run + loop em lotes com barra de progresso.
+async function limparDuplicatasContratos() {
+  var dry;
+  try {
+    const rr = await fetch('/api/LimparContratosDuplicados', { credentials: 'include' });
+    dry = await rr.json();
+    if (!rr.ok || !dry.ok) { toast('Falha ao verificar duplicatas: ' + (dry && dry.error || ('HTTP ' + rr.status)), 'error'); return; }
+  } catch (e) { toast('Erro de rede: ' + (e.message || e), 'error'); return; }
+
+  if (!dry.duplicatasIdentificadas) { toast('Nenhuma duplicata encontrada. ✓', 'success'); return; }
+
+  const ok = await confirmarAcao({
+    titulo: 'Limpar contratos duplicados?',
+    mensagem: 'Encontrei <b>' + dry.duplicatasIdentificadas + '</b> contratos duplicados (de ' + dry.totalItens + ' no total).\n\n' +
+      'Vou remover os repetidos, mantendo <b>1 de cada</b> arquivo (o mais recente, preservando edições). Isso não pode ser desfeito.',
+    tipo: 'danger', confirmLabel: 'Sim, limpar', cancelLabel: 'Cancelar'
+  });
+  if (!ok) return;
+
+  const total = dry.duplicatasIdentificadas;
+  openModal(
+    '<div style="text-align:center;padding:22px 14px">' +
+    '<div style="display:inline-block;width:46px;height:46px;border:5px solid #E5E7EB;border-top-color:#1F4E79;border-radius:50%;animation:spinLD .8s linear infinite;margin-bottom:14px"></div>' +
+    '<h3 style="margin:0 0 6px;color:#1F4E79;font-size:18px">Limpando duplicatas...</h3>' +
+    '<div style="height:10px;background:#E5E7EB;border-radius:5px;overflow:hidden;margin:14px 0 8px"><div id="ld-bar" style="height:100%;width:0%;background:#1F4E79;transition:width .3s"></div></div>' +
+    '<div id="ld-status" style="font-size:13px;color:#374151">Iniciando...</div>' +
+    '</div><style>@keyframes spinLD{to{transform:rotate(360deg)}}</style>'
+  );
+
+  let removidosAcum = 0;
+  let guarda = 0;
+  let erroFinal = null;
+  while (guarda++ < 200) {
+    let r;
+    try {
+      const resp = await fetch('/api/LimparContratosDuplicados?aplicar=true', { credentials: 'include' });
+      r = await resp.json();
+      if (!resp.ok || !r.ok) { erroFinal = (r && r.error) || ('HTTP ' + resp.status); break; }
+    } catch (e) { erroFinal = e.message || String(e); break; }
+    removidosAcum += (r.removidos || 0);
+    const pct = total > 0 ? Math.min(100, Math.round(removidosAcum / total * 100)) : 100;
+    const bar = document.getElementById('ld-bar'); if (bar) bar.style.width = pct + '%';
+    const st = document.getElementById('ld-status'); if (st) st.textContent = 'Removidos ' + removidosAcum + ' de ' + total + ' (faltam ' + Math.max(0, (r.restantes || 0)) + ')';
+    // Termina quando nao ha mais o que remover (ou o lote nao removeu nada — evita loop infinito)
+    if ((r.restantes || 0) <= 0 || (r.removidos || 0) === 0) break;
+  }
+
+  try { closeModal(); } catch (e) {}
+  if (erroFinal) { toast('Limpeza interrompida: ' + erroFinal + ' (removidos ' + removidosAcum + '). Tente de novo.', 'error'); }
+  else { toast('Limpeza concluída: ' + removidosAcum + ' duplicata(s) removida(s). ✓', 'success'); }
+  // Recarrega a lista de contratos pra refletir a limpeza
+  window._contratosCarregados = false;
+  if (typeof carregarContratosReais === 'function') carregarContratosReais();
 }
 
 function renderArvoreContratos(arvore) {
