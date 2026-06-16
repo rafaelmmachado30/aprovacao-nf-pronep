@@ -82,10 +82,12 @@ function folderParaRole(folder) {
   return null;
 }
 
-// Decide se um usuario (com seus roles/grupos) ve os contratos de uma pasta. Complementar.
-function podeVerContrato(folderDiretoria, userRoles, mapa) {
+// Decide se um usuario ve os contratos de uma pasta. Complementar + granular.
+// Tokens em config[pasta] podem ser ROLE (grupo inteiro) OU EMAIL (pessoa especifica).
+function podeVerContrato(folderDiretoria, userEmail, userRoles, mapa) {
   const folder = String(folderDiretoria || '').trim();
   if (!folder) return false;
+  const email = String(userEmail || '').toLowerCase().trim();
   const roles = (userRoles || []).map(function (r) { return String(r).toLowerCase(); });
   // Config explicita da pasta (chave case/acento-insensitive)?
   let liberadas = null;
@@ -93,10 +95,11 @@ function podeVerContrato(folderDiretoria, userRoles, mapa) {
     if (_norm(k) === _norm(folder) && Array.isArray(mapa[k])) { liberadas = mapa[k]; break; }
   }
   if (liberadas) {
-    const set = liberadas.map(function (r) { return String(r).toLowerCase(); });
-    return roles.some(function (r) { return set.indexOf(r) >= 0; });
+    const set = liberadas.map(function (t) { return String(t).toLowerCase().trim(); });
+    if (email && set.indexOf(email) >= 0) return true;       // pessoa especifica liberada
+    return roles.some(function (r) { return set.indexOf(r) >= 0; }); // grupo inteiro liberado
   }
-  // Fallback: grupo cujo nome = nome da pasta.
+  // Fallback (pasta sem config): grupo cujo nome = nome da pasta.
   const ownRole = folderParaRole(folder);
   return ownRole ? roles.indexOf(ownRole.toLowerCase()) >= 0 : false;
 }

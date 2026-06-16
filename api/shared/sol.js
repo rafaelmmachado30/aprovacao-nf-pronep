@@ -1093,7 +1093,7 @@ function _filtraContratosRBAC(ctx, lista) {
   const cr = (ctx && ctx.contratos) || {};
   if (cr.veTodos) return lista;
   const { podeVerContrato } = require('./acessoContratos');
-  return lista.filter(function (c) { return podeVerContrato(c.Diretoria, cr.roles || [], cr.mapa || {}); });
+  return lista.filter(function (c) { return podeVerContrato(c.Diretoria, cr.email || '', cr.roles || [], cr.mapa || {}); });
 }
 
 // Helper: calcula dias para vencer (negativo se ja venceu)
@@ -1420,7 +1420,7 @@ async function runSol(history, userMessage, user, opts) {
     try { mapaContr = await require('./acessoContratos').lerMapaAcessos(client, siteId, null); }
     catch (e) { mapaContr = {}; }
   }
-  ctx.contratos = { veTodos: veTodosContr, roles: rolesSol, mapa: mapaContr };
+  ctx.contratos = { veTodos: veTodosContr, email: (user && user.email) || '', roles: rolesSol, mapa: mapaContr };
   const systemPrompt = buildSystemPrompt(user, viewAtual, escopo, perfil);
 
   // Tenta Anthropic primeiro

@@ -4403,9 +4403,10 @@ const views = {
   }
 };
 
-// ===== Controle de Acessos a contratos (tela admin) — POR GRUPO =====
-// Cada PASTA de contrato libera acesso a um ou mais GRUPOS (diretorias do Entra). Quem for
-// MEMBRO de um grupo liberado ve a pasta — as pessoas vem da pertinencia ao grupo (Graph).
+// ===== Controle de Acessos a contratos (tela admin) — GRANULAR (pasta -> grupo -> pessoas) =====
+// Cada PASTA libera acesso a GRUPOS inteiros (token = role, auto-atualiza) e/ou PESSOAS
+// especificas (token = email). Tokens guardados em acessos[pasta]. Pasta sem config = grupo
+// de mesmo nome (fallback). Admin/Juridico veem tudo.
 function _caNorm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]/g, ''); }
 function caFolderRole(folder) {
   const f = _caNorm(folder);
@@ -4425,7 +4426,7 @@ async function carregarControleAcessos() {
     if (r.status === 403) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Acesso restrito a administradores.</div>'; return; }
     if (!r.ok) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Falha ao carregar Controle de Acessos (HTTP ' + r.status + ')</div>'; return; }
     const data = await r.json();
-    window._ca = { folders: data.folders || [], grupos: data.grupos || [], acessos: data.acessos || {}, folderSel: '', comSet: new Set() };
+    window._ca = { folders: data.folders || [], grupos: data.grupos || [], acessos: data.acessos || {}, folderSel: '', grupoSel: '', tokenSet: new Set(), membrosCache: {} };
     area.innerHTML = renderControleAcessosView();
   } catch (e) {
     area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>' + escHtml(e.message || 'erro') + '</div>';
@@ -4440,94 +4441,145 @@ function renderControleAcessosView() {
   ).join('');
   return '' +
     '<h2>Controle de Acessos a Contratos</h2>' +
-    '<div class="view-sub">Escolha uma <b>pasta de contrato</b> e defina quais <b>grupos (diretorias)</b> têm acesso a ela. ' +
-      'Quem for membro de um grupo liberado passa a ver os contratos da pasta — as pessoas vêm automaticamente da pertinência ao grupo. ' +
+    '<div class="view-sub">Escolha uma <b>pasta</b>, depois um <b>grupo</b>, e libere o <b>grupo inteiro</b> ou <b>pessoas específicas</b> dele. ' +
       'Pasta <b>não configurada</b> segue o padrão (só o grupo de mesmo nome). Admin e Jurídico veem tudo sempre.</div>' +
     '<div class="card">' +
       '<label style="font-weight:600;color:var(--azul-escuro)">Pasta de contrato</label><br>' +
       '<select id="ca-folder" onchange="caSelecionarPasta(this.value)" style="width:100%;max-width:420px;margin-top:6px;padding:8px;border:1px solid var(--cinza-borda);border-radius:6px">' + optsFolder + '</select>' +
-      '<div id="ca-listas" style="margin-top:18px">' + (ca.folderSel ? caRenderListas() : '<div class="small muted">Selecione uma pasta acima para definir quais grupos têm acesso.</div>') + '</div>' +
+      '<div id="ca-corpo" style="margin-top:18px">' + (ca.folderSel ? caRenderCorpo() : '<div class="small muted">Selecione uma pasta para começar.</div>') + '</div>' +
     '</div>';
 }
 
-function caRenderListas() {
+function caRenderResumo() {
+  const ca = window._ca;
+  const toks = Array.from(ca.tokenSet || []);
+  const gruposInt = toks.filter(function (t) { return t.indexOf('@') < 0; });
+  const pessoas = toks.filter(function (t) { return t.indexOf('@') >= 0; });
+  const partes = [];
+  gruposInt.forEach(function (r) { partes.push('grupo <b>' + escHtml(caLabelDoRole(r)) + '</b> (inteiro)'); });
+  if (pessoas.length) partes.push('<b>' + pessoas.length + '</b> pessoa(s) específica(s)');
+  const ownRole = caFolderRole(ca.folderSel);
+  const padrao = ownRole ? ('padrão: grupo <b>' + escHtml(caLabelDoRole(ownRole)) + '</b>') : 'padrão: só Admin/Jurídico';
+  return '<div style="background:#F0FDF4;border:1px solid #A7F3D0;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px">' +
+    '<b>Acesso desta pasta:</b> ' + (partes.length ? partes.join(' · ') : '<span class="muted">nada configurado (' + padrao + ')</span>') + '</div>';
+}
+
+function caRenderCorpo() {
   const ca = window._ca;
   if (!ca || !ca.folderSel) return '';
-  const com = ca.comSet || new Set();
-  const grupos = ca.grupos || [];
-  const disp = grupos.filter(function (g) { return !com.has(String(g.role).toLowerCase()); });
-  const comArr = grupos.filter(function (g) { return com.has(String(g.role).toLowerCase()); });
-  function optList(arr) { return arr.map(function (g) { return '<option value="' + escAttr(g.role) + '">' + escHtml(g.label) + '</option>'; }).join(''); }
-  const semConfig = !(ca.acessos && Array.isArray(ca.acessos[ca.folderSel]));
-  const ownRole = caFolderRole(ca.folderSel);
-  const avisoPadrao = ownRole
-    ? 'Esta pasta ainda usa a regra padrão (só o grupo <b>' + escHtml(caLabelDoRole(ownRole)) + '</b> a vê). Já deixei esse grupo à direita — adicione outros para liberar mais. Salvar com a lista vazia volta ao padrão.'
-    : 'Esta pasta não tem grupo de mesmo nome, então por padrão só Admin/Jurídico a veem. Adicione os grupos que devem ter acesso e salve.';
-  return '' +
-    (semConfig ? '<div class="alert alert-info" style="margin-bottom:12px"><span class="ico">ℹ</span><div>' + avisoPadrao + '</div></div>' : '') +
-    '<div style="display:flex;gap:14px;align-items:stretch;flex-wrap:wrap">' +
-      '<div style="flex:1;min-width:240px">' +
-        '<div style="font-weight:600;font-size:13px;margin-bottom:4px">Grupos disponíveis (' + disp.length + ')</div>' +
-        '<select id="ca-disp" multiple size="12" style="width:100%;border:1px solid var(--cinza-borda);border-radius:6px;padding:4px;font-size:13px">' + optList(disp) + '</select>' +
-      '</div>' +
-      '<div style="display:flex;flex-direction:column;justify-content:center;gap:8px">' +
-        '<button class="btn btn-secondary" onclick="caMover(\'add\')" title="Liberar acesso">→</button>' +
-        '<button class="btn btn-secondary" onclick="caMover(\'rem\')" title="Remover acesso">←</button>' +
-      '</div>' +
-      '<div style="flex:1;min-width:240px">' +
-        '<div style="font-weight:600;font-size:13px;margin-bottom:4px;color:#065F46">Grupos com acesso (' + comArr.length + ')</div>' +
-        '<select id="ca-com" multiple size="12" style="width:100%;border:1px solid #A7F3D0;background:#F0FDF4;border-radius:6px;padding:4px;font-size:13px">' + optList(comArr) + '</select>' +
-      '</div>' +
-    '</div>' +
-    '<div style="margin-top:14px;display:flex;gap:10px;align-items:center">' +
+  const optsGrupo = ['<option value="">— escolha um grupo —</option>'].concat(
+    (ca.grupos || []).map(function (g) { return '<option value="' + escAttr(g.role) + '"' + (ca.grupoSel === g.role ? ' selected' : '') + '>' + escHtml(g.label) + '</option>'; })
+  ).join('');
+  return caRenderResumo() +
+    '<label style="font-weight:600;color:var(--azul-escuro)">Grupo</label><br>' +
+    '<select id="ca-grupo" onchange="caSelecionarGrupo(this.value)" style="width:100%;max-width:360px;margin-top:6px;padding:8px;border:1px solid var(--cinza-borda);border-radius:6px">' + optsGrupo + '</select>' +
+    '<div id="ca-grupo-painel" style="margin-top:14px">' + (ca.grupoSel ? caRenderGrupoPainel() : '<div class="small muted">Escolha um grupo para liberar o grupo inteiro ou pessoas dele.</div>') + '</div>' +
+    '<div style="margin-top:16px;display:flex;gap:10px;align-items:center">' +
       '<button class="btn btn-primary" onclick="caSalvar()">Salvar acessos desta pasta</button>' +
       '<span id="ca-msg" class="small muted"></span>' +
     '</div>';
 }
 
+function caRenderGrupoPainel() {
+  const ca = window._ca;
+  const role = ca.grupoSel;
+  if (!role) return '';
+  const inteiro = ca.tokenSet.has(String(role).toLowerCase());
+  let html = '<label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;margin-bottom:10px">' +
+    '<input type="checkbox" ' + (inteiro ? 'checked' : '') + ' onchange="caToggleInteiro(this.checked)"> Liberar o grupo INTEIRO (' + escHtml(caLabelDoRole(role)) + ') — atualiza automático quando a composição muda</label>';
+  if (inteiro) {
+    html += '<div class="small muted">Grupo inteiro liberado. Desmarque acima para escolher pessoas específicas.</div>';
+    return html;
+  }
+  const membros = ca.membrosCache[role] || [];
+  if (!membros.length) { html += '<div class="small muted">Nenhum integrante encontrado neste grupo.</div>'; return html; }
+  const disp = membros.filter(function (m) { return !ca.tokenSet.has(m.email); });
+  const com = membros.filter(function (m) { return ca.tokenSet.has(m.email); });
+  function opt(arr) { return arr.map(function (m) { return '<option value="' + escAttr(m.email) + '">' + escHtml(m.nome) + ' (' + escHtml(m.email) + ')</option>'; }).join(''); }
+  html += '<div style="display:flex;gap:14px;align-items:stretch;flex-wrap:wrap">' +
+    '<div style="flex:1;min-width:220px"><div style="font-weight:600;font-size:13px;margin-bottom:4px">Integrantes (' + disp.length + ')</div>' +
+      '<select id="ca-memb-disp" multiple size="10" style="width:100%;border:1px solid var(--cinza-borda);border-radius:6px;padding:4px;font-size:13px">' + opt(disp) + '</select></div>' +
+    '<div style="display:flex;flex-direction:column;justify-content:center;gap:8px">' +
+      '<button class="btn btn-secondary" onclick="caMoverMembro(\'add\')" title="Liberar">→</button>' +
+      '<button class="btn btn-secondary" onclick="caMoverMembro(\'rem\')" title="Remover">←</button></div>' +
+    '<div style="flex:1;min-width:220px"><div style="font-weight:600;font-size:13px;margin-bottom:4px;color:#065F46">Com acesso (' + com.length + ')</div>' +
+      '<select id="ca-memb-com" multiple size="10" style="width:100%;border:1px solid #A7F3D0;background:#F0FDF4;border-radius:6px;padding:4px;font-size:13px">' + opt(com) + '</select></div>' +
+  '</div>';
+  return html;
+}
+
+function caRefreshCorpo() { const c = document.getElementById('ca-corpo'); if (c) c.innerHTML = caRenderCorpo(); }
+
 function caSelecionarPasta(folder) {
   const ca = window._ca;
   if (!ca) return;
   ca.folderSel = folder || '';
-  if (!folder) { ca.comSet = new Set(); const el0 = document.getElementById('ca-listas'); if (el0) el0.innerHTML = '<div class="small muted">Selecione uma pasta acima para definir quais grupos têm acesso.</div>'; return; }
+  ca.grupoSel = '';
+  if (!folder) { ca.tokenSet = new Set(); const el0 = document.getElementById('ca-corpo'); if (el0) el0.innerHTML = '<div class="small muted">Selecione uma pasta para começar.</div>'; return; }
   const explicit = (ca.acessos && Array.isArray(ca.acessos[folder])) ? ca.acessos[folder] : null;
   if (explicit) {
-    ca.comSet = new Set(explicit.map(function (r) { return String(r).toLowerCase(); }));
+    ca.tokenSet = new Set(explicit.map(function (t) { return String(t).toLowerCase(); }));
   } else {
-    // Sem config: pre-seleciona o grupo de mesmo nome da pasta (padrao), se existir.
     const own = caFolderRole(folder);
-    ca.comSet = new Set(own ? [String(own).toLowerCase()] : []);
+    ca.tokenSet = new Set(own ? [String(own).toLowerCase()] : []);
   }
-  const el = document.getElementById('ca-listas');
-  if (el) el.innerHTML = caRenderListas();
+  caRefreshCorpo();
 }
 
-function caMover(acao) {
+async function caSelecionarGrupo(role) {
   const ca = window._ca;
-  if (!ca || !ca.folderSel) return;
-  const sel = document.getElementById(acao === 'add' ? 'ca-disp' : 'ca-com');
+  if (!ca) return;
+  ca.grupoSel = role || '';
+  if (!role) { const el0 = document.getElementById('ca-grupo-painel'); if (el0) el0.innerHTML = '<div class="small muted">Escolha um grupo.</div>'; return; }
+  if (!ca.membrosCache[role]) {
+    const painel = document.getElementById('ca-grupo-painel'); if (painel) painel.innerHTML = '<div class="small muted">Carregando integrantes...</div>';
+    try {
+      const r = await fetch('/api/ListarMembrosGrupo?role=' + encodeURIComponent(role), { credentials: 'include' });
+      const d = await r.json();
+      ca.membrosCache[role] = (r.ok && d.membros) ? d.membros : [];
+    } catch (e) { ca.membrosCache[role] = []; }
+  }
+  const el = document.getElementById('ca-grupo-painel'); if (el) el.innerHTML = caRenderGrupoPainel();
+}
+
+function caToggleInteiro(checked) {
+  const ca = window._ca;
+  const role = String(ca.grupoSel).toLowerCase();
+  if (!role) return;
+  if (checked) {
+    ca.tokenSet.add(role);
+    (ca.membrosCache[ca.grupoSel] || []).forEach(function (m) { ca.tokenSet.delete(m.email); }); // remove pessoas redundantes
+  } else {
+    ca.tokenSet.delete(role);
+  }
+  caRefreshCorpo();
+}
+
+function caMoverMembro(acao) {
+  const ca = window._ca;
+  if (!ca || !ca.grupoSel) return;
+  const sel = document.getElementById(acao === 'add' ? 'ca-memb-disp' : 'ca-memb-com');
   if (!sel) return;
-  const escolhidos = Array.from(sel.selectedOptions).map(function (o) { return String(o.value).toLowerCase(); });
-  if (acao === 'add') escolhidos.forEach(function (r) { ca.comSet.add(r); });
-  else escolhidos.forEach(function (r) { ca.comSet.delete(r); });
-  const el = document.getElementById('ca-listas');
-  if (el) el.innerHTML = caRenderListas();
+  const emails = Array.from(sel.selectedOptions).map(function (o) { return String(o.value).toLowerCase(); });
+  if (acao === 'add') emails.forEach(function (e) { ca.tokenSet.add(e); });
+  else emails.forEach(function (e) { ca.tokenSet.delete(e); });
+  caRefreshCorpo();
 }
 
 async function caSalvar() {
   const ca = window._ca;
   if (!ca || !ca.folderSel) return;
-  const roles = Array.from(ca.comSet);
+  const tokens = Array.from(ca.tokenSet);
   const msg = document.getElementById('ca-msg');
   if (msg) { msg.textContent = 'Salvando...'; msg.style.color = ''; }
   try {
-    const r = await fetch('/api/SalvarControleAcessos', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diretoria: ca.folderSel, diretorias: roles }) });
+    const r = await fetch('/api/SalvarControleAcessos', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ diretoria: ca.folderSel, diretorias: tokens }) });
     const data = await r.json().catch(function () { return {}; });
     if (r.ok) {
       ca.acessos = data.acessos || ca.acessos || {};
-      if (roles.length) ca.acessos[ca.folderSel] = roles; else delete ca.acessos[ca.folderSel];
+      if (tokens.length) ca.acessos[ca.folderSel] = tokens; else delete ca.acessos[ca.folderSel];
       if (msg) { msg.textContent = '✓ Salvo'; msg.style.color = 'var(--verde)'; }
-      const el = document.getElementById('ca-listas'); if (el) el.innerHTML = caRenderListas();
+      caRefreshCorpo();
     } else {
       if (msg) { msg.textContent = '✗ ' + (data.error || ('HTTP ' + r.status)); msg.style.color = 'var(--vermelho)'; }
     }

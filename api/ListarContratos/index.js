@@ -227,7 +227,7 @@ module.exports = async function (context, req) {
     if (!veTodosContratos) {
       // RBAC por grupo: ve a pasta se pertence a algum grupo liberado pra ela
       // (ou, sem config, ao grupo de mesmo nome da pasta).
-      filtrados = filtrados.filter(function(c){ return podeVerContrato(c.diretoria, allRoles, mapaAcessos); });
+      filtrados = filtrados.filter(function(c){ return podeVerContrato(c.diretoria, user.email, allRoles, mapaAcessos); });
       if (!filtrados.length) {
         context.res = {
           status: 200,

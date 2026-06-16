@@ -118,7 +118,7 @@ module.exports = async function (context, req) {
     // + fallback no grupo de mesmo nome da pasta).
     if (!veTodos) {
       const mapa = await lerMapaAcessos(client, siteId, null);
-      if (!podeVerContrato(diretoria, allRoles, mapa)) {
+      if (!podeVerContrato(diretoria, user.email, allRoles, mapa)) {
         context.res = { status: 403, body: { error: 'Voce nao tem acesso a esta pasta de contratos. Solicite liberacao ao Admin (Controle de Acessos).' } };
         return;
       }

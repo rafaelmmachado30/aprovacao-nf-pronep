@@ -56,6 +56,15 @@ function gruposContrato() {
     .sort(function (a, b) { return a.label.localeCompare(b.label); });
 }
 
+// role -> groupId do Entra (reverso de GROUP_TO_ROLE). null se nao houver.
+function roleParaGrupoId(role) {
+  const alvo = String(role || '').toLowerCase();
+  for (const gid of Object.keys(GROUP_TO_ROLE)) {
+    if (String(GROUP_TO_ROLE[gid]).toLowerCase() === alvo) return gid;
+  }
+  return null;
+}
+
 function formatGuid(guid) {
   if (!guid) return guid;
   const d = String(guid).replace(/-/g, '').toLowerCase();
@@ -127,4 +136,4 @@ async function getUserRoles(user) {
   }
 }
 
-module.exports = { getUserRoles, GROUP_TO_ROLE, ROLE_LABELS, gruposContrato };
+module.exports = { getUserRoles, GROUP_TO_ROLE, ROLE_LABELS, gruposContrato, roleParaGrupoId };
