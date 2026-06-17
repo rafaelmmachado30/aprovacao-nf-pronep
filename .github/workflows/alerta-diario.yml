@@ -80,3 +80,23 @@ jobs:
             echo "::error::Endpoint retornou HTTP $HTTP_CODE"
             exit 1
           fi
+
+      - name: Chamar /api/AlertaRecorrentes (só na manhã)
+        if: steps.detect.outputs.tipo == 'manha'
+        env:
+          SECRET: ${{ secrets.ALERTA_DIARIO_SECRET }}
+        run: |
+          URL="https://purple-forest-09588fe10.7.azurestaticapps.net/api/AlertaRecorrentes"
+          echo "Disparando $URL"
+          HTTP_CODE=$(curl -s -o /tmp/resp_rec.json -w "%{http_code}" \
+            -H "X-Alerta-Secret: $SECRET" \
+            -H "Accept: application/json" \
+            --max-time 290 \
+            "$URL")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/resp_rec.json | head -c 2000
+          echo ""
+          # Nao falha o workflow se as recorrentes derem erro — o alerta principal ja rodou.
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::warning::AlertaRecorrentes retornou HTTP $HTTP_CODE"
+          fi
