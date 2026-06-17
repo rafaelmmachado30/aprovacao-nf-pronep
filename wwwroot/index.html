@@ -7843,17 +7843,19 @@ function confirmApprove(id) {
       membros.map(function(m){
         return '<option value="' + m.email + '">' + m.nome + ' (' + (m.cargo || '') + ')</option>';
       }).join('');
+    // NAO usar class="alert" aqui: .alert e display:flex e jogaria os blocos lado a
+    // lado (layout desconfigurado). Container proprio, vertical.
     blocoAlinhamento =
-      '<div class="alert alert-warning" style="margin:14px 0;padding:12px;border-radius:6px;background:#FEF3C7;border-left:4px solid #F59E0B">' +
-      '  <div style="font-weight:600;color:#92400E;margin-bottom:8px">⚠ Vencimento em ' + diasParaVenc + ' dia(s) — fora do prazo D+5</div>' +
-      '  <div style="font-size:13px;color:#78350F;margin-bottom:10px">Compliance: voce alinhou esta aprovacao com o Financeiro?</div>' +
-      '  <div style="display:flex;gap:14px;margin-bottom:10px">' +
-      '    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px"><input type="radio" name="aprov-alinhou" value="sim" onchange="document.getElementById(\'aprov-gestor-row\').style.display=\'block\'">Sim, alinhei</label>' +
-      '    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px"><input type="radio" name="aprov-alinhou" value="nao" onchange="document.getElementById(\'aprov-gestor-row\').style.display=\'none\'">Não alinhei (vou registrar)</label>' +
+      '<div style="margin:14px 0;padding:14px 16px;border-radius:8px;background:#FEF3C7;border-left:4px solid #F59E0B">' +
+      '  <div style="font-weight:700;color:#92400E;margin-bottom:6px;font-size:14px">⚠ Vencimento em ' + diasParaVenc + ' dia(s) — fora do prazo D+5</div>' +
+      '  <div style="font-size:13px;color:#78350F;margin-bottom:12px">Compliance: você alinhou esta aprovação com o Financeiro?</div>' +
+      '  <div style="display:flex;flex-wrap:wrap;gap:10px 22px">' +
+      '    <label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:14px;color:#451A03"><input type="radio" name="aprov-alinhou" value="sim" onchange="document.getElementById(\'aprov-gestor-row\').style.display=\'block\'"> Sim, alinhei</label>' +
+      '    <label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-size:14px;color:#451A03"><input type="radio" name="aprov-alinhou" value="nao" onchange="document.getElementById(\'aprov-gestor-row\').style.display=\'none\'"> Não alinhei (vou registrar)</label>' +
       '  </div>' +
-      '  <div id="aprov-gestor-row" style="display:none">' +
-      '    <label style="display:block;font-size:12px;font-weight:600;color:#78350F;margin-bottom:4px">Com qual gestor financeiro?</label>' +
-      '    <select id="aprov-gestor-financeiro" style="width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:4px;font-size:14px;background:#fff">' + opcoesGestor + '</select>' +
+      '  <div id="aprov-gestor-row" style="display:none;margin-top:12px">' +
+      '    <label style="display:block;font-size:12px;font-weight:600;color:#78350F;margin-bottom:5px;text-transform:uppercase;letter-spacing:.03em">Com qual gestor financeiro?</label>' +
+      '    <select id="aprov-gestor-financeiro" style="width:100%;max-width:340px;padding:9px 12px;border:1px solid #D1D5DB;border-radius:6px;font-size:14px;background:#fff;color:#1f2937">' + opcoesGestor + '</select>' +
       '  </div>' +
       '</div>';
   }
