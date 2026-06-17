@@ -4421,11 +4421,15 @@ function _recStatusBadge(c) {
   return '<span style="display:inline-block;background:#FEF3C7;color:#92400E;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">Candidata</span>';
 }
 
-async function carregarRecorrentes() {
+async function carregarRecorrentes(diretoria) {
   var area = document.getElementById('content-area');
   if (!area) return;
+  if (typeof diretoria === 'string') window._recDiretoriaSel = diretoria;
+  var sel = window._recDiretoriaSel || '';
+  area.innerHTML = '<div class="card" style="text-align:center;padding:40px"><div style="font-size:16px;color:var(--azul-escuro)">Analisando contas recorrentes...</div></div>';
   try {
-    var r = await fetch('/api/ListarRecorrentes', { credentials: 'include' });
+    var qs = sel ? ('?diretoria=' + encodeURIComponent(sel)) : '';
+    var r = await fetch('/api/ListarRecorrentes' + qs, { credentials: 'include' });
     if (r.status === 403) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Acesso restrito a gestores e administradores.</div>'; return; }
     var data = await r.json();
     if (!r.ok) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Falha ao carregar (HTTP ' + r.status + '): ' + escHtml((data && data.error) || '') + '</div>'; return; }
@@ -4444,7 +4448,21 @@ function renderRecorrentesView() {
 
   var html = '';
   html += '<h2 style="margin:0 0 4px;color:var(--azul-escuro);font-size:22px">Contas Recorrentes</h2>';
-  html += '<div class="view-sub">A SAN varreu as NFs dos últimos ' + jan + ' meses e listou os fornecedores que apareceram. As prováveis recorrentes vêm marcadas como <b>Candidata</b>; as demais como <b>Sugestão</b> (histórico ainda curto). Confirme quais são contas recorrentes — sua decisão fica guardada para os próximos meses. <b>Escopo:</b> ' + escHtml(escopo) + '.</div>';
+  html += '<div class="view-sub">A SAN varreu as NFs dos últimos ' + jan + ' meses e listou os fornecedores que apareceram. As prováveis recorrentes vêm marcadas como <b>Candidata</b>; as demais como <b>Sugestão</b> (histórico ainda curto). Confirme quais são contas recorrentes — sua decisão fica guardada para os próximos meses.</div>';
+
+  // Seletor de diretoria (admin ve todas; gestor ve a(s) sua(s))
+  var dirs = data.diretoriasDisponiveis || [];
+  var selDir = window._recDiretoriaSel || '';
+  if (dirs.length) {
+    html += '<div style="margin:10px 0 16px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+      '<label style="font-size:13px;font-weight:600;color:var(--azul-escuro)">Diretoria:</label>' +
+      '<select onchange="carregarRecorrentes(this.value)" style="padding:7px 11px;border:1px solid var(--cinza-borda);border-radius:5px;font-size:13px;background:#fff">' +
+      '<option value=""' + (selDir === '' ? ' selected' : '') + '>Todas</option>' +
+      dirs.map(function (d) { return '<option value="' + escAttr(d) + '"' + (selDir === d ? ' selected' : '') + '>' + escHtml(d) + '</option>'; }).join('') +
+      '</select>' +
+      '<span class="small muted">' + contas.length + ' fornecedor(es) · escopo atual: ' + escHtml(escopo) + '</span>' +
+      '</div>';
+  }
 
   if (!data.listaDecisoesExiste) {
     html += '<div style="margin:14px 0;padding:14px 16px;border-radius:8px;background:#FEF3C7;border-left:4px solid #F59E0B">' +

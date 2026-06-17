@@ -162,10 +162,12 @@ module.exports = async function (context, req) {
 
     // Escopo de diretorias
     const qDiretoria = (req.query && req.query.diretoria) || '';
-    let scopeDiretorias = null; // null = todas (admin)
-    if (qDiretoria) scopeDiretorias = [qDiretoria];
-    else if (gestorLabels.length) scopeDiretorias = gestorLabels;
-    else scopeDiretorias = null; // admin sem gestor e sem filtro -> todas
+    let scopeDiretorias = null; // null = todas
+    if (qDiretoria && qDiretoria !== '__todas__') scopeDiretorias = [qDiretoria];
+    else if (qDiretoria === '__todas__') scopeDiretorias = null; // forca todas
+    else if (isAdmin) scopeDiretorias = null;                    // admin: default todas
+    else if (gestorLabels.length) scopeDiretorias = gestorLabels; // gestor: sua(s) diretoria(s)
+    else scopeDiretorias = null;
     const scopeNorm = scopeDiretorias ? scopeDiretorias.map(_norm) : null;
     diag.scope = { isAdmin, gestorLabels, scopeDiretorias };
 
@@ -194,9 +196,11 @@ module.exports = async function (context, req) {
 
     diag.step = 'agrupar';
     const grupos = {}; // chave(cnpj|diretoria|unidade) -> stats
+    const diretoriasSet = {}; // todas as diretorias vistas (pro seletor), antes do escopo
     for (const item of all) {
       const n = normalizeItem(item, invColMap);
       const diretoria = n.Diretoria || '';
+      if (diretoria) diretoriasSet[diretoria] = true;
       if (scopeNorm && scopeNorm.indexOf(_norm(diretoria)) < 0) continue;
       const cnpj = String(n.CNPJFornecedor || '').replace(/\D/g, '');
       if (!cnpj) continue;
@@ -298,6 +302,7 @@ module.exports = async function (context, req) {
       body: {
         ok: true,
         scope: { isAdmin, diretorias: scopeDiretorias },
+        diretoriasDisponiveis: Object.keys(diretoriasSet).sort(function (a, b) { return a.localeCompare(b); }),
         params: { janelaMeses: janelaMeses, minMeses: MIN_MESES },
         listaDecisoesExiste: !!decisoes.listId,
         total: contas.length,
