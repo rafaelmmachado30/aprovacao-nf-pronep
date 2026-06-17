@@ -1004,7 +1004,7 @@ const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
   gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','contratos','mapa-aprovadores','arquitetura'] },
   financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','controle-acessos','contas-recorrentes','auditoria','arquitetura','configuracoes'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','controle-acessos','contas-recorrentes','fechamento-mes','auditoria','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -1115,6 +1115,7 @@ const ICONS = {
   auditoria:    '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>',
   controleAcessos: '<svg viewBox="0 0 24 24"><path d="M12 2l7 3v6c0 4.5-3 8-7 11-4-3-7-6.5-7-11V5z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg>',
   recorrentes:  '<svg viewBox="0 0 24 24"><path d="M17 2.1l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 21.9l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>',
+  fechamento:   '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M9 15l2 2 4-4"/></svg>',
   arquitetura:  '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M9 14l-3 3M15 14l3 3M8 19h8"/></svg>',
   configuracoes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
 };
@@ -2051,6 +2052,7 @@ const menuItems = [
   { id: 'mapa-aprovadores',  label: 'Mapa de Aprovadores',        icon: ICONS.mapa },
   { id: 'controle-acessos',  label: 'Controle de Acessos',        icon: ICONS.controleAcessos },
   { id: 'contas-recorrentes',label: 'Contas Recorrentes',         icon: ICONS.recorrentes },
+  { id: 'fechamento-mes',    label: 'Fechamento do Mês',          icon: ICONS.fechamento },
   { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
   { id: 'arquitetura',       label: 'Arquitetura do Sistema',     icon: ICONS.arquitetura },
   { id: 'configuracoes',     label: 'Configurações',              icon: ICONS.configuracoes },
@@ -4406,6 +4408,10 @@ const views = {
   'contas-recorrentes': () => {
     setTimeout(carregarRecorrentes, 30);
     return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Analisando contas recorrentes...</div><div class="small muted">Varrendo o histórico de NFs dos últimos meses</div></div>';
+  },
+  'fechamento-mes': () => {
+    setTimeout(carregarChecklistMes, 30);
+    return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Montando o fechamento do mês...</div><div class="small muted">Cruzando contas recorrentes com as NFs do mês</div></div>';
   }
 };
 
@@ -4567,6 +4573,147 @@ async function salvarRecorrenteUI(i, btn) {
     toast('Erro: ' + (e.message || e), 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
   }
+}
+
+// ===== Fechamento do Mês (Estagio 2) — checklist anti-atraso das contas recorrentes =====
+var _CK_MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+function _ckMesLabel(ym) {
+  if (!ym) return '';
+  var p = String(ym).split('-');
+  var mi = Number(p[1]) - 1;
+  return (_CK_MESES[mi] || p[1]) + '/' + p[0];
+}
+function _ckShiftMes(ym, delta) {
+  var p = String(ym).split('-');
+  var d = new Date(Number(p[0]), Number(p[1]) - 1 + delta, 1);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+}
+function _ckBadge(status) {
+  var map = {
+    atrasada:   ['#FEE2E2', '#7F1D1D', '⚠ Atrasada'],
+    risco:      ['#FEF3C7', '#92400E', '⚠ Risco D+5'],
+    rejeitada:  ['#FEE2E2', '#7F1D1D', 'Rejeitada — reenviar'],
+    aguardando: ['#E0E7FF', '#3730A3', 'Aguardando'],
+    lancada:    ['#DBEAFE', '#1E40AF', 'Lançada'],
+    aprovada:   ['#D1FAE5', '#065F46', '✓ Aprovada'],
+    integrada:  ['#D1FAE5', '#065F46', '✓ Integrada (Omie)']
+  };
+  var m = map[status] || ['#E5E7EB', '#374151', status];
+  return '<span style="display:inline-block;background:' + m[0] + ';color:' + m[1] + ';padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700;white-space:nowrap">' + m[2] + '</span>';
+}
+function _ckCard(num, label, cor) {
+  return '<div style="flex:1;min-width:120px;background:#fff;border:1px solid var(--cinza-borda);border-radius:8px;padding:12px 14px;text-align:center">' +
+    '<div style="font-size:26px;font-weight:800;color:' + cor + '">' + num + '</div>' +
+    '<div style="font-size:12px;color:var(--cinza-medio);margin-top:2px">' + label + '</div></div>';
+}
+
+async function carregarChecklistMes(diretoria, mes) {
+  var area = document.getElementById('content-area');
+  if (!area) return;
+  if (typeof diretoria === 'string') window._ckDir = diretoria;
+  if (typeof mes === 'string') window._ckMes = mes;
+  var dir = window._ckDir || '';
+  var m = window._ckMes || '';
+  area.innerHTML = '<div class="card" style="text-align:center;padding:40px"><div style="font-size:16px;color:var(--azul-escuro)">Montando o fechamento do mês...</div></div>';
+  try {
+    var qs = [];
+    if (dir) qs.push('diretoria=' + encodeURIComponent(dir));
+    if (m) qs.push('mes=' + encodeURIComponent(m));
+    var r = await fetch('/api/ChecklistRecorrentes' + (qs.length ? ('?' + qs.join('&')) : ''), { credentials: 'include' });
+    var data = await r.json();
+    if (r.status === 403) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Acesso restrito a gestores e administradores.</div>'; return; }
+    if (!r.ok) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Falha (HTTP ' + r.status + '): ' + escHtml((data && data.error) || '') + '</div>'; return; }
+    window._ck = data;
+    window._ckMes = data.mes; // sincroniza com o mes efetivamente retornado
+    area.innerHTML = renderChecklistMesView();
+  } catch (e) {
+    area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>' + escHtml(e.message || 'erro') + '</div>';
+  }
+}
+
+function renderChecklistMesView() {
+  var data = window._ck || {};
+  var contas = data.contas || [];
+  var resumo = data.resumo || {};
+  var mes = data.mes || '';
+  var escopo = (data.scope && data.scope.diretorias && data.scope.diretorias.join(', ')) || 'Todas';
+
+  var html = '';
+  html += '<h2 style="margin:0 0 4px;color:var(--azul-escuro);font-size:22px">Fechamento do Mês</h2>';
+  html += '<div class="view-sub">Status das suas contas recorrentes confirmadas no mês. <b>Atrasada</b> = venceu sem lançamento; <b>Risco D+5</b> = vence em até 5 dias úteis e ainda não foi lançada.</div>';
+
+  if (!data.listaDecisoesExiste) {
+    html += '<div style="margin:14px 0;padding:14px 16px;border-radius:8px;background:#E0E7FF;border-left:4px solid #6366F1">' +
+      '<b style="color:#3730A3">Ainda não há contas recorrentes confirmadas.</b><br>' +
+      '<span style="font-size:13px;color:#3730A3">Vá em <b>Contas Recorrentes</b>, marque as contas recorrentes e salve. Elas aparecerão aqui no checklist do mês.</span><br>' +
+      '<button class="btn btn-primary" style="margin-top:10px" onclick="showView(\'contas-recorrentes\')">Ir para Contas Recorrentes</button>' +
+      '</div>';
+    return html;
+  }
+
+  // Navegacao de mes + seletor de diretoria
+  var dirs = data.diretoriasDisponiveis || [];
+  var selDir = window._ckDir || '';
+  html += '<div style="margin:10px 0 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
+  html += '<button class="btn btn-secondary" style="padding:5px 12px" onclick="carregarChecklistMes(undefined, \'' + _ckShiftMes(mes, -1) + '\')">‹ ' + escHtml(_ckMesLabel(_ckShiftMes(mes, -1))) + '</button>';
+  html += '<span style="font-weight:700;color:var(--azul-escuro);font-size:15px;min-width:130px;text-align:center">' + escHtml(_ckMesLabel(mes)) + '</span>';
+  html += '<button class="btn btn-secondary" style="padding:5px 12px" onclick="carregarChecklistMes(undefined, \'' + _ckShiftMes(mes, 1) + '\')">' + escHtml(_ckMesLabel(_ckShiftMes(mes, 1))) + ' ›</button>';
+  if (dirs.length) {
+    html += '<label style="font-size:13px;font-weight:600;color:var(--azul-escuro);margin-left:10px">Diretoria:</label>' +
+      '<select onchange="carregarChecklistMes(this.value)" style="padding:6px 10px;border:1px solid var(--cinza-borda);border-radius:5px;font-size:13px;background:#fff">' +
+      '<option value=""' + (selDir === '' ? ' selected' : '') + '>Todas</option>' +
+      dirs.map(function (d) { return '<option value="' + escAttr(d) + '"' + (selDir === d ? ' selected' : '') + '>' + escHtml(d) + '</option>'; }).join('') +
+      '</select>';
+  }
+  html += '</div>';
+
+  // KPIs
+  var aprov = (resumo.aprovada || 0) + (resumo.integrada || 0);
+  html += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">' +
+    _ckCard(resumo.atrasada || 0, 'Atrasadas', '#B91C1C') +
+    _ckCard(resumo.risco || 0, 'Risco D+5', '#B45309') +
+    _ckCard(resumo.aguardando || 0, 'Aguardando', '#4338CA') +
+    _ckCard(resumo.lancada || 0, 'Lançadas', '#1E40AF') +
+    _ckCard(aprov, 'Aprovadas', '#047857') +
+    '</div>';
+
+  if (!contas.length) {
+    html += '<div class="card" style="padding:30px;text-align:center"><div style="font-size:15px;color:var(--azul-escuro)">Nenhuma conta recorrente neste escopo/mês.</div><div class="small muted" style="margin-top:6px">Confirme contas recorrentes na aba Contas Recorrentes.</div></div>';
+    return html;
+  }
+
+  html += '<div class="card" style="padding:0;overflow:hidden"><table style="width:100%;border-collapse:collapse;font-size:13px">';
+  html += '<thead><tr style="background:var(--azul-bg);text-align:left">' +
+    '<th style="padding:10px 12px">Fornecedor</th>' +
+    '<th style="padding:10px 12px">Dir./Un.</th>' +
+    '<th style="padding:10px 12px">Venc. esperado</th>' +
+    '<th style="padding:10px 12px;text-align:right">Valor estimado</th>' +
+    '<th style="padding:10px 12px;text-align:center">Status</th>' +
+    '<th style="padding:10px 12px">NF do mês</th>' +
+    '<th style="padding:10px 12px"></th>' +
+    '</tr></thead><tbody>';
+  contas.forEach(function (c) {
+    var venc = c.vencEsperado ? escHtml(c.vencEsperado.split('-').reverse().join('/')) : '—';
+    var hint = '';
+    if (c.status === 'risco' && c.diasUteisAteVenc != null) hint = '<br><span class="small" style="color:#B45309">em ' + c.diasUteisAteVenc + ' dia(s) úteis</span>';
+    var nfTxt = c.nf
+      ? ('Nº ' + escHtml(String(c.nf.numero || '—')) + '<br><span class="small muted">' + escHtml(String(c.nf.status || '')) + '</span>')
+      : '<span class="muted">—</span>';
+    var acao = (c.nf || c.status === 'aprovada' || c.status === 'integrada' || c.status === 'lancada')
+      ? ''
+      : '<button class="btn btn-secondary" style="padding:5px 12px;font-size:12px" onclick="showView(\'nova-nf\')">Lançar</button>';
+    html += '<tr style="border-top:1px solid var(--cinza-borda)">' +
+      '<td style="padding:10px 12px"><b>' + escHtml(c.fornecedor || c.cnpj) + '</b><br><span class="small muted">' + escHtml(c.cnpj) + '</span></td>' +
+      '<td style="padding:10px 12px">' + escHtml(c.diretoria || '—') + '<br><span class="small muted">' + escHtml(c.unidade || '—') + '</span></td>' +
+      '<td style="padding:10px 12px">' + venc + hint + '</td>' +
+      '<td style="padding:10px 12px;text-align:right">' + _recFmtBRL(c.valorEstimado) + '</td>' +
+      '<td style="padding:10px 12px;text-align:center">' + _ckBadge(c.status) + '</td>' +
+      '<td style="padding:10px 12px">' + nfTxt + '</td>' +
+      '<td style="padding:10px 12px">' + acao + '</td>' +
+      '</tr>';
+  });
+  html += '</tbody></table></div>';
+  return html;
 }
 
 // ===== Controle de Acessos a contratos (tela admin) — GRANULAR (pasta -> grupo -> pessoas) =====
