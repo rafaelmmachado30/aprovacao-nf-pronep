@@ -238,12 +238,16 @@ module.exports = async function (context, req) {
     for (const chave of Object.keys(grupos)) {
       const g = grupos[chave];
       const recMeses = Object.keys(g.meses).length;
+      const qtd = g.qtdNotas;
       const dec = decisoes.porChave[chave];
+      // Forca da recorrencia:
+      //  - 'candidata': aparece em >=2 meses OU tem >=2 NFs (sinal de repeticao)
+      //  - 'sugestao' : apareceu so 1x na janela (historico curto) -> gestor decide
       let status;
       if (dec && dec.ehRecorrente) status = 'confirmada';
       else if (dec && !dec.ehRecorrente) status = 'descartada';
-      else if (recMeses >= MIN_MESES) status = 'candidata';
-      else status = 'ignorada'; // pouca recorrencia e sem decisao -> nao mostra
+      else if (recMeses >= MIN_MESES || recMeses >= 2 || qtd >= 2) status = 'candidata';
+      else status = 'sugestao';
       porChave[chave] = {
         chave: chave, cnpj: g.cnpj, fornecedor: nomeForn(g.cnpj) || g.cnpj,
         diretoria: g.diretoria, unidade: g.unidade,
@@ -276,11 +280,10 @@ module.exports = async function (context, req) {
       };
     }
 
-    const contas = Object.keys(porChave).map(function (k) { return porChave[k]; })
-      .filter(function (c) { return c.status !== 'ignorada'; });
+    const contas = Object.keys(porChave).map(function (k) { return porChave[k]; });
 
-    // Ordena: confirmadas, candidatas (mais recorrentes primeiro), descartadas
-    const ordemStatus = { confirmada: 0, candidata: 1, descartada: 2 };
+    // Ordena: confirmadas, candidatas (mais recorrentes primeiro), sugestoes, descartadas
+    const ordemStatus = { confirmada: 0, candidata: 1, sugestao: 2, descartada: 3 };
     contas.sort(function (a, b) {
       const sa = ordemStatus[a.status] != null ? ordemStatus[a.status] : 9;
       const sb = ordemStatus[b.status] != null ? ordemStatus[b.status] : 9;

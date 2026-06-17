@@ -4417,6 +4417,7 @@ function _recFmtBRL(v) {
 function _recStatusBadge(c) {
   if (c.status === 'confirmada') return '<span style="display:inline-block;background:#D1FAE5;color:#065F46;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">✓ Recorrente</span>';
   if (c.status === 'descartada') return '<span style="display:inline-block;background:#E5E7EB;color:#374151;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600">Não recorrente</span>';
+  if (c.status === 'sugestao') return '<span style="display:inline-block;background:#E0E7FF;color:#3730A3;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600">Sugestão</span>';
   return '<span style="display:inline-block;background:#FEF3C7;color:#92400E;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">Candidata</span>';
 }
 
@@ -4443,7 +4444,7 @@ function renderRecorrentesView() {
 
   var html = '';
   html += '<h2 style="margin:0 0 4px;color:var(--azul-escuro);font-size:22px">Contas Recorrentes</h2>';
-  html += '<div class="view-sub">A SAN varreu as NFs dos últimos ' + jan + ' meses e identificou fornecedores que se repetem. Confirme quais são contas recorrentes — sua decisão fica guardada para os próximos meses. <b>Escopo:</b> ' + escHtml(escopo) + '.</div>';
+  html += '<div class="view-sub">A SAN varreu as NFs dos últimos ' + jan + ' meses e listou os fornecedores que apareceram. As prováveis recorrentes vêm marcadas como <b>Candidata</b>; as demais como <b>Sugestão</b> (histórico ainda curto). Confirme quais são contas recorrentes — sua decisão fica guardada para os próximos meses. <b>Escopo:</b> ' + escHtml(escopo) + '.</div>';
 
   if (!data.listaDecisoesExiste) {
     html += '<div style="margin:14px 0;padding:14px 16px;border-radius:8px;background:#FEF3C7;border-left:4px solid #F59E0B">' +
