@@ -195,70 +195,95 @@ module.exports = async function (context, req) {
     }
 
     diag.step = 'achar_pdf';
-    // Procura PDF aprovado na estrutura "Notas Fiscais/Notas Aprovadas/{Unidade}/{AAAA-MM-DD}/"
-    // Usa AprovadoEm pra pular direto pra pasta da data. Se nao tiver, itera subpastas.
+    // Procura o PDF aprovado em "Notas Fiscais/Notas Aprovadas/{Unidade}/{AAAA-MM-DD}/".
+    // BUG CORRIGIDO: a pasta e nomeada pela data BRT (UTC-3) da aprovacao (ver AprovarNota,
+    // que ajusta o fuso), mas AprovadoEm e gravado em UTC. Apos 21h BRT a data UTC "vira" o
+    // dia seguinte e a busca caia na pasta errada -> "PDF nao encontrado". Agora convertemos
+    // pra BRT, tentamos tambem a data UTC, e como rede de seguranca varremos TODAS as
+    // subpastas (datas) da unidade.
     const aprovadoEm = f.AprovadoEm || '';
-    const dataAprovada = aprovadoEm ? String(aprovadoEm).substring(0, 10) : '';
     const numero = String(f.NumeroNF || '');
     const unidade = String(f.Unidade || '');
-    diag.pdfBusca = { aprovadoEm, dataAprovada, numero, unidade };
 
-    let arquivosCandidatos = [];
-    const folderRapido = 'Notas Fiscais/Notas Aprovadas/' + unidade + '/' + dataAprovada;
-    const folderUnidade = 'Notas Fiscais/Notas Aprovadas/' + unidade;
-    try {
-      if (dataAprovada) {
-        // Caminho rapido: direto na pasta da data
-        const resp = await client.api('/sites/' + siteId + '/drive/root:/' + folderRapido + ':/children').get();
-        arquivosCandidatos = (resp.value || []).filter(function (x) { return x.file; });
-        diag.pdfBusca.folderUsado = folderRapido;
+    function _fmtData(d) {
+      return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+    }
+    const datasCandidatas = [];
+    if (aprovadoEm) {
+      const dUtc = new Date(aprovadoEm);
+      if (!isNaN(dUtc.getTime())) {
+        const dBrt = new Date(dUtc.getTime() - 3 * 60 * 60 * 1000);
+        datasCandidatas.push(_fmtData(dBrt)); // pasta BRT (a correta)
+        const utcStr = String(aprovadoEm).substring(0, 10);
+        if (datasCandidatas.indexOf(utcStr) < 0) datasCandidatas.push(utcStr); // fallback: data UTC (nomes antigos)
       } else {
-        // Sem data: itera subpastas da unidade
+        datasCandidatas.push(String(aprovadoEm).substring(0, 10));
+      }
+    }
+    diag.pdfBusca = { aprovadoEm, datasCandidatas, numero, unidade, pastasTentadas: [] };
+
+    const { normalizaNumeroNF } = require('../shared/omie');
+    const numAlvoFmt = normalizaNumeroNF(numero);
+    diag.pdfBusca.numAlvoFmt = numAlvoFmt;
+    function achaPdfNaLista(arquivos) {
+      return arquivos.find(function (x) {
+        if (!x.name) return false;
+        const base = x.name.replace(/\.pdf$/i, '');
+        // 1) algum token (separado por _ - espaco) igual ao numero normalizado
+        const tokens = base.split(/[_\-\s]+/);
+        if (tokens.some(function (t) { return numAlvoFmt && normalizaNumeroNF(t) === numAlvoFmt; })) return true;
+        // 2) numero normalizado aparece no nome inteiro normalizado (cobre nomes "colados")
+        return numAlvoFmt && normalizaNumeroNF(base).indexOf(numAlvoFmt) >= 0;
+      });
+    }
+
+    const folderUnidade = 'Notas Fiscais/Notas Aprovadas/' + unidade;
+    let pdfMatch = null;
+    let arquivosCandidatos = [];
+
+    // 1) Caminho rapido: tenta cada data candidata (BRT primeiro, depois UTC)
+    for (const data of datasCandidatas) {
+      const folder = folderUnidade + '/' + data;
+      try {
+        const resp = await client.api('/sites/' + siteId + '/drive/root:/' + folder + ':/children').get();
+        const arqs = (resp.value || []).filter(function (x) { return x.file; });
+        diag.pdfBusca.pastasTentadas.push({ folder: folder, arquivos: arqs.length });
+        const m = achaPdfNaLista(arqs);
+        if (m) { pdfMatch = m; arquivosCandidatos = arqs; diag.pdfBusca.folderUsado = folder; break; }
+        arquivosCandidatos = arquivosCandidatos.concat(arqs);
+      } catch (e) {
+        diag.pdfBusca.pastasTentadas.push({ folder: folder, erro: e.message });
+      }
+    }
+
+    // 2) Rede de seguranca: varre TODAS as subpastas (datas) da unidade
+    if (!pdfMatch) {
+      try {
         const sub = await client.api('/sites/' + siteId + '/drive/root:/' + folderUnidade + ':/children').get();
         for (const sf of (sub.value || []).filter(function (x) { return x.folder; })) {
           try {
             const filesResp = await client.api('/sites/' + siteId + '/drive/items/' + sf.id + '/children').get();
-            for (const ff of (filesResp.value || [])) { if (ff.file) arquivosCandidatos.push(ff); }
-          } catch (e) {}
+            const arqs = (filesResp.value || []).filter(function (x) { return x.file; });
+            const m = achaPdfNaLista(arqs);
+            if (m) { pdfMatch = m; diag.pdfBusca.folderUsado = folderUnidade + '/' + sf.name + ' (varredura)'; break; }
+          } catch (e2) {}
         }
-        diag.pdfBusca.folderUsado = folderUnidade + ' (iterado subpastas)';
-      }
-    } catch (e) {
-      // Pasta da data nao existe — fallback iterando subpastas
-      diag.pdfBusca.erroPastaData = e.message;
-      if (dataAprovada) {
-        try {
-          const sub = await client.api('/sites/' + siteId + '/drive/root:/' + folderUnidade + ':/children').get();
-          for (const sf of (sub.value || []).filter(function (x) { return x.folder; })) {
-            try {
-              const filesResp = await client.api('/sites/' + siteId + '/drive/items/' + sf.id + '/children').get();
-              for (const ff of (filesResp.value || [])) { if (ff.file) arquivosCandidatos.push(ff); }
-            } catch (e2) {}
-          }
-          diag.pdfBusca.folderUsado = folderUnidade + ' (fallback iterado)';
-        } catch (e2) {
-          diag.pdfBusca.erroFallback = e2.message;
-        }
+        diag.pdfBusca.varreuSubpastas = true;
+      } catch (e) {
+        diag.pdfBusca.erroVarredura = e.message;
       }
     }
-    diag.pdfBusca.totalArquivos = arquivosCandidatos.length;
 
-    // Acha o arquivo pelo NumeroNF — normaliza alvo E nomes pra comparar
-    // (normalizaNumeroNF: remove tudo nao alfanumerico e zeros a esquerda)
-    const { normalizaNumeroNF } = require('../shared/omie');
-    const numAlvoFmt = normalizaNumeroNF(numero);
-    diag.pdfBusca.numAlvoFmt = numAlvoFmt;
-    const pdfMatch = arquivosCandidatos.find(function (x) {
-      if (!x.name) return false;
-      // Extrai tokens do nome (separa por _ - espaco) e normaliza cada um
-      const tokens = x.name.replace(/\.pdf$/i, '').split(/[_\-\s]+/);
-      return tokens.some(function (t) {
-        return normalizaNumeroNF(t) === numAlvoFmt;
-      });
-    });
     if (!pdfMatch) {
-      diag.pdfBusca.nomesEncontrados = arquivosCandidatos.slice(0, 5).map(function (x) { return x.name; });
-      context.res = { status: 404, body: { error: 'PDF aprovado nao encontrado na pasta', diag } };
+      diag.pdfBusca.nomesEncontrados = arquivosCandidatos.slice(0, 8).map(function (x) { return x.name; });
+      context.res = {
+        status: 404,
+        body: {
+          error: 'PDF aprovado nao encontrado na pasta',
+          detail: 'NF ' + numero + ' (aprovada em ' + (aprovadoEm || '?') + '). Procurei nas pastas ' + (datasCandidatas.join(', ') || '?') + ' e varri as subpastas de ' + unidade + '.',
+          diag
+        }
+      };
       return;
     }
     diag.pdfBusca.pdfMatch = { id: pdfMatch.id, name: pdfMatch.name };
