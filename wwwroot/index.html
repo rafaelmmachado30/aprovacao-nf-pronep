@@ -1004,7 +1004,7 @@ const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
   gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','contratos','mapa-aprovadores','arquitetura'] },
   financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','controle-acessos','auditoria','arquitetura','configuracoes'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','controle-acessos','contas-recorrentes','auditoria','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -1114,6 +1114,7 @@ const ICONS = {
   mapa:         '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
   auditoria:    '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>',
   controleAcessos: '<svg viewBox="0 0 24 24"><path d="M12 2l7 3v6c0 4.5-3 8-7 11-4-3-7-6.5-7-11V5z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg>',
+  recorrentes:  '<svg viewBox="0 0 24 24"><path d="M17 2.1l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 21.9l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>',
   arquitetura:  '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M9 14l-3 3M15 14l3 3M8 19h8"/></svg>',
   configuracoes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
 };
@@ -2049,6 +2050,7 @@ const menuItems = [
   { id: 'contratos',         label: 'Contratos',                  icon: ICONS.contratos },
   { id: 'mapa-aprovadores',  label: 'Mapa de Aprovadores',        icon: ICONS.mapa },
   { id: 'controle-acessos',  label: 'Controle de Acessos',        icon: ICONS.controleAcessos },
+  { id: 'contas-recorrentes',label: 'Contas Recorrentes',         icon: ICONS.recorrentes },
   { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
   { id: 'arquitetura',       label: 'Arquitetura do Sistema',     icon: ICONS.arquitetura },
   { id: 'configuracoes',     label: 'Configurações',              icon: ICONS.configuracoes },
@@ -4400,8 +4402,153 @@ const views = {
   'controle-acessos': () => {
     setTimeout(carregarControleAcessos, 30);
     return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Carregando Controle de Acessos...</div><div class="small muted">Buscando diretorias e gestores</div></div>';
+  },
+  'contas-recorrentes': () => {
+    setTimeout(carregarRecorrentes, 30);
+    return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Analisando contas recorrentes...</div><div class="small muted">Varrendo o histórico de NFs dos últimos meses</div></div>';
   }
 };
+
+// ===== Contas Recorrentes (Estagio 1) — deteccao + confirmacao do gestor =====
+function _recFmtBRL(v) {
+  var n = Number(v || 0) || 0;
+  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+function _recStatusBadge(c) {
+  if (c.status === 'confirmada') return '<span style="display:inline-block;background:#D1FAE5;color:#065F46;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">✓ Recorrente</span>';
+  if (c.status === 'descartada') return '<span style="display:inline-block;background:#E5E7EB;color:#374151;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600">Não recorrente</span>';
+  return '<span style="display:inline-block;background:#FEF3C7;color:#92400E;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700">Candidata</span>';
+}
+
+async function carregarRecorrentes() {
+  var area = document.getElementById('content-area');
+  if (!area) return;
+  try {
+    var r = await fetch('/api/ListarRecorrentes', { credentials: 'include' });
+    if (r.status === 403) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Acesso restrito a gestores e administradores.</div>'; return; }
+    var data = await r.json();
+    if (!r.ok) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Falha ao carregar (HTTP ' + r.status + '): ' + escHtml((data && data.error) || '') + '</div>'; return; }
+    window._rec = data;
+    area.innerHTML = renderRecorrentesView();
+  } catch (e) {
+    area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>' + escHtml(e.message || 'erro') + '</div>';
+  }
+}
+
+function renderRecorrentesView() {
+  var data = window._rec || {};
+  var contas = data.contas || [];
+  var escopo = (data.scope && data.scope.diretorias && data.scope.diretorias.join(', ')) || 'Todas';
+  var jan = (data.params && data.params.janelaMeses) || 6;
+
+  var html = '';
+  html += '<h2 style="margin:0 0 4px;color:var(--azul-escuro);font-size:22px">Contas Recorrentes</h2>';
+  html += '<div class="view-sub">A SAN varreu as NFs dos últimos ' + jan + ' meses e identificou fornecedores que se repetem. Confirme quais são contas recorrentes — sua decisão fica guardada para os próximos meses. <b>Escopo:</b> ' + escHtml(escopo) + '.</div>';
+
+  if (!data.listaDecisoesExiste) {
+    html += '<div style="margin:14px 0;padding:14px 16px;border-radius:8px;background:#FEF3C7;border-left:4px solid #F59E0B">' +
+      '<b style="color:#92400E">A lista de decisões ainda não foi criada.</b><br>' +
+      '<span style="font-size:13px;color:#78350F">Você consegue ver os candidatos abaixo, mas para <b>salvar</b> as confirmações é preciso criar a lista no SharePoint (uma vez só).</span><br>' +
+      '<button class="btn btn-primary" style="margin-top:10px" onclick="criarListaRecorrentes(this)">Criar lista de decisões</button>' +
+      '</div>';
+  }
+
+  if (!contas.length) {
+    html += '<div class="card" style="padding:30px;text-align:center"><div style="font-size:15px;color:var(--azul-escuro)">Nenhuma conta recorrente detectada ainda.</div><div class="small muted" style="margin-top:6px">Conforme as NFs forem sendo lançadas, os fornecedores que se repetirem aparecerão aqui.</div></div>';
+    return html;
+  }
+
+  html += '<div class="card" style="padding:0;overflow:hidden">';
+  html += '<table style="width:100%;border-collapse:collapse;font-size:13px">';
+  html += '<thead><tr style="background:var(--azul-bg);text-align:left">' +
+    '<th style="padding:10px 12px">Fornecedor</th>' +
+    '<th style="padding:10px 12px">Diretoria / Un.</th>' +
+    '<th style="padding:10px 12px;text-align:center">Recorrência</th>' +
+    '<th style="padding:10px 12px;text-align:center">Dia venc.</th>' +
+    '<th style="padding:10px 12px;text-align:right">Valor médio</th>' +
+    '<th style="padding:10px 12px">Última NF</th>' +
+    '<th style="padding:10px 12px;text-align:center">É recorrente?</th>' +
+    '<th style="padding:10px 12px">Lembrar até</th>' +
+    '<th style="padding:10px 12px"></th>' +
+    '</tr></thead><tbody>';
+
+  contas.forEach(function (c, i) {
+    var recTxt = c.semMovimentoNaJanela
+      ? '<span title="Confirmada, mas sem NF nos últimos meses — pode ser uma conta esperada que não chegou" style="color:#92400E;font-weight:700">⚠ sem movimento</span>'
+      : (c.recorrenciaMeses + ' de ' + (c.janelaMeses || jan) + ' meses');
+    var ultima = c.ultimaData
+      ? escHtml(c.ultimaData) + ' · ' + _recFmtBRL(c.ultimoValor)
+      : '<span class="muted">—</span>';
+    var checked = (c.ehRecorrente === true) ? ' checked' : '';
+    html += '<tr style="border-top:1px solid var(--cinza-borda)">' +
+      '<td style="padding:10px 12px"><b>' + escHtml(c.fornecedor || c.cnpj) + '</b><br><span class="small muted">' + escHtml(c.cnpj) + '</span><br>' + _recStatusBadge(c) + '</td>' +
+      '<td style="padding:10px 12px">' + escHtml(c.diretoria || '—') + '<br><span class="small muted">' + escHtml(c.unidade || '—') + '</span></td>' +
+      '<td style="padding:10px 12px;text-align:center">' + recTxt + '<br><span class="small muted">' + (c.qtdNotas || 0) + ' NFs</span></td>' +
+      '<td style="padding:10px 12px;text-align:center">' + (c.diaVencimento ? ('dia ' + c.diaVencimento) : '—') + '</td>' +
+      '<td style="padding:10px 12px;text-align:right">' + _recFmtBRL(c.valorEstimado) + '</td>' +
+      '<td style="padding:10px 12px">' + ultima + '</td>' +
+      '<td style="padding:10px 12px;text-align:center"><input type="checkbox" id="rec-chk-' + i + '"' + checked + ' style="width:18px;height:18px;cursor:pointer"></td>' +
+      '<td style="padding:10px 12px"><input type="date" id="rec-fim-' + i + '" value="' + escAttr(c.dataFim || '') + '" style="padding:5px 7px;border:1px solid #D1D5DB;border-radius:5px;font-size:12px"></td>' +
+      '<td style="padding:10px 12px"><button class="btn btn-secondary" style="padding:5px 12px;font-size:12px" onclick="salvarRecorrenteUI(' + i + ', this)">Salvar</button></td>' +
+      '</tr>';
+  });
+  html += '</tbody></table></div>';
+  html += '<div class="small muted" style="margin-top:10px">Marque <b>É recorrente?</b> e clique em Salvar. Para contrato com prazo, preencha <b>Lembrar até</b> — o lembrete para nessa data.</div>';
+  return html;
+}
+
+async function criarListaRecorrentes(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Criando...'; }
+  try {
+    var r = await fetch('/api/CriarListaRecorrentes', { method: 'POST', credentials: 'include' });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) { toast('Falha ao criar lista: ' + ((data && data.error) || ('HTTP ' + r.status)), 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Criar lista de decisões'; } return; }
+    toast('✓ Lista de decisões pronta.', 'success');
+    await carregarRecorrentes();
+  } catch (e) {
+    toast('Erro: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Criar lista de decisões'; }
+  }
+}
+
+async function salvarRecorrenteUI(i, btn) {
+  var data = window._rec || {};
+  var c = (data.contas || [])[i];
+  if (!c) return;
+  var chk = document.getElementById('rec-chk-' + i);
+  var fim = document.getElementById('rec-fim-' + i);
+  var ehRec = !!(chk && chk.checked);
+  var dataFim = (fim && fim.value) || '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  try {
+    var r = await fetch('/api/SalvarRecorrente', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cnpj: c.cnpj, fornecedor: c.fornecedor, diretoria: c.diretoria, unidade: c.unidade,
+        ehRecorrente: ehRec, dataFim: dataFim,
+        diaVencimento: c.diaVencimento, valorEstimado: c.valorEstimado
+      })
+    });
+    var resp = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      toast('Falha ao salvar: ' + ((resp && resp.error) || ('HTTP ' + r.status)), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+      return;
+    }
+    // Atualiza estado local e re-renderiza
+    c.ehRecorrente = ehRec;
+    c.dataFim = dataFim;
+    c.status = ehRec ? 'confirmada' : 'descartada';
+    c.temDecisao = true;
+    if (data.listaDecisoesExiste === false) data.listaDecisoesExiste = true;
+    toast('✓ ' + escHtml(c.fornecedor || c.cnpj) + ' salvo como ' + (ehRec ? 'recorrente' : 'não recorrente') + '.', 'success');
+    var area = document.getElementById('content-area');
+    if (area) area.innerHTML = renderRecorrentesView();
+  } catch (e) {
+    toast('Erro: ' + (e.message || e), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+  }
+}
 
 // ===== Controle de Acessos a contratos (tela admin) — GRANULAR (pasta -> grupo -> pessoas) =====
 // Cada PASTA libera acesso a GRUPOS inteiros (token = role, auto-atualiza) e/ou PESSOAS
