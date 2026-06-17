@@ -8081,7 +8081,10 @@ async function integrarOmie(id, numero, fornecedor, unidade) {
   });
   if (!okOmie) return;
 
-  // Modal de loading com etapas animadas
+  // Modal de progresso. IMPORTANTE: os passos refletem o ESTADO REAL retornado
+  // pelo backend — NAO avancam por tempo. (Antes a barra avancava sozinha com
+  // timers de 15s/25s, entao parecia que "localizou a conta" quando na verdade a
+  // busca ainda estava rodando ou ja tinha FALHADO. Isso enganava o usuario.)
   openModal(`
     <div style="text-align:center;padding:20px 0">
       <div style="margin-bottom:20px">
@@ -8089,13 +8092,12 @@ async function integrarOmie(id, numero, fornecedor, unidade) {
       </div>
       <h3 style="margin-bottom:8px;color:var(--azul-escuro)">Integrando com Omie ${unidade}...</h3>
       <div class="muted" style="font-size:14px;margin-bottom:18px">NF ${numero} • ${fornecedor}</div>
-      <div id="omie-step-list" style="text-align:left;max-width:340px;margin:0 auto;font-size:13px;line-height:1.9">
+      <div id="omie-step-list" style="text-align:left;max-width:360px;margin:0 auto;font-size:13px;line-height:1.9">
         <div id="omie-step-1" style="color:var(--azul-escuro);font-weight:600">
           <span class="omie-step-icon">⏳</span> Buscando fornecedor no Omie
         </div>
         <div id="omie-step-2" style="color:#999">
-        <div id="omie-step-2" style="color:#999">
-          <span class="omie-step-icon">○</span> Localizando conta a pagar (pode demorar)
+          <span class="omie-step-icon">○</span> Localizando a conta a pagar (pode demorar)
         </div>
         <div id="omie-step-3" style="color:#999">
           <span class="omie-step-icon">○</span> Baixando PDF aprovado
@@ -8104,33 +8106,59 @@ async function integrarOmie(id, numero, fornecedor, unidade) {
           <span class="omie-step-icon">○</span> Anexando PDF na conta Omie
         </div>
       </div>
-      <div class="small muted" style="margin-top:18px;font-style:italic">Esta operacao pode levar ate 30 segundos.<br>Por favor, aguarde sem fechar a janela.</div>
+      <div id="omie-result-msg"></div>
+      <div id="omie-wait-hint" class="small muted" style="margin-top:18px;font-style:italic">Esta operacao pode levar ate 30 segundos.<br>Por favor, aguarde sem fechar a janela.</div>
     </div>
     <style>
       @keyframes spin { to { transform: rotate(360deg); } }
     </style>
   `);
 
-  // Avanca animacao de etapas (simulado pelo tempo medio de cada passo)
-  const stepTimers = [];
-  function avancaStep(numAtual, numProx) {
-    const elAtual = document.getElementById('omie-step-' + numAtual);
-    const elProx = document.getElementById('omie-step-' + numProx);
-    if (elAtual) {
-      elAtual.style.color = 'var(--verde)';
-      const icon = elAtual.querySelector('.omie-step-icon');
-      if (icon) icon.textContent = '✓';
-    }
-    if (elProx) {
-      elProx.style.color = 'var(--azul-escuro)';
-      elProx.style.fontWeight = '600';
-      const icon = elProx.querySelector('.omie-step-icon');
-      if (icon) icon.textContent = '⏳';
+  // Pinta um passo: 'done' (verde ✓), 'active' (azul ⏳), 'fail' (vermelho ✗), 'idle' (cinza ○)
+  function setStepOmie(num, estado) {
+    const el = document.getElementById('omie-step-' + num);
+    if (!el) return;
+    const icon = el.querySelector('.omie-step-icon');
+    if (estado === 'done') { el.style.color = 'var(--verde)'; el.style.fontWeight = '400'; if (icon) icon.textContent = '✓'; }
+    else if (estado === 'active') { el.style.color = 'var(--azul-escuro)'; el.style.fontWeight = '600'; if (icon) icon.textContent = '⏳'; }
+    else if (estado === 'fail') { el.style.color = '#c0392b'; el.style.fontWeight = '700'; if (icon) icon.textContent = '✗'; }
+    else { el.style.color = '#999'; el.style.fontWeight = '400'; if (icon) icon.textContent = '○'; }
+  }
+
+  // Mapeia o passo retornado pelo backend (diag.step) pro numero do passo na UI.
+  function uiStepDoBackend(diag) {
+    const s = (diag && diag.step) || '';
+    const b = diag && diag.buscaOmie;
+    const clienteFound = b && b.clienteOmie && b.clienteOmie.found;
+    if (s === 'credenciais' || s === 'fetch_item' || s === 'graph') return 1;
+    if (s === 'buscar_conta') return clienteFound ? 2 : 1; // achou o fornecedor mas nao a conta -> passo 2
+    if (s === 'achar_pdf' || s === 'download_pdf') return 3;
+    if (s === 'anexar_omie' || s === 'update_sp') return 4;
+    return 2; // default: onde mais falha (conta nao lancada no Omie)
+  }
+
+  function mostrarFalhaOmie(failStep, motivo) {
+    for (let i = 1; i < failStep; i++) setStepOmie(i, 'done');
+    setStepOmie(failStep, 'fail');
+    for (let i = failStep + 1; i <= 4; i++) setStepOmie(i, 'idle');
+    const sp = document.querySelector('.omie-spinner'); if (sp) sp.style.display = 'none';
+    const hint = document.getElementById('omie-wait-hint'); if (hint) hint.style.display = 'none';
+    const msgEl = document.getElementById('omie-result-msg');
+    if (msgEl) {
+      msgEl.innerHTML =
+        '<div style="margin-top:16px;padding:12px 14px;border-radius:8px;background:#fdecea;border:1px solid #f5c6cb;color:#922;text-align:left;font-size:13px">' +
+        '<b>Nao foi possivel concluir.</b><br>' + (typeof escHtml === 'function' ? escHtml(motivo) : motivo) +
+        '</div>' +
+        '<button onclick="closeModal()" class="btn" style="margin-top:14px">Fechar</button>';
+    } else {
+      closeModal(); alert('❌ Falha na integracao com Omie:\n\n' + motivo);
     }
   }
-  stepTimers.push(setTimeout(() => avancaStep(1, 2), 1500));
-  stepTimers.push(setTimeout(() => avancaStep(2, 3), 15000));
-  stepTimers.push(setTimeout(() => avancaStep(3, 4), 25000));
+
+  // Unico avanco honesto: apos ~1,5s o fornecedor ja foi resolvido; o tempo longo
+  // e a varredura das contas. NAO avancamos pra PDF/anexo por tempo.
+  const stepTimers = [];
+  stepTimers.push(setTimeout(() => { setStepOmie(1, 'done'); setStepOmie(2, 'active'); }, 1500));
 
   try {
     const r = await fetch('/api/IntegrarOmie', {
@@ -8141,13 +8169,15 @@ async function integrarOmie(id, numero, fornecedor, unidade) {
     });
     const data = await r.json().catch(() => ({}));
     stepTimers.forEach(t => clearTimeout(t));
-    closeModal();
 
     if (!r.ok) {
       const detail = data.detail || data.error || ('HTTP ' + r.status);
-      alert('\u274c Falha na integracao com Omie:\n\n' + detail);
+      mostrarFalhaOmie(uiStepDoBackend(data.diag), detail);
       return;
     }
+    // Sucesso real: marca todos os passos como concluidos, fecha e notifica.
+    setStepOmie(1, 'done'); setStepOmie(2, 'done'); setStepOmie(3, 'done'); setStepOmie(4, 'done');
+    closeModal();
     toast('\u2713 NF ' + numero + ' integrada com Omie ' + (data.empresa || unidade) + '. Codigo: ' + (data.codigoLancamentoOmie || '\u2014'), 'success');
     try { if (typeof carregarNotasReais === 'function') await carregarNotasReais(); } catch (e) {}
     showView(currentView);
