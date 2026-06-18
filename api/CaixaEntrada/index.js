@@ -62,8 +62,8 @@ async function listarArquivos(client, siteId, email) {
   const folder = pastaDoUsuario(email);
   try {
     const resp = await client.api('/sites/' + siteId + '/drive/root:/' + folder + ':/children')
-      .select('id,name,size,createdDateTime,@microsoft.graph.downloadUrl').get();
-    return (resp.value || []).filter(function (x) { return x.file; }).map(function (x) {
+      .select('id,name,size,createdDateTime,file,folder,@microsoft.graph.downloadUrl').get();
+    return (resp.value || []).filter(function (x) { return x.file && !x.folder; }).map(function (x) {
       return {
         id: x.id, nome: x.name, tamanho: x.size || 0,
         criadoEm: x.createdDateTime || null,
