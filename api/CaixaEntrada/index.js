@@ -18,7 +18,7 @@
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
+const { Client, ResponseType } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
 
 const BASE_FOLDER = 'Notas Fiscais/Caixa de Entrada';
@@ -77,6 +77,26 @@ async function listarArquivos(client, siteId, email) {
   }
 }
 
+// Baixa os bytes de um PDF da caixa. Tenta o downloadUrl pre-autenticado e, no
+// fallback, usa o Graph /content como ARRAYBUFFER. Importante: nunca usar
+// Buffer.from() sobre o stream cru do .get() (no SDK/Node atual o corpo vem como
+// ReadableStream e o Buffer.from quebra com "first argument must be of type...").
+async function baixarPdfBuffer(client, siteId, item) {
+  if (!item || !item.id) return null;
+  if (item.urlDownload) {
+    try {
+      const r = await fetch(item.urlDownload);
+      if (r.ok) {
+        const ab = await r.arrayBuffer();
+        if (ab && ab.byteLength) return Buffer.from(ab);
+      }
+    } catch (e) { /* cai pro fallback do Graph */ }
+  }
+  const ab = await client.api('/sites/' + siteId + '/drive/items/' + item.id + '/content')
+    .responseType(ResponseType.ARRAYBUFFER).get();
+  return Buffer.from(ab);
+}
+
 module.exports = async function (context, req) {
   try {
     const user = await getUser(req);
@@ -126,17 +146,8 @@ module.exports = async function (context, req) {
       const merged = await PDFDocument.create();
       let totalBytes = 0;
       for (const id of ids) {
-        // Baixa o conteudo via downloadUrl pre-autenticado (padrao usado no projeto)
-        const dlUrl = meusIds[id].urlDownload;
-        let buf;
-        if (dlUrl) {
-          const r = await fetch(dlUrl);
-          if (!r.ok) { context.res = { status: 502, body: { error: 'Falha ao baixar PDF da caixa (HTTP ' + r.status + ')' } }; return; }
-          buf = Buffer.from(await r.arrayBuffer());
-        } else {
-          const ab = await client.api('/sites/' + siteId + '/drive/items/' + id + '/content').get();
-          buf = Buffer.from(ab);
-        }
+        const buf = await baixarPdfBuffer(client, siteId, meusIds[id]);
+        if (!buf || !buf.length) { context.res = { status: 502, body: { error: 'Falha ao baixar PDF da caixa' } }; return; }
         totalBytes += buf.length;
         if (totalBytes > MAX_COMBINADO) { context.res = { status: 400, body: { error: 'PDF combinado excede 12MB' } }; return; }
         const src = await PDFDocument.load(buf, { ignoreEncryption: true });
