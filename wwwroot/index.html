@@ -4773,9 +4773,12 @@ function renderCaixaView() {
     '<th style="padding:10px 12px"></th>' +
     '</tr></thead><tbody>';
   arqs.forEach(function (a, i) {
-    var nomeLimpo = String(a.nome || '').replace(/^[0-9T:.\-]+__/, ''); // tira o timestamp do prefixo
-    var dt = a.criadoEm ? escHtml(String(a.criadoEm).substring(0, 10).split('-').reverse().join('/')) : '—';
     var estado = a.estado || 'avulso';
+    // tira o timestamp do prefixo (inclui o Z final do ISO) e dá nome amigável p/ unificadas
+    var nomeLimpo = String(a.nome || '').replace(/^[\dT:.\-]+Z?__/, '');
+    var mNF = nomeLimpo.match(/^combinada__(\d+)NFs/i);
+    if (mNF) { nomeLimpo = 'NF unificada — ' + mNF[1] + ' PDFs'; }
+    var dt = a.criadoEm ? escHtml(String(a.criadoEm).substring(0, 10).split('-').reverse().join('/')) : '—';
     var lancada = estado === 'lancada';
     var combinada = estado === 'combinado';
     var idAttr = escAttr(jsStr(a.id));
@@ -4806,9 +4809,7 @@ function renderCaixaView() {
     if (combinada) {
       acoes += '<button class="btn btn-success" style="padding:4px 10px;font-size:12px;margin-right:10px" onclick="caixaRealizarLancamento(\'' + idAttr + '\', this)">Realizar lançamento</button>';
     }
-    if (a.urlDownload) {
-      acoes += '<a href="' + escAttr(safeUrl(a.urlDownload)) + '" target="_blank" rel="noopener" class="small" style="margin-right:12px">Ver</a>';
-    }
+    acoes += '<a href="javascript:void(0)" class="small" style="margin-right:12px" onclick="caixaVer(\'' + idAttr + '\', this)">Ver</a>';
     acoes += '<a href="javascript:void(0)" class="small" style="color:var(--vermelho)" onclick="caixaExcluir(\'' + idAttr + '\')">Excluir</a>';
 
     var rowStyle = 'border-top:1px solid var(--cinza-borda)' + (lancada ? ';background:#f4f5f7;color:#8a94a6' : '');
@@ -4874,6 +4875,34 @@ async function caixaExcluir(id) {
     toast('✓ Removido.', 'success');
     await carregarCaixa();
   } catch (e) { toast('Erro: ' + (e.message || e), 'error'); }
+}
+
+// Abre o PDF (avulso ou unificado) numa nova aba — baixa via backend e mostra
+// num blob, pra conferir se a unificação ficou correta. Não depende de downloadUrl.
+async function caixaVer(id, el) {
+  var txt = el ? el.textContent : null;
+  if (el) { el.textContent = 'Abrindo...'; }
+  try {
+    var r = await fetch('/api/CaixaEntrada', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'baixar', id: id })
+    });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok || !data.fileBase64) { toast('Não consegui abrir o PDF: ' + ((data && data.error) || ('HTTP ' + r.status)), 'error'); return; }
+    var arr = String(data.fileBase64).split(',');
+    var bstr = atob(arr[1]);
+    var n = bstr.length;
+    var u8 = new Uint8Array(n);
+    while (n--) u8[n] = bstr.charCodeAt(n);
+    var blob = new Blob([u8], { type: 'application/pdf' });
+    var url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  } catch (e) {
+    toast('Erro ao abrir o PDF: ' + (e.message || e), 'error');
+  } finally {
+    if (el && txt !== null) { el.textContent = txt; }
+  }
 }
 
 // Combina os avulsos selecionados num PDF unificado (no backend), apaga os

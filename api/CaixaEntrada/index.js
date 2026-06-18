@@ -62,16 +62,20 @@ async function listarArquivos(client, siteId, email) {
   const folder = pastaDoUsuario(email);
   try {
     const resp = await client.api('/sites/' + siteId + '/drive/root:/' + folder + ':/children')
-      .select('id,name,size,createdDateTime,description,file,folder,@microsoft.graph.downloadUrl').get();
+      .select('id,name,size,createdDateTime,file,folder,@microsoft.graph.downloadUrl').get();
     return (resp.value || []).filter(function (x) { return x.file && !x.folder; }).map(function (x) {
-      var desc = x.description || '';
+      // O estado é codificado NO NOME do arquivo (description nao persiste de
+      // forma confiavel em bibliotecas SharePoint). Marcadores:
+      //   ...__combinada__<n>NFs.pdf                       -> combinado (pronto p/ lancar)
+      //   ...__combinada__<n>NFs__LANCADA__<data>__<id>.pdf -> lancada
+      var nome = x.name || '';
       var estado = 'avulso', lancadaEm = null, notaId = null;
-      if (desc.indexOf('caixa:lancada') === 0) {
+      var mL = nome.match(/__LANCADA__([^_]+)__([^.]*)\.pdf$/i);
+      if (mL) {
         estado = 'lancada';
-        var p = desc.split('|');
-        lancadaEm = p[1] || null;
-        notaId = p[2] || null;
-      } else if (desc.indexOf('caixa:combinado') === 0) {
+        lancadaEm = mL[1] || null;
+        notaId = (mL[2] && mL[2] !== 'NA') ? mL[2] : null;
+      } else if (/__combinada__\d+NFs/i.test(nome)) {
         estado = 'combinado';
       }
       return {
@@ -179,9 +183,8 @@ module.exports = async function (context, req) {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const nomeCombinado = stamp + '__combinada__' + ids.length + 'NFs.pdf';
       const upPath = '/sites/' + siteId + '/drive/root:/' + encodeURIComponent(folder).replace(/%2F/g, '/') + '/' + encodeURIComponent(nomeCombinado) + ':/content';
+      // O proprio nome (__combinada__<n>NFs.pdf) ja marca o item como "combinado".
       const novo = await client.api(upPath).header('Content-Type', 'application/pdf').put(outBuf);
-      // Marca o item como "combinado" (pronto para lancar)
-      try { await client.api('/sites/' + siteId + '/drive/items/' + novo.id).update({ description: 'caixa:combinado' }); } catch (e) { /* nao critico */ }
 
       // So depois de salvar o unificado com sucesso, exclui os avulsos de origem.
       const apagados = [];
@@ -213,13 +216,21 @@ module.exports = async function (context, req) {
     }
 
     // ===== MARCAR LANCADA — chamado apos o PostNota concluir com sucesso =====
+    // Renomeia o arquivo adicionando o marcador __LANCADA__<data>__<notaId> (o
+    // nome e a fonte da verdade do estado — ver listarArquivos).
     if (action === 'marcarLancada') {
       const id = body.id;
       if (!id) { context.res = { status: 400, body: { error: 'id obrigatorio' } }; return; }
       const meus = await listarArquivos(client, siteId, email);
-      if (!meus.find(function (a) { return a.id === id; })) { context.res = { status: 403, body: { error: 'Arquivo fora da sua caixa' } }; return; }
-      const marca = 'caixa:lancada|' + new Date().toISOString() + '|' + (body.notaId ? String(body.notaId).slice(0, 60) : '');
-      await client.api('/sites/' + siteId + '/drive/items/' + id).update({ description: marca });
+      const item = meus.find(function (a) { return a.id === id; });
+      if (!item) { context.res = { status: 403, body: { error: 'Arquivo fora da sua caixa' } }; return; }
+      if (item.estado !== 'lancada') {
+        const base = String(item.nome).replace(/\.pdf$/i, '');
+        const dataStr = new Date().toISOString().slice(0, 10);              // YYYY-MM-DD (sem '_')
+        const nid = (String(body.notaId || '').replace(/[^A-Za-z0-9]/g, '') || 'NA').slice(0, 40);
+        const novoNome = base + '__LANCADA__' + dataStr + '__' + nid + '.pdf';
+        await client.api('/sites/' + siteId + '/drive/items/' + id).update({ name: novoNome });
+      }
       context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: { ok: true } };
       return;
     }
