@@ -4,9 +4,14 @@
  * Para cada conta RECORRENTE confirmada (PRONEP-NF-Recorrentes, EhRecorrente=Sim,
  * Ativo, dentro da DataFim), cruza com as NFs do mes-alvo e calcula o status:
  *   - 'aprovada'   : NF do mes ja aprovada (ou integrada/processada)
- *   - 'lancada'    : NF do mes lancada, aguardando aprovacao
- *   - 'rejeitada'  : NF do mes rejeitada (precisa reenviar)
+ *   - 'lancada'    : NF do mes lancada, aguardando aprovacao (fila)
  *   - 'atrasada'   : sem NF e o vencimento esperado JA passou
+ *
+ * NFs REJEITADAS sao ignoradas: contam apenas Aprovadas/integradas e em fila de
+ * aprovacao. Rejeitada costuma ser relancada sob outra chave, entao olhar a
+ * rejeitada so gerava falso "reenviar".
+ *
+ *   (continua)
  *   - 'risco'      : sem NF e o vencimento esperado entra no prazo D+5 (<=5 dias uteis)
  *   - 'aguardando' : sem NF e ainda nao chegou a hora
  *
@@ -241,20 +246,21 @@ module.exports = async function (context, req) {
     const contas = confirmadas.map(function (d) {
       const dia = d.diaVencimento && d.diaVencimento >= 1 && d.diaVencimento <= 31 ? Math.min(d.diaVencimento, ultimoDiaMes) : ultimoDiaMes;
       const vencEsperado = new Date(ano, mes, dia);
-      const nfs = nfsPorChave[d.chave] || [];
+      // IMPORTANTE: NFs Rejeitadas sao IGNORADAS de proposito. Uma conta rejeitada
+      // normalmente e relancada (e aprovada) sob outra chave — CNPJ de filial ou
+      // diretoria diferente — entao tratar a rejeitada como status do mes gerava
+      // falso "rejeitada/reenviar". So contam NFs aprovadas/integradas ou em fila
+      // de aprovacao. Se nao houver nenhuma, cai no calculo de aguardando/risco/atrasada.
+      const nfs = (nfsPorChave[d.chave] || []).filter(function (x) { return String(x.status) !== 'Rejeitada'; });
       let nf = null;
       if (nfs.length) {
-        // prioriza nao-rejeitada / mais recente
-        const naoRej = nfs.filter(function (x) { return String(x.status) !== 'Rejeitada'; });
-        const pool = naoRej.length ? naoRej : nfs;
-        nf = pool.sort(function (a, b) { return String(b.vencimento).localeCompare(String(a.vencimento)); })[0];
+        nf = nfs.sort(function (a, b) { return String(b.vencimento).localeCompare(String(a.vencimento)); })[0];
       }
       let status, diasUteis = null;
       if (nf) {
         const s = String(nf.status || '');
         if (s === 'Aprovada') status = (nf.integrado || nf.processado) ? 'integrada' : 'aprovada';
-        else if (s === 'Rejeitada') status = 'rejeitada';
-        else status = 'lancada'; // Lancada / AguardandoN2 / outros
+        else status = 'lancada'; // Lancada / AguardandoN2 / outros (fila de aprovacao)
       } else {
         diasUteis = diasUteisAte(hojeBRT, vencEsperado);
         if (diasUteis < 0) status = 'atrasada';
