@@ -62,14 +62,30 @@ async function listarArquivos(client, siteId, email) {
   const folder = pastaDoUsuario(email);
   try {
     const resp = await client.api('/sites/' + siteId + '/drive/root:/' + folder + ':/children')
-      .select('id,name,size,createdDateTime,file,folder,@microsoft.graph.downloadUrl').get();
+      .select('id,name,size,createdDateTime,description,file,folder,@microsoft.graph.downloadUrl').get();
     return (resp.value || []).filter(function (x) { return x.file && !x.folder; }).map(function (x) {
+      var desc = x.description || '';
+      var estado = 'avulso', lancadaEm = null, notaId = null;
+      if (desc.indexOf('caixa:lancada') === 0) {
+        estado = 'lancada';
+        var p = desc.split('|');
+        lancadaEm = p[1] || null;
+        notaId = p[2] || null;
+      } else if (desc.indexOf('caixa:combinado') === 0) {
+        estado = 'combinado';
+      }
       return {
         id: x.id, nome: x.name, tamanho: x.size || 0,
         criadoEm: x.createdDateTime || null,
+        estado: estado, lancadaEm: lancadaEm, notaId: notaId,
         urlDownload: x['@microsoft.graph.downloadUrl'] || null
       };
-    }).sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); });
+    }).sort(function (a, b) {
+      // Lançadas sempre no fim; dentro de cada grupo, mais recentes primeiro
+      var la = a.estado === 'lancada' ? 1 : 0, lb = b.estado === 'lancada' ? 1 : 0;
+      if (la !== lb) return la - lb;
+      return String(b.criadoEm).localeCompare(String(a.criadoEm));
+    });
   } catch (e) {
     // Pasta ainda nao existe -> caixa vazia
     if (e.statusCode === 404) return [];
@@ -141,6 +157,8 @@ module.exports = async function (context, req) {
       const meus = await listarArquivos(client, siteId, email);
       const meusIds = {}; meus.forEach(function (a) { meusIds[a.id] = a; });
       for (const id of ids) { if (!meusIds[id]) { context.res = { status: 403, body: { error: 'Arquivo fora da sua caixa' } }; return; } }
+      // So combina avulsos — combinados/lancados nao podem ser recombinados
+      for (const id of ids) { if (meusIds[id].estado && meusIds[id].estado !== 'avulso') { context.res = { status: 400, body: { error: 'Selecione apenas arquivos avulsos para combinar' } }; return; } }
 
       const { PDFDocument } = require('pdf-lib');
       const merged = await PDFDocument.create();
@@ -156,11 +174,53 @@ module.exports = async function (context, req) {
       }
       const out = await merged.save();
       const outBuf = Buffer.from(out);
-      const nomeCombinado = 'combinado_' + new Date().toISOString().substring(0, 10) + '.pdf';
+
+      // Grava o PDF unificado na propria pasta da caixa (vira o item do historico).
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const nomeCombinado = stamp + '__combinada__' + ids.length + 'NFs.pdf';
+      const upPath = '/sites/' + siteId + '/drive/root:/' + encodeURIComponent(folder).replace(/%2F/g, '/') + '/' + encodeURIComponent(nomeCombinado) + ':/content';
+      const novo = await client.api(upPath).header('Content-Type', 'application/pdf').put(outBuf);
+      // Marca o item como "combinado" (pronto para lancar)
+      try { await client.api('/sites/' + siteId + '/drive/items/' + novo.id).update({ description: 'caixa:combinado' }); } catch (e) { /* nao critico */ }
+
+      // So depois de salvar o unificado com sucesso, exclui os avulsos de origem.
+      const apagados = [];
+      for (const id of ids) {
+        try { await client.api('/sites/' + siteId + '/drive/items/' + id).delete(); apagados.push(id); } catch (e) { /* ignora */ }
+      }
+
       context.res = {
         status: 200, headers: { 'Content-Type': 'application/json' },
-        body: { ok: true, fileName: nomeCombinado, fileBase64: 'data:application/pdf;base64,' + outBuf.toString('base64'), tamanho: outBuf.length, qtdArquivos: ids.length }
+        body: { ok: true, id: novo.id, nome: novo.name, tamanho: outBuf.length, qtdArquivos: ids.length, apagados: apagados }
       };
+      return;
+    }
+
+    // ===== BAIXAR (base64) — usado pelo "Realizar lancamento" =====
+    if (action === 'baixar') {
+      const id = body.id;
+      if (!id) { context.res = { status: 400, body: { error: 'id obrigatorio' } }; return; }
+      const meus = await listarArquivos(client, siteId, email);
+      const item = meus.find(function (a) { return a.id === id; });
+      if (!item) { context.res = { status: 403, body: { error: 'Arquivo fora da sua caixa' } }; return; }
+      const buf = await baixarPdfBuffer(client, siteId, item);
+      if (!buf || !buf.length) { context.res = { status: 502, body: { error: 'Falha ao baixar PDF' } }; return; }
+      context.res = {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+        body: { ok: true, fileName: item.nome, fileBase64: 'data:application/pdf;base64,' + buf.toString('base64'), tamanho: buf.length }
+      };
+      return;
+    }
+
+    // ===== MARCAR LANCADA — chamado apos o PostNota concluir com sucesso =====
+    if (action === 'marcarLancada') {
+      const id = body.id;
+      if (!id) { context.res = { status: 400, body: { error: 'id obrigatorio' } }; return; }
+      const meus = await listarArquivos(client, siteId, email);
+      if (!meus.find(function (a) { return a.id === id; })) { context.res = { status: 403, body: { error: 'Arquivo fora da sua caixa' } }; return; }
+      const marca = 'caixa:lancada|' + new Date().toISOString() + '|' + (body.notaId ? String(body.notaId).slice(0, 60) : '');
+      await client.api('/sites/' + siteId + '/drive/items/' + id).update({ description: marca });
+      context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: { ok: true } };
       return;
     }
 
@@ -179,7 +239,7 @@ module.exports = async function (context, req) {
       return;
     }
 
-    context.res = { status: 400, body: { error: 'action invalida (use upload|combinar|excluir)' } };
+    context.res = { status: 400, body: { error: 'action invalida (use upload|combinar|baixar|marcarLancada|excluir)' } };
   } catch (err) {
     context.log && context.log.error && context.log.error('CaixaEntrada error:', err);
     context.res = { status: 500, headers: { 'Content-Type': 'application/json' }, body: { error: (err && err.message) || String(err) } };
