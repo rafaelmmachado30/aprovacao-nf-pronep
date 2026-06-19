@@ -2278,6 +2278,10 @@ function loginAs(userData, emailLogin) {
   const base = personas[userData.persona];
   // Resolve o e-mail (vem do login ou da lista)
   const email = emailLogin || Object.entries(usuariosReconhecidos).find(([k,v]) => v.nome === userData.nome)?.[0] || '';
+  // canSee = ADITIVO: telas do papel + telas extras liberadas via Central de Acessos.
+  const telasExtras = Array.isArray(userData.telasExtras) ? userData.telasExtras : [];
+  const canSee = (base.canSee || []).slice();
+  telasExtras.forEach(function (t) { if (canSee.indexOf(t) < 0) canSee.push(t); });
   // Clonar e personalizar
   currentPersona = Object.assign({}, base, {
     name: userData.nome,
@@ -2285,7 +2289,8 @@ function loginAs(userData, emailLogin) {
     initials: userData.nome.split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase(),
     role: userData.cargo || base.role,
     roleKey: userData.persona,  // CHAVE real ('admin','financeiro','gestor','submitter') - separada do role de display
-    dept: userData.dept || base.dept
+    dept: userData.dept || base.dept,
+    canSee: canSee
   });
   document.getElementById('user-email').textContent = currentPersona.email || '—';
   document.getElementById('user-roles').textContent = currentPersona.role;
@@ -2846,7 +2851,7 @@ async function tryAutoLoginFromAzure() {
         .join(' ');
       userData = { persona, nome, cargo: persona.charAt(0).toUpperCase() + persona.slice(1) };
     }
-    userData = Object.assign({}, userData, { persona });
+    userData = Object.assign({}, userData, { persona, telasExtras: (data.telasExtras || []) });
 
     loginAs(userData, email);
     carregarDadosIniciais();  // carrega fornecedores+diretorias do SharePoint
@@ -4404,8 +4409,8 @@ const views = {
     return renderConfiguracoesView();
   },
   'controle-acessos': () => {
-    setTimeout(carregarControleAcessos, 30);
-    return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Carregando Controle de Acessos...</div><div class="small muted">Buscando diretorias e gestores</div></div>';
+    setTimeout(function () { centralAcessosTab('telas'); }, 30);
+    return renderCentralAcessosShell();
   },
   'contas-recorrentes': () => {
     setTimeout(carregarRecorrentes, 30);
@@ -4987,8 +4992,210 @@ function caLabelDoRole(role) {
   return g ? g.label : role;
 }
 
+// ============================================================================
+// CENTRAL DE CONTROLE DE ACESSOS — shell com abas (Telas do sistema | Contratos)
+// ============================================================================
+function renderCentralAcessosShell() {
+  return '' +
+    '<h2>Central de Controle de Acessos</h2>' +
+    '<div class="view-sub">Gerencie quem acessa o quê. Em <b>Telas do sistema</b>, libere telas para grupos inteiros ou pessoas específicas (soma ao que o papel já dá — nunca remove). Em <b>Contratos</b>, controle o acesso às pastas de contratos.</div>' +
+    '<div style="display:flex;gap:6px;margin:10px 0 16px;border-bottom:1px solid var(--cinza-borda)">' +
+      '<button id="central-tab-telas" onclick="centralAcessosTab(\'telas\')" style="border:none;border-bottom:3px solid transparent;border-radius:0;background:none;font-weight:600;padding:9px 14px;cursor:pointer;color:#6B7280">Telas do sistema</button>' +
+      '<button id="central-tab-contratos" onclick="centralAcessosTab(\'contratos\')" style="border:none;border-bottom:3px solid transparent;border-radius:0;background:none;font-weight:600;padding:9px 14px;cursor:pointer;color:#6B7280">Contratos</button>' +
+    '</div>' +
+    '<div id="central-pane"><div class="card" style="text-align:center;padding:30px"><div class="small muted">Carregando...</div></div></div>';
+}
+
+function centralAcessosTab(tab) {
+  window._centralTab = tab;
+  const bt = document.getElementById('central-tab-telas');
+  const bc = document.getElementById('central-tab-contratos');
+  if (bt) { bt.style.borderBottomColor = (tab === 'telas') ? 'var(--azul-escuro)' : 'transparent'; bt.style.color = (tab === 'telas') ? 'var(--azul-escuro)' : '#6B7280'; }
+  if (bc) { bc.style.borderBottomColor = (tab === 'contratos') ? 'var(--azul-escuro)' : 'transparent'; bc.style.color = (tab === 'contratos') ? 'var(--azul-escuro)' : '#6B7280'; }
+  const pane = document.getElementById('central-pane');
+  if (pane) pane.innerHTML = '<div class="card" style="text-align:center;padding:30px"><div class="small muted">Carregando...</div></div>';
+  if (tab === 'contratos') carregarControleAcessos();
+  else carregarControleAcessosTelas();
+}
+
+// ---- Aba "Telas do sistema" (espelha o controle de contratos, alvo = TELA) ----
+function caTLabelDoRole(role) {
+  const g = (window._caTelas && window._caTelas.grupos || []).find(function (x) { return String(x.role).toLowerCase() === String(role).toLowerCase(); });
+  return g ? g.label : role;
+}
+
+async function carregarControleAcessosTelas() {
+  const area = document.getElementById('central-pane') || document.getElementById('content-area');
+  if (!area) return;
+  try {
+    const r = await fetch('/api/GetControleAcessosTelas', { credentials: 'include' });
+    if (r.status === 403) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Acesso restrito a administradores.</div>'; return; }
+    if (!r.ok) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Falha ao carregar Telas (HTTP ' + r.status + ')</div>'; return; }
+    const data = await r.json();
+    window._caTelas = { telas: data.telas || [], grupos: data.grupos || [], acessos: data.acessos || {}, telaSel: '', grupoSel: '', tokenSet: new Set(), membrosCache: {} };
+    area.innerHTML = renderTelasView();
+  } catch (e) {
+    area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>' + escHtml(e.message || 'erro') + '</div>';
+  }
+}
+
+function renderTelasView() {
+  const ct = window._caTelas || {};
+  const telas = ct.telas || [];
+  const opts = ['<option value="">— selecione uma tela —</option>'].concat(
+    telas.map(function (t) { return '<option value="' + escAttr(t.id) + '"' + (ct.telaSel === t.id ? ' selected' : '') + '>' + escHtml(t.label) + '</option>'; })
+  ).join('');
+  return '' +
+    '<div class="card">' +
+      '<label style="font-weight:600;color:var(--azul-escuro)">Tela do sistema</label><br>' +
+      '<select id="cat-tela" onchange="caTSelecionarTela(this.value)" style="width:100%;max-width:420px;margin-top:6px;padding:8px;border:1px solid var(--cinza-borda);border-radius:6px">' + opts + '</select>' +
+      '<div id="cat-corpo" style="margin-top:18px">' + (ct.telaSel ? caTRenderCorpo() : '<div class="small muted">Selecione uma tela para começar. Quem você liberar aqui passa a ver a tela <b>além</b> de quem já vê pelo papel.</div>') + '</div>' +
+    '</div>';
+}
+
+function caTRenderResumo() {
+  const ct = window._caTelas;
+  const toks = Array.from(ct.tokenSet || []);
+  const gruposInt = toks.filter(function (t) { return t.indexOf('@') < 0; });
+  const pessoas = toks.filter(function (t) { return t.indexOf('@') >= 0; });
+  const partes = [];
+  gruposInt.forEach(function (r) { partes.push('grupo <b>' + escHtml(caTLabelDoRole(r)) + '</b> (inteiro)'); });
+  if (pessoas.length) partes.push('<b>' + pessoas.length + '</b> pessoa(s) específica(s)');
+  return '<div style="background:#F0FDF4;border:1px solid #A7F3D0;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px">' +
+    '<b>Acesso extra a esta tela:</b> ' + (partes.length ? partes.join(' · ') : '<span class="muted">nada configurado (só quem já vê pelo papel)</span>') + '</div>';
+}
+
+function caTRenderCorpo() {
+  const ct = window._caTelas;
+  if (!ct || !ct.telaSel) return '';
+  const optsGrupo = ['<option value="">— escolha um grupo —</option>'].concat(
+    (ct.grupos || []).map(function (g) { return '<option value="' + escAttr(g.role) + '"' + (ct.grupoSel === g.role ? ' selected' : '') + '>' + escHtml(g.label) + '</option>'; })
+  ).join('');
+  return caTRenderResumo() +
+    '<label style="font-weight:600;color:var(--azul-escuro)">Grupo</label><br>' +
+    '<select id="cat-grupo" onchange="caTSelecionarGrupo(this.value)" style="width:100%;max-width:360px;margin-top:6px;padding:8px;border:1px solid var(--cinza-borda);border-radius:6px">' + optsGrupo + '</select>' +
+    '<div id="cat-grupo-painel" style="margin-top:14px">' + (ct.grupoSel ? caTRenderGrupoPainel() : '<div class="small muted">Escolha um grupo para liberar o grupo inteiro ou pessoas dele.</div>') + '</div>' +
+    '<div style="margin-top:16px;display:flex;gap:10px;align-items:center">' +
+      '<button class="btn btn-primary" onclick="caTSalvar()">Salvar acessos desta tela</button>' +
+      '<span id="cat-msg" class="small muted"></span>' +
+    '</div>';
+}
+
+function caTRenderGrupoPainel() {
+  const ct = window._caTelas;
+  const role = ct.grupoSel;
+  if (!role) return '';
+  const inteiro = ct.tokenSet.has(String(role).toLowerCase());
+  let html = '<label style="display:flex;align-items:center;gap:8px;font-weight:600;cursor:pointer;margin-bottom:10px">' +
+    '<input type="checkbox" ' + (inteiro ? 'checked' : '') + ' onchange="caTToggleInteiro(this.checked)"> Liberar o grupo INTEIRO (' + escHtml(caTLabelDoRole(role)) + ') — atualiza automático quando a composição muda</label>';
+  if (inteiro) {
+    html += '<div class="small muted">Grupo inteiro liberado. Desmarque acima para escolher pessoas específicas.</div>';
+    return html;
+  }
+  const membros = ct.membrosCache[role] || [];
+  if (!membros.length) { html += '<div class="small muted">Nenhum integrante encontrado neste grupo.</div>'; return html; }
+  const disp = membros.filter(function (m) { return !ct.tokenSet.has(m.email); });
+  const com = membros.filter(function (m) { return ct.tokenSet.has(m.email); });
+  function opt(arr) { return arr.map(function (m) { return '<option value="' + escAttr(m.email) + '">' + escHtml(m.nome) + ' (' + escHtml(m.email) + ')</option>'; }).join(''); }
+  html += '<div style="display:flex;gap:14px;align-items:stretch;flex-wrap:wrap">' +
+    '<div style="flex:1;min-width:220px"><div style="font-weight:600;font-size:13px;margin-bottom:4px">Integrantes (' + disp.length + ')</div>' +
+      '<select id="cat-memb-disp" multiple size="10" style="width:100%;border:1px solid var(--cinza-borda);border-radius:6px;padding:4px;font-size:13px">' + opt(disp) + '</select></div>' +
+    '<div style="display:flex;flex-direction:column;justify-content:center;gap:8px">' +
+      '<button class="btn btn-secondary" onclick="caTMoverMembro(\'add\')" title="Liberar">→</button>' +
+      '<button class="btn btn-secondary" onclick="caTMoverMembro(\'rem\')" title="Remover">←</button></div>' +
+    '<div style="flex:1;min-width:220px"><div style="font-weight:600;font-size:13px;margin-bottom:4px;color:#065F46">Com acesso (' + com.length + ')</div>' +
+      '<select id="cat-memb-com" multiple size="10" style="width:100%;border:1px solid #A7F3D0;background:#F0FDF4;border-radius:6px;padding:4px;font-size:13px">' + opt(com) + '</select></div>' +
+  '</div>';
+  return html;
+}
+
+function caTRefreshCorpo() { const c = document.getElementById('cat-corpo'); if (c) c.innerHTML = caTRenderCorpo(); }
+
+function caTSelecionarTela(telaId) {
+  const ct = window._caTelas;
+  if (!ct) return;
+  ct.telaSel = telaId || '';
+  ct.grupoSel = '';
+  if (!telaId) { ct.tokenSet = new Set(); const e0 = document.getElementById('cat-corpo'); if (e0) e0.innerHTML = '<div class="small muted">Selecione uma tela.</div>'; return; }
+  const explicit = (ct.acessos && Array.isArray(ct.acessos[telaId])) ? ct.acessos[telaId] : [];
+  ct.tokenSet = new Set(explicit.map(function (t) { return String(t).toLowerCase(); }));
+  caTRefreshCorpo();
+}
+
+async function caTSelecionarGrupo(role) {
+  const ct = window._caTelas;
+  if (!ct) return;
+  ct.grupoSel = role || '';
+  if (!role) { const e0 = document.getElementById('cat-grupo-painel'); if (e0) e0.innerHTML = '<div class="small muted">Escolha um grupo.</div>'; return; }
+  if (!ct.membrosCache[role]) {
+    const painel = document.getElementById('cat-grupo-painel'); if (painel) painel.innerHTML = '<div class="small muted">Carregando integrantes...</div>';
+    try {
+      const r = await fetch('/api/ListarMembrosGrupo?role=' + encodeURIComponent(role), { credentials: 'include' });
+      const d = await r.json();
+      ct.membrosCache[role] = (r.ok && d.membros) ? d.membros : [];
+    } catch (e) { ct.membrosCache[role] = []; }
+  }
+  const el = document.getElementById('cat-grupo-painel'); if (el) el.innerHTML = caTRenderGrupoPainel();
+}
+
+function caTToggleInteiro(checked) {
+  const ct = window._caTelas;
+  const role = String(ct.grupoSel).toLowerCase();
+  if (!role) return;
+  if (checked) {
+    ct.tokenSet.add(role);
+    (ct.membrosCache[ct.grupoSel] || []).forEach(function (m) { ct.tokenSet.delete(m.email); }); // remove pessoas redundantes
+  } else {
+    ct.tokenSet.delete(role);
+  }
+  caTRefreshCorpo();
+}
+
+function caTMoverMembro(acao) {
+  const ct = window._caTelas;
+  if (!ct || !ct.grupoSel) return;
+  const sel = document.getElementById(acao === 'add' ? 'cat-memb-disp' : 'cat-memb-com');
+  if (!sel) return;
+  const emails = Array.from(sel.selectedOptions).map(function (o) { return String(o.value).toLowerCase(); });
+  if (acao === 'add') emails.forEach(function (e) { ct.tokenSet.add(e); });
+  else emails.forEach(function (e) { ct.tokenSet.delete(e); });
+  caTRefreshCorpo();
+}
+
+async function caTSalvar() {
+  const ct = window._caTelas;
+  if (!ct || !ct.telaSel) return;
+  const tokens = Array.from(ct.tokenSet);
+  let msg = document.getElementById('cat-msg');
+  if (msg) { msg.textContent = 'Salvando...'; msg.style.color = ''; }
+  try {
+    const r = await fetch('/api/SalvarControleAcessosTelas', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tela: ct.telaSel, tokens: tokens }) });
+    const data = await r.json().catch(function () { return {}; });
+    if (!r.ok || !data.ok) {
+      if (msg) { msg.textContent = '✗ Erro ao salvar: ' + (data.error || ('HTTP ' + r.status)); msg.style.color = 'var(--vermelho)'; }
+      return;
+    }
+    ct.acessos = data.acessos || ct.acessos || {};
+    const conf = (ct.acessos[ct.telaSel] || []);
+    ct.tokenSet = new Set(conf.map(function (t) { return String(t).toLowerCase(); }));
+    caTRefreshCorpo();
+    msg = document.getElementById('cat-msg');
+    if (msg) {
+      const nGrupos = conf.filter(function (t) { return String(t).indexOf('@') < 0; }).length;
+      const nPessoas = conf.filter(function (t) { return String(t).indexOf('@') >= 0; }).length;
+      msg.textContent = conf.length
+        ? '✓ Salvo! Esta tela agora libera ' + nGrupos + ' grupo(s) inteiro(s) + ' + nPessoas + ' pessoa(s). (Eles veem na próxima vez que abrirem o sistema.)'
+        : '✓ Salvo! Tela sem acesso extra (só quem já vê pelo papel).';
+      msg.style.color = 'var(--verde)';
+    }
+  } catch (e) {
+    msg = document.getElementById('cat-msg');
+    if (msg) { msg.textContent = '✗ Erro de rede: ' + (e.message || 'falha'); msg.style.color = 'var(--vermelho)'; }
+  }
+}
+
 async function carregarControleAcessos() {
-  const area = document.getElementById('content-area');
+  const area = document.getElementById('central-pane') || document.getElementById('content-area');
   if (!area) return;
   try {
     const r = await fetch('/api/GetControleAcessos', { credentials: 'include' });

@@ -16,6 +16,7 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
+const { lerMapaTelas, telasLiberadasPara } = require('../shared/acessoTelas');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -163,6 +164,20 @@ module.exports = async function (context, req) {
     const aggregated = new Set(roles);
     if (roles.some(r => r.startsWith('gestor_'))) aggregated.add('gestor');
 
+    // Telas extras liberadas via Central de Controle de Acessos (ADITIVO ao canSee
+    // do papel). Best-effort: se a config falhar, segue sem telas extras.
+    diag.step = 'telas_extras';
+    let telasExtras = [];
+    try {
+      const host = process.env.SHAREPOINT_SITE_HOSTNAME;
+      const sitePath = process.env.SHAREPOINT_SITE_PATH;
+      if (host && sitePath) {
+        const siteResp = await client.api('/sites/' + host + ':' + sitePath).get();
+        const mapaTelas = await lerMapaTelas(client, siteResp.id, null);
+        telasExtras = telasLiberadasPara(principal.userDetails || '', Array.from(aggregated), mapaTelas);
+      }
+    } catch (e) { /* sem telas extras */ }
+
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
@@ -173,7 +188,8 @@ module.exports = async function (context, req) {
         identityProvider: principal.identityProvider || null,
         groups,
         roles,
-        rolesAggregated: Array.from(aggregated)
+        rolesAggregated: Array.from(aggregated),
+        telasExtras: telasExtras
       }
     };
   } catch (err) {

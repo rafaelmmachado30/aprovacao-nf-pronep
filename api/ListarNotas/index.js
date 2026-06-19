@@ -13,6 +13,7 @@ require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
 const { isAdminEmail } = require('../shared/authz');
+const { lerMapaTelas, telasLiberadasPara } = require('../shared/acessoTelas');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -157,6 +158,30 @@ module.exports = async function (context, req) {
       notasFiltradas = notas.filter(n => (n.AprovadorAtual || '').toLowerCase() === userEmail);
     } else {
       notasFiltradas = notas.filter(n => (n.LancadoPor || '').toLowerCase() === userEmail);
+    }
+
+    // === Ampliacao ADITIVA via Central de Controle de Acessos ===
+    // Quem teve uma tela compartilhada liberada (ex.: contabil -> "Aprovadas") passa a
+    // ver TODAS as NFs daquele status (empresa toda), somadas ao que ja via pelo papel.
+    // So adiciona, nunca remove. Quem ja ve tudo (admin/financeiro/?todos) nao precisa.
+    diag.step = 'ampliacao_central';
+    if (!(isAdmin || isFinanceiro || qTodos)) {
+      try {
+        const mapaTelas = await lerMapaTelas(client, siteId, null);
+        const telasLib = telasLiberadasPara(userEmail, userRoles, mapaTelas);
+        const statusAmplo = new Set();
+        if (telasLib.indexOf('aprovadas') >= 0) statusAmplo.add('aprovada');
+        if (telasLib.indexOf('rejeitadas') >= 0) statusAmplo.add('rejeitada');
+        if (telasLib.indexOf('fila-aprovacao') >= 0) { statusAmplo.add('lancada'); statusAmplo.add('aguardandon2'); }
+        if (statusAmplo.size) {
+          const jaTem = new Set(notasFiltradas.map(n => n.id));
+          for (const n of notas) {
+            const s = String(n.Status || '').toLowerCase().replace(/\s+/g, '');
+            if (statusAmplo.has(s) && !jaTem.has(n.id)) { notasFiltradas.push(n); jaTem.add(n.id); }
+          }
+          diag.telasAmpliadas = telasLib;
+        }
+      } catch (e) { diag.ampliacaoErr = (e && e.message) || String(e); }
     }
 
     // Filtros query string adicionais
