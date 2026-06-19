@@ -48,7 +48,15 @@ module.exports = async function (context, req) {
     const client = getGraphClient();
     const siteId = await resolveSite(client);
     const acessos = await lerMapaTelas(client, siteId, null);
-    const grupos = gruposContrato(); // lista canonica [{role,label}] dos grupos do Entra
+    // Grupos liberaveis nesta aba: alem dos grupos de diretoria (gruposContrato),
+    // tambem Submetedores e TI — fazem sentido pra liberar TELAS (nao pra contratos).
+    // roleParaGrupoId resolve esses roles (estao no GROUP_TO_ROLE), entao a listagem
+    // de membros (ListarMembrosGrupo) funciona normalmente.
+    const extras = [
+      { role: 'submitter', label: 'Submetedores' },
+      { role: 'ti',        label: 'TI / Suporte' }
+    ];
+    const grupos = extras.concat(gruposContrato());
 
     context.res = {
       status: 200,
