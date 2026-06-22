@@ -155,7 +155,12 @@ module.exports = async function (context, req) {
     if (isAdmin || isFinanceiro || qTodos) {
       notasFiltradas = notas;
     } else if (isGestor) {
-      notasFiltradas = notas.filter(n => (n.AprovadorAtual || '').toLowerCase() === userEmail);
+      // Gestor ve as notas que APROVA (AprovadorAtual) E TAMBEM as que ele mesmo
+      // LANCOU — senao um gestor que lanca NF nao a enxerga em "Minhas NFs".
+      notasFiltradas = notas.filter(n =>
+        (n.AprovadorAtual || '').toLowerCase() === userEmail ||
+        (n.LancadoPor || '').toLowerCase() === userEmail
+      );
     } else {
       notasFiltradas = notas.filter(n => (n.LancadoPor || '').toLowerCase() === userEmail);
     }
