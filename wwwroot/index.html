@@ -498,7 +498,12 @@
      Em mobile (<768px): tabelas escondidas, cards visiveis
      ============================================================================ */
   .nf-cards-mobile { display: none; }
-  .data-table-desktop { display: block; }
+  .data-table-desktop { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Tabelas largas (Aprovadas/Fila/Rejeitadas) nao devem espremer: largura minima
+     garante espaco pra coluna Acoes; o card rola na horizontal quando faltar largura. */
+  .data-table-desktop table.data { min-width: 1080px; }
+  .data-table-desktop table.data td:last-child,
+  .data-table-desktop table.data th:last-child { white-space: nowrap; }
 
   @media (max-width: 768px) {
     .nf-cards-mobile { display: flex; flex-direction: column; gap: 10px; padding: 4px 2px; }
