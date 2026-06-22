@@ -9,6 +9,7 @@
 
 require('isomorphic-fetch');
 const { resolveAuthz } = require('../shared/authz');
+const { lerMapaTelas, telasLiberadasPara } = require('../shared/acessoTelas');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -93,9 +94,25 @@ module.exports = async function (context, req) {
     // so onde e o aprovador; demais so o que lancaram.
     const lancadoPor = (fields.LancadoPor || '').toLowerCase();
     const aprovadorAtual = (fields.AprovadorAtual || '').toLowerCase();
-    const podeVer = authz.isAdmin || authz.isFinanceiro
+    let podeVer = authz.isAdmin || authz.isFinanceiro
       || (authz.isGestor && aprovadorAtual === authz.email)
       || (lancadoPor === authz.email);
+
+    // Ampliacao ADITIVA via Central de Controle de Acessos: se o usuario ganhou a tela
+    // correspondente ao status desta NF (ex.: contabil -> "Aprovadas"), pode abrir o PDF.
+    // Mesmo criterio do escopo do ListarNotas — mantem as duas camadas coerentes.
+    if (!podeVer) {
+      try {
+        const mapaTelas = await lerMapaTelas(client, siteId, null);
+        const telasLib = telasLiberadasPara(authz.email, authz.roles, mapaTelas);
+        const s = String(status).toLowerCase().replace(/\s+/g, '');
+        if ((s === 'aprovada' && telasLib.indexOf('aprovadas') >= 0) ||
+            (s === 'rejeitada' && telasLib.indexOf('rejeitadas') >= 0) ||
+            ((s === 'lancada' || s === 'aguardandon2') && telasLib.indexOf('fila-aprovacao') >= 0)) {
+          podeVer = true;
+        }
+      } catch (e) { /* na duvida, mantem negado */ }
+    }
     if (!podeVer) {
       context.res = { status: 403, headers: { 'Content-Type': 'text/html; charset=utf-8' },
         body: htmlErro('Acesso negado', 'Voce nao tem permissao para abrir o PDF desta nota fiscal.') };
