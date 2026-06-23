@@ -24,6 +24,7 @@ const { getUser } = require('../shared/auth');
 const { getUserRoles, ROLE_LABELS } = require('../shared/userRoles');
 const { isAdminEmail } = require('../shared/authz');
 const { lerDecisoes, chaveRecorrente, _norm } = require('../shared/recorrentes');
+const { lerConciliacoes, chaveConc } = require('../shared/conciliacaoRecorrentes');
 const { ClientSecretCredential } = require('@azure/identity');
 const { Client } = require('@microsoft/microsoft-graph-client');
 const { TokenCredentialAuthenticationProvider } =
@@ -180,6 +181,9 @@ module.exports = async function (context, req) {
     const client = getGraphClient();
     const { siteId, listNotasId } = await resolveSite(client);
     const decisoes = await lerDecisoes(client, siteId, null);
+    // Conciliacoes manuais (Merge) do mes — best-effort.
+    let conciliacoes = {};
+    try { conciliacoes = await lerConciliacoes(client, siteId, null); } catch (e) { conciliacoes = {}; }
     if (!decisoes.listId) {
       context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
         body: { ok: true, listaDecisoesExiste: false, mes: mesKeyAlvo, contas: [], resumo: {}, diretoriasDisponiveis: [] } };
@@ -267,6 +271,15 @@ module.exports = async function (context, req) {
         else if (diasUteis <= D5_DIAS_UTEIS) status = 'risco';
         else status = 'aguardando';
       }
+
+      // Conciliacao manual (Merge) tem PRECEDENCIA: resolve a conta no mes, apontando
+      // a NF aprovada que o gestor vinculou. Elimina o falso "atrasada".
+      const link = conciliacoes[chaveConc(d.chave, mesKeyAlvo)];
+      if (link) {
+        status = 'conciliada';
+        diasUteis = null;
+      }
+
       return {
         chave: d.chave, cnpj: d.cnpj,
         fornecedor: d.fornecedor || nomeForn(d.cnpj, ''),
@@ -276,12 +289,15 @@ module.exports = async function (context, req) {
         valorEstimado: d.valorEstimado || null,
         diasUteisAteVenc: diasUteis,
         status: status,
-        nf: nf ? { id: nf.id, numero: nf.numero, status: nf.status, valor: nf.valor, vencimento: nf.vencimento } : null
+        nf: nf
+          ? { id: nf.id, numero: nf.numero, status: nf.status, valor: nf.valor, vencimento: nf.vencimento }
+          : (link ? { id: link.notaId, numero: link.numero, status: link.status, valor: link.valor, vencimento: null } : null),
+        conciliada: link ? { numero: link.numero, por: link.por, em: link.em } : null
       };
     });
 
-    // Ordena por urgencia
-    const ordem = { atrasada: 0, risco: 1, rejeitada: 2, aguardando: 3, lancada: 4, aprovada: 5, integrada: 6 };
+    // Ordena por urgencia (conciliada conta como resolvida, perto de aprovada)
+    const ordem = { atrasada: 0, risco: 1, rejeitada: 2, aguardando: 3, lancada: 4, conciliada: 5, aprovada: 6, integrada: 7 };
     contas.sort(function (a, b) {
       const oa = ordem[a.status] != null ? ordem[a.status] : 9;
       const ob = ordem[b.status] != null ? ordem[b.status] : 9;
@@ -289,7 +305,7 @@ module.exports = async function (context, req) {
       return String(a.vencEsperado).localeCompare(String(b.vencEsperado));
     });
 
-    const resumo = { atrasada: 0, risco: 0, aguardando: 0, lancada: 0, aprovada: 0, integrada: 0, rejeitada: 0 };
+    const resumo = { atrasada: 0, risco: 0, aguardando: 0, lancada: 0, conciliada: 0, aprovada: 0, integrada: 0, rejeitada: 0 };
     contas.forEach(function (c) { if (resumo[c.status] != null) resumo[c.status]++; });
 
     diag.step = 'done';
