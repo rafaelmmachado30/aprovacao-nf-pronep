@@ -2344,6 +2344,21 @@ function esconderLoadingInicial() {
   if (el) { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(()=>el.remove(), 350); }
 }
 
+// Indicador discreto (canto inferior) enquanto as notas carregam em segundo plano.
+// Nao bloqueia a UI — o usuario ja pode navegar; as listas se preenchem ao concluir.
+function _mostrarPillNotas() {
+  if (document.getElementById('notas-loading-pill')) return;
+  const p = document.createElement('div');
+  p.id = 'notas-loading-pill';
+  p.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:9000;background:#1F4E79;color:#fff;border-radius:20px;padding:8px 14px;font-size:13px;box-shadow:0 2px 10px rgba(0,0,0,.18);display:flex;align-items:center;gap:8px';
+  p.innerHTML = '<span style="width:14px;height:14px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;display:inline-block;animation:spin .8s linear infinite"></span> Carregando notas...';
+  document.body.appendChild(p);
+}
+function _esconderPillNotas() {
+  const p = document.getElementById('notas-loading-pill');
+  if (p) { p.style.opacity = '0'; p.style.transition = 'opacity .3s'; setTimeout(()=>p.remove(), 350); }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   mostrarLoadingInicial();
 
@@ -2746,8 +2761,10 @@ async function carregarDadosIniciais() {
   // Guard contra chamadas simultaneas
   if (window._carregamentoEmAndamento) return window._carregamentoEmAndamento;
   window._carregamentoEmAndamento = (async () => {
+    const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
     try {
-      // Carrega fornecedores+diretorias PRIMEIRO (notas dependem do fornecedores pra mapping)
+      // Carrega as REFERENCIAS (fornecedores/diretorias/gestores/config/feriados).
+      // As notas NAO entram aqui — saem do caminho critico pra UI abrir antes.
       await Promise.all([
         carregarFornecedoresReais().catch(e => console.error('[carregarFornecedores]', e)),
         carregarDiretoriasReais().catch(e => console.error('[carregarDiretorias]', e)),
@@ -2755,20 +2772,26 @@ async function carregarDadosIniciais() {
         carregarConfigSistema().catch(e => console.error('[carregarConfig]', e)),
         carregarFeriadosBR().catch(e => console.error('[carregarFeriados]', e))
       ]);
-      // Depois carrega as notas (que mapeiam fornecedorIdx pelo array de fornecedores)
-      try { await carregarNotasReais(); } catch (e) { console.error('[carregarNotas]', e); }
-      // Re-renderiza qualquer view que dependa de fornecedores/diretorias
-      const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
-      if (viewsQueDependem.includes(currentView)) {
-        try { showView(currentView); } catch (e) { console.error('[showView no boot]', e); }
-      }
     } catch (e) {
       console.error('[carregarDadosIniciais] erro geral:', e);
     } finally {
-      // CRITICO: SEMPRE esconde o loading, mesmo se algo der errado.
-      // Antes, se qualquer await throwasse, o usuario ficava preso na tela "Carregando sistema...".
+      // Libera a UI assim que as referencias estao prontas (perf: nao espera as notas).
       esconderLoadingInicial();
+      if (viewsQueDependem.includes(currentView)) {
+        try { showView(currentView); } catch (e) { console.error('[showView no boot]', e); }
+      }
     }
+    // NOTAS EM SEGUNDO PLANO: a tela ja esta usavel; quando chegarem, re-renderiza
+    // a view atual pra preencher as listas. Indicador discreto enquanto carregam.
+    _mostrarPillNotas();
+    carregarNotasReais()
+      .catch(e => console.error('[carregarNotas]', e))
+      .finally(() => {
+        _esconderPillNotas();
+        if (viewsQueDependem.includes(currentView)) {
+          try { showView(currentView); } catch (e) { console.error('[showView pos-notas]', e); }
+        }
+      });
   })();
   return window._carregamentoEmAndamento;
 }
