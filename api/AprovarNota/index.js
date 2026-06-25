@@ -179,6 +179,10 @@ async function aplicarWatermark(pdfBuffer, aprovadorEmail) {
   // ignoreEncryption: alguns PDFs de NF vem com criptografia/permissoes (mesmo sem
   // senha de abertura). Sem isso o pdf-lib lanca "document is encrypted" no watermark.
   const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+  // IMPORTANTE: se o PDF e criptografado, o pdf-lib carrega mas NAO decifra os streams —
+  // salvar geraria um arquivo CORROMPIDO (nao abre no SharePoint). Nesse caso arquivamos
+  // o ORIGINAL intacto, sem watermark, pra preservar o documento legivel.
+  if (pdfDoc.isEncrypted) return pdfBuffer;
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
 

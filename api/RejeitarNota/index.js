@@ -103,6 +103,9 @@ async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
   // ignoreEncryption: PDFs de NF as vezes vem com criptografia/permissoes — sem isso
   // o pdf-lib falha no watermark com "document is encrypted".
   const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+  // Se criptografado, salvar com watermark geraria arquivo corrompido — arquiva o
+  // original intacto (sem o carimbo) pra nao perder o documento.
+  if (pdfDoc.isEncrypted) return pdfBuffer;
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
