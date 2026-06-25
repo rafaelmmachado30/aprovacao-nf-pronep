@@ -176,7 +176,9 @@ async function aplicarWatermark(pdfBuffer, aprovadorEmail) {
   // LAZY require — so carrega pdf-lib quando essa funcao for chamada
   const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 
-  const pdfDoc = await PDFDocument.load(pdfBuffer);
+  // ignoreEncryption: alguns PDFs de NF vem com criptografia/permissoes (mesmo sem
+  // senha de abertura). Sem isso o pdf-lib lanca "document is encrypted" no watermark.
+  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
