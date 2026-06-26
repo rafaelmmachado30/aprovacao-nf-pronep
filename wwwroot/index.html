@@ -4681,6 +4681,8 @@ async function salvarRecorrenteUI(i, btn) {
   } catch (e) {
     toast('Erro: ' + (e.message || e), 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+  } finally {
+    esconderSalvandoOverlay();
   }
 }
 
