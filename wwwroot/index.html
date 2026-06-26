@@ -8578,6 +8578,7 @@ async function submitNF() {
   btn.disabled = true;
   const labelOriginal = btn.textContent;
   btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:8px"></span>Enviando para SharePoint...';
+  mostrarSalvandoOverlay('Enviando NF para aprovação...');
 
   try {
     msgs.innerHTML = '<div class="alert alert-info" style="background:var(--azul-soft);border-left:3px solid var(--azul-claro);color:var(--azul-escuro);padding:10px;border-radius:4px"><span class="ico">⏳</span><div>Convertendo PDF e enviando ao SharePoint...</div></div>';
@@ -8769,6 +8770,7 @@ async function submitNF() {
       ? `<div style="margin-top:10px;padding:12px;background:#FEE2E2;border-left:3px solid #DC2626;border-radius:4px;font-size:13px;color:#7F1D1D;text-align:left"><b>⚠ Atencao: solicitante nao identificado</b><br>Sua sessao de autenticacao expirou no momento do lancamento. A NF foi gravada com solicitante <b>"desconhecido@pronep.com.br"</b>. Por favor, <b>recarregue a pagina (Ctrl+Shift+R) e relogue antes de lancar a proxima NF</b>. Avise o admin (rafael.machado@pronep.com.br) sobre esta NF pra correcao retroativa.</div>`
       : '';
 
+    esconderSalvandoOverlay();
     openModal(`
       <div style="text-align:center;padding:8px 0 4px">
         <div style="width:64px;height:64px;border-radius:50%;background:var(--verde-bg);color:var(--verde);display:inline-grid;place-items:center;font-size:34px;margin-bottom:14px">✓</div>
@@ -8792,6 +8794,7 @@ async function submitNF() {
     msgs.innerHTML = `<div class="alert alert-error"><span class="ico">x</span><div><b>Falha ao comunicar com o servidor.</b><br>${e && e.message || String(e)}</div></div>`;
     console.error('[submitNF]', e);
   } finally {
+    esconderSalvandoOverlay();
     btn.disabled = false;
     btn.textContent = labelOriginal;
   }
