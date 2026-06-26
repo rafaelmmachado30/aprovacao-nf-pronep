@@ -2359,6 +2359,42 @@ function _esconderPillNotas() {
   if (p) { p.style.opacity = '0'; p.style.transition = 'opacity .3s'; setTimeout(()=>p.remove(), 350); }
 }
 
+// ===== Overlay de "Salvando..." (barra de progresso indeterminada) =====
+// Feedback claro e bloqueante durante operacoes de gravacao (ex.: salvar fornecedor).
+function mostrarSalvandoOverlay(msg) {
+  esconderSalvandoOverlay();
+  const o = document.createElement('div');
+  o.id = 'salvando-overlay';
+  o.style.cssText = 'position:fixed;inset:0;z-index:11000;background:rgba(15,30,50,.45);display:flex;align-items:center;justify-content:center';
+  o.innerHTML = '<div style="background:#fff;border-radius:12px;padding:26px 30px;min-width:280px;max-width:90vw;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25)">' +
+    '<div style="font-size:15px;font-weight:600;color:var(--azul-escuro);margin-bottom:14px">' + (msg || 'Salvando...') + '</div>' +
+    '<div style="height:8px;border-radius:6px;background:#E5EAF0;overflow:hidden"><div style="height:100%;width:40%;border-radius:6px;background:#1F4E79;animation:barIndet 1.1s ease-in-out infinite"></div></div>' +
+    '<div class="small muted" style="margin-top:10px">Aguarde, não feche a janela.</div>' +
+    '<style>@keyframes barIndet{0%{margin-left:-42%}50%{margin-left:60%}100%{margin-left:102%}}</style>' +
+    '</div>';
+  document.body.appendChild(o);
+}
+function esconderSalvandoOverlay() {
+  const o = document.getElementById('salvando-overlay');
+  if (o) o.remove();
+}
+
+// ===== Mascara de moeda BRL (campo de valor limite das Configuracoes) =====
+// Formata um numero (em reais) como "1.000,00" (sem o "R$", que fica no prefixo do campo).
+function formatBRLNumber(n) {
+  return (Number(n) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+// Converte o texto do campo (ex: "1.000,00" ou "1000") no numero em reais (1000).
+function _brlParaNumero(str) {
+  var d = String(str == null ? '' : str).replace(/\D/g, '');
+  return d ? (parseInt(d, 10) / 100) : 0;
+}
+// Mascara "centavos da direita pra esquerda": digita 100000 -> mostra 1.000,00.
+function maskValorLimite(el) {
+  if (!el) return;
+  el.value = formatBRLNumber(_brlParaNumero(el.value));
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   mostrarLoadingInicial();
 
@@ -3294,8 +3330,11 @@ function renderConfiguracoesView() {
 
       <div id="cfg-multinivel-detalhes" style="${habilitado ? '' : 'opacity:0.5;pointer-events:none;'}">
         <div class="form-row" style="margin-bottom:14px">
-          <label>Valor limite (R$) <span class="small muted">— NFs acima desse valor precisam de 2º nivel</span></label>
-          <input type="number" id="cfg-valor-limite" value="${valorLimite}" min="0" step="100" style="max-width:200px">
+          <label>Valor limite <span class="small muted">— NFs acima desse valor precisam de 2º nivel</span></label>
+          <div style="display:inline-flex;align-items:center;max-width:220px;border:1px solid var(--cinza-borda);border-radius:6px;overflow:hidden;background:#fff">
+            <span style="padding:8px 10px;background:#F4F7FA;color:var(--azul-escuro);font-weight:600;border-right:1px solid var(--cinza-borda)">R$</span>
+            <input type="text" inputmode="numeric" id="cfg-valor-limite" value="${formatBRLNumber(valorLimite)}" oninput="maskValorLimite(this)" placeholder="0,00" style="border:none;outline:none;padding:8px 10px;width:140px;text-align:right;font-variant-numeric:tabular-nums">
+          </div>
         </div>
 
         <div class="form-row" style="margin-bottom:14px">
@@ -3539,7 +3578,7 @@ document.addEventListener('change', function (e) {
 
 async function salvarConfigSistema() {
   const habilitado = document.getElementById('cfg-habilitado').checked;
-  const valorLimite = Number(document.getElementById('cfg-valor-limite').value || 0);
+  const valorLimite = _brlParaNumero(document.getElementById('cfg-valor-limite').value);
   const modoEl = document.querySelector('input[name="cfg-modo"]:checked');
   const modo = modoEl ? modoEl.value : 'global';
 
@@ -6765,9 +6804,9 @@ async function salvarFornecedor(idx) {
     }
   }
 
-  // Desabilita botoes pra evitar duplo-clique
+  // Desabilita botoes pra evitar duplo-clique + overlay de progresso visivel
   document.querySelectorAll('.modal .btn').forEach(b => b.disabled = true);
-  toast('Salvando fornecedor...', 'info');
+  mostrarSalvandoOverlay(idx === null ? 'Cadastrando fornecedor...' : 'Salvando alterações...');
 
   try {
     if (idx === null) {
@@ -6834,6 +6873,9 @@ async function salvarFornecedor(idx) {
   } catch (e) {
     toast('Falha ao comunicar com servidor: ' + (e && e.message), 'error');
     document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
+  } finally {
+    // Sempre remove o overlay — em sucesso, erro de validacao (409/400) ou exbecao.
+    esconderSalvandoOverlay();
   }
 }
 
