@@ -3609,7 +3609,7 @@ async function salvarConfigSistema() {
     }
   }
 
-  toast('Salvando configurações...', 'info');
+  mostrarSalvandoOverlay('Salvando configurações...');
   try {
     const r = await fetch('/api/ConfigUpdate', {
       method: 'POST',
@@ -3627,6 +3627,8 @@ async function salvarConfigSistema() {
     showView('configuracoes');
   } catch (e) {
     toast('Falha de comunicacao: ' + (e && e.message), 'error');
+  } finally {
+    esconderSalvandoOverlay();
   }
 }
 
@@ -4651,6 +4653,7 @@ async function salvarRecorrenteUI(i, btn) {
   var ehRec = !!(chk && chk.checked);
   var dataFim = (fim && fim.value) || '';
   if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  mostrarSalvandoOverlay('Salvando conta recorrente...');
   try {
     var r = await fetch('/api/SalvarRecorrente', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -6132,6 +6135,7 @@ async function salvarVigenciaContrato(id) {
   const valor = valorRaw !== '' && !isNaN(parseFloat(valorRaw)) ? parseFloat(valorRaw) : null;
   const resDiv = document.getElementById('evc-resultado');
   resDiv.innerHTML = '<div class="muted small">Salvando...</div>';
+  mostrarSalvandoOverlay('Salvando vigência do contrato...');
   try {
     const r = await fetch('/api/AtualizarStatusContrato', {
       method: 'POST',
@@ -6156,6 +6160,8 @@ async function salvarVigenciaContrato(id) {
     carregarContratosReais();
   } catch (e) {
     resDiv.innerHTML = '<div class="alert alert-error">' + e.message + '</div>';
+  } finally {
+    esconderSalvandoOverlay();
   }
 }
 
