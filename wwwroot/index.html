@@ -2532,17 +2532,12 @@ async function garantirSessaoNoTeams() {
   // Esse caminho funciona dentro do iframe Teams pq nao depende de cookies (que sao particionados).
   // Frontend pega token, inclui em Authorization: Bearer pra cada fetch /api/*, backend valida JWT.
   console.log('[Teams Auth] Tentando SSO real (getAuthToken)...');
-  // RESOURCE = Application ID URI (SEM o sufixo /access_as_user). No SDK v2, `resources`
-  // espera o recurso (a audiencia), e o escopo access_as_user vem do webApplicationInfo
-  // do manifest. Esse valor casa exatamente com as audiences aceitas no backend
-  // (shared/auth.js ACCEPTED_AUDIENCES). O escopo no proprio resource costuma fazer o
-  // getAuthToken nao resolver.
-  const RESOURCE = 'api://purple-forest-09588fe10.7.azurestaticapps.net/85f7fa68-a241-4caf-803f-9991bd1f0eee';
+  const SCOPE = 'api://purple-forest-09588fe10.7.azurestaticapps.net/85f7fa68-a241-4caf-803f-9991bd1f0eee/access_as_user';
   try {
     // Timeout de 8s: se o SSO pendurar (consentimento/escopo AAD, cookie partitioning),
     // rejeita e cai no fallback (popup/login) em vez de travar o boot pra sempre.
     const token = await Promise.race([
-      window.microsoftTeams.authentication.getAuthToken({ resources: [RESOURCE] }),
+      window.microsoftTeams.authentication.getAuthToken({ resources: [SCOPE] }),
       new Promise(function (_, rej) { setTimeout(function () { rej(new Error('getAuthToken timeout (8s)')); }, 8000); })
     ]);
     if (token) {
