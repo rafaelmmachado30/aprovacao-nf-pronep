@@ -9004,7 +9004,10 @@ async function doApprove(id) {
 
     // Sucesso!
     n.status = 'aprovada';
-    n.aprovadoPor = currentPersona.name;
+    // Usa o E-MAIL (mesma fonte que o ListarNotas devolve em AprovadorAtual) pra que o
+    // render otimista ja nasca igual ao valor final — evita a coluna "trocar" de nome
+    // pra e-mail quando a recarga em segundo plano chega.
+    n.aprovadoPor = (currentPersona && currentPersona.email) || currentPersona.name;
     n.aprovadoEm = agoraBRT().substring(0,16);
     n.urlPDFAprovado = data.urlPDFAprovado || '';
     closeModal();
