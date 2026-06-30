@@ -49,6 +49,11 @@
       "allowedRoles": ["anonymous", "authenticated"]
     },
     {
+      "comment": "Warm-up anti cold-start: cron/uptime monitor. Sem dado sensivel; opcionalmente protegido por WARMUP_SECRET.",
+      "route": "/api/Warmup",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
       "comment": "Demais endpoints exigem sessao Entra ID. Fecha spoofing de x-ms-client-principal (C2).",
       "route": "/api/*",
       "allowedRoles": ["authenticated"]

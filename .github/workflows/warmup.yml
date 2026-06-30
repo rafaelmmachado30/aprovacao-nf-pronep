@@ -1,0 +1,44 @@
+name: Warm-up — mantém as Functions quentes (anti cold-start)
+
+# Pinga /api/Warmup em horário comercial pra evitar o cold start das Azure Functions
+# (que torna o boot lento, sobretudo dentro do Teams). Como as Functions do SWA
+# compartilham o mesmo processo, aquecer um endpoint aquece todos.
+#
+# GitHub cron usa UTC. BRT = UTC-3. Janela 8h–20h BRT = 11h–23h UTC, seg–sex.
+# A cada 10 min (o cron do GitHub pode atrasar alguns minutos — tudo bem pro caso).
+#
+# OBS de custo: em repo PRIVADO, cada execução consome minutos de Actions. Se for
+# apertado, aumente o intervalo (ex.: */15) ou troque por um uptime monitor externo
+# gratuito (UptimeRobot/Cron-job.org) apontando pra https://.../api/Warmup.
+#
+# Secret opcional: se definir a App Setting WARMUP_SECRET no Azure, crie também o
+# Repository Secret WARMUP_SECRET (mesmo valor) — vai no header X-Warmup-Secret.
+# Sem isso, o endpoint funciona aberto (não expõe nenhum dado).
+
+on:
+  schedule:
+    - cron: '*/10 11-23 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pingar /api/Warmup
+        env:
+          SECRET: ${{ secrets.WARMUP_SECRET }}
+        run: |
+          URL="https://purple-forest-09588fe10.7.azurestaticapps.net/api/Warmup"
+          echo "Warm-up -> $URL"
+          HTTP_CODE=$(curl -s -o /tmp/warm.json -w "%{http_code}" \
+            -H "Accept: application/json" \
+            ${SECRET:+-H "X-Warmup-Secret: $SECRET"} \
+            --max-time 60 \
+            "$URL")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/warm.json | head -c 800 || true
+          echo ""
+          # Warm-up nao deve quebrar o pipeline — loga e segue mesmo se nao for 200.
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::warning::Warmup retornou HTTP $HTTP_CODE"
+          fi
