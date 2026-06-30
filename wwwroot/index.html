@@ -2344,34 +2344,6 @@ function esconderLoadingInicial() {
   if (el) { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(()=>el.remove(), 350); }
 }
 
-// Watchdog de boot: se depois de N segundos a tela de carregamento ainda estiver
-// aberta (tipico quando o SSO do Teams pendura), oferece uma saida — abrir no
-// navegador, onde costuma carregar bem mais rapido. NAO aborta a autenticacao em
-// curso: se ela concluir antes, o overlay some e o botao nunca aparece.
-function _bootWatchdog(ms) {
-  setTimeout(function () {
-    var ov = document.getElementById('loading-inicial-overlay');
-    if (!ov || document.getElementById('boot-escape')) return;
-    var alvo = (window.location && window.location.origin) || '';
-    var box = document.createElement('div');
-    box.id = 'boot-escape';
-    box.style.cssText = 'margin-top:24px;max-width:340px;text-align:center';
-    box.innerHTML = '<p style="font-size:13px;opacity:.9;margin:0 0 12px;line-height:1.5">Está demorando mais que o normal dentro do Teams. Você pode abrir no navegador, onde costuma carregar mais rápido.</p>' +
-      '<button id="btn-boot-browser" style="background:#27AAE1;color:#fff;border:0;padding:11px 22px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer">Abrir no navegador</button>';
-    var inner = ov.firstElementChild || ov;
-    inner.appendChild(box);
-    var btn = document.getElementById('btn-boot-browser');
-    if (btn) btn.addEventListener('click', function () {
-      try {
-        if (window.microsoftTeams && window.microsoftTeams.app && typeof window.microsoftTeams.app.openLink === 'function') {
-          window.microsoftTeams.app.openLink(alvo); return;
-        }
-      } catch (e) { /* fallback abaixo */ }
-      window.open(alvo, '_blank', 'noopener');
-    });
-  }, ms || 18000);
-}
-
 // Indicador discreto (canto inferior) enquanto as notas carregam em segundo plano.
 // Nao bloqueia a UI — o usuario ja pode navegar; as listas se preenchem ao concluir.
 function _mostrarPillNotas() {
@@ -2425,7 +2397,6 @@ function maskValorLimite(el) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   mostrarLoadingInicial();
-  _bootWatchdog(18000);
 
   const el = document.getElementById('login-email');
   if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') loginCheckEmail(); });
@@ -2534,12 +2505,9 @@ async function garantirSessaoNoTeams() {
   console.log('[Teams Auth] Tentando SSO real (getAuthToken)...');
   const SCOPE = 'api://purple-forest-09588fe10.7.azurestaticapps.net/85f7fa68-a241-4caf-803f-9991bd1f0eee/access_as_user';
   try {
-    // Timeout de 8s: se o SSO pendurar (consentimento/escopo AAD, cookie partitioning),
-    // rejeita e cai no fallback (popup/login) em vez de travar o boot pra sempre.
-    const token = await Promise.race([
-      window.microsoftTeams.authentication.getAuthToken({ resources: [SCOPE] }),
-      new Promise(function (_, rej) { setTimeout(function () { rej(new Error('getAuthToken timeout (8s)')); }, 8000); })
-    ]);
+    const token = await window.microsoftTeams.authentication.getAuthToken({
+      resources: [SCOPE]
+    });
     if (token) {
       window._teamsAuthToken = token;
       console.log('[Teams Auth] Token SSO obtido (length=' + token.length + '). Instalando interceptor fetch.');
