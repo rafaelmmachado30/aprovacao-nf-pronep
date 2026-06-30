@@ -4119,7 +4119,7 @@ const views = {
                  oninput="this.value = this.value.toUpperCase()">
         </div>
         <div class="form-row" id="frm-observacao-row" style="display:none;grid-column:1/-1">
-          <label>Observação * <span class="small muted" style="font-weight:400">(obrigatório quando fornecedor é Pessoa Física — descreva o motivo: ex. "Reembolso uber visita ABC" / "Férias março/2026")</span></label>
+          <label>Observação * <span class="small muted" id="frm-observacao-hint" style="font-weight:400">(obrigatório quando fornecedor é Pessoa Física — descreva o motivo: ex. "Reembolso uber visita ABC" / "Férias março/2026")</span></label>
           <textarea id="frm-observacao" placeholder="Descreva o motivo do lançamento — referência mensal, período, finalidade etc" maxlength="500" rows="3" style="width:100%;padding:10px 12px;border:2px solid #B0B7BD;background:#fff;border-radius:6px;font-family:inherit;font-size:14px;color:#2C3E50;resize:vertical;box-shadow:inset 0 1px 2px rgba(0,0,0,0.04)" onfocus="this.style.borderColor='#1F4E79'" onblur="this.style.borderColor='#B0B7BD'"></textarea>
         </div>
 
@@ -4142,7 +4142,7 @@ const views = {
 
         <div class="form-row">
           <label>Número da NF <span class="small muted" style="font-weight:400">(opcional — deixe vazio p/ reembolso, rescisão, etc.)</span></label>
-          <input id="frm-numero" placeholder="ex.: 2545 — ou vazio p/ gerar automático">
+          <input id="frm-numero" placeholder="ex.: 2545 — ou vazio p/ gerar automático" oninput="atualizarCamposDescritivos()">
         </div>
         <div class="form-row">
           <label>Série</label>
@@ -7962,6 +7962,37 @@ function filtrarFornecedoresLancamento() {
   dropdown.classList.add('show');
 }
 
+// Decide quais campos descritivos aparecem no lancamento:
+//  - Descricao: quando a categoria do fornecedor e "Outros".
+//  - Observacao: quando o fornecedor e Pessoa Fisica (CPF) OU quando a NF NAO tem
+//    numero (conta de consumo - luz/agua/internet/gas -, reembolso, rescisao etc.).
+// Assim, lancamentos auto-numerados sempre tem onde explicar o motivo.
+function atualizarCamposDescritivos() {
+  const f = window._fornAtual || {};
+  const docLimpo = String(f.documento || f.cnpj || '').replace(/\D/g, '');
+  const ehCPF = (String(f.tipoDocumento || '').toUpperCase() === 'CPF') || docLimpo.length === 11;
+  const ehOutros = (f.categoria || '').toLowerCase() === 'outros';
+  const numero = ((document.getElementById('frm-numero') || {}).value || '').trim();
+  const semNumero = !numero;
+
+  const descRow = document.getElementById('frm-descricao-row');
+  if (descRow) descRow.style.display = ehOutros ? '' : 'none';
+  if (!ehOutros) { const di = document.getElementById('frm-descricao'); if (di) di.value = ''; }
+
+  const precisaObs = ehCPF || semNumero;
+  const obsRow = document.getElementById('frm-observacao-row');
+  if (obsRow) obsRow.style.display = precisaObs ? '' : 'none';
+  if (!precisaObs) { const obs = document.getElementById('frm-observacao'); if (obs) obs.value = ''; }
+
+  // Ajusta a dica do rotulo conforme o motivo de a observacao ser exigida.
+  const hint = document.getElementById('frm-observacao-hint');
+  if (hint) {
+    hint.textContent = ehCPF
+      ? '(obrigatório p/ Pessoa Física — ex.: "Reembolso uber visita ABC" / "Férias março/2026")'
+      : '(NF sem número — ex.: conta de luz/água/internet/gás ou reembolso. Informe a referência, ex.: "Energia mar/2026")';
+  }
+}
+
 function selecionarFornecedorLancamento(idx) {
   const f = fornecedores[idx];
   if (!f) return;
@@ -7986,26 +8017,10 @@ function onFornChange() {
   if (!f) return;
   document.getElementById('frm-categoria').value = f.categoria || '';
 
-  // Detecta se fornecedor eh Pessoa Fisica (CPF)
-  const docLimpo = String(f.documento || f.cnpj || '').replace(/\D/g,'');
-  const ehCPF = (String(f.tipoDocumento || '').toUpperCase() === 'CPF') || docLimpo.length === 11;
-
-  // Mostra/esconde campo descricao baseado em Categoria='Outros' (vale pra ambos modos)
-  const ehOutros = (f.categoria || '').toLowerCase() === 'outros';
-  const descRow = document.getElementById('frm-descricao-row');
-  if (descRow) descRow.style.display = ehOutros ? '' : 'none';
-  if (!ehOutros) {
-    const di = document.getElementById('frm-descricao');
-    if (di) di.value = '';
-  }
-
-  // Mostra/esconde campo Observacao quando CPF
-  const obsRow = document.getElementById('frm-observacao-row');
-  if (obsRow) obsRow.style.display = ehCPF ? '' : 'none';
-  if (!ehCPF) {
-    const obs = document.getElementById('frm-observacao');
-    if (obs) obs.value = '';
-  }
+  // Guarda o fornecedor selecionado pra recalcular os campos descritivos quando
+  // o numero da NF mudar (ver atualizarCamposDescritivos).
+  window._fornAtual = f;
+  atualizarCamposDescritivos();
   document.getElementById('frm-diretoria').value = f.diretoria || '';
   console.log('[selecionarFornecedor] fornecedor:', f.razao, 'atendeTodas:', f.atendeTodas, 'multiDir:', f.atendeMultiDiretoria);
 
