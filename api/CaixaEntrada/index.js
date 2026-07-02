@@ -117,6 +117,36 @@ async function baixarPdfBuffer(client, siteId, item) {
   return Buffer.from(ab);
 }
 
+// Une varios PDFs (array de Buffers) num so. Motor PRINCIPAL: mupdf (WASM) via
+// graftPage — preserva fielmente o conteudo, inclusive boletos com Form XObject /
+// fontes que o pdf-lib CORROMPE (pagina sai em branco). FALLBACK: pdf-lib (fluxo
+// antigo) caso o mupdf falhe ao carregar/gerar — pior caso = comportamento anterior.
+async function combinarPdfsBuffers(buffers) {
+  try {
+    const mupdf = await import('mupdf');
+    const dst = new mupdf.PDFDocument();
+    for (const buf of buffers) {
+      const src = mupdf.Document.openDocument(new Uint8Array(buf), 'application/pdf');
+      const n = src.countPages();
+      for (let i = 0; i < n; i++) dst.graftPage(dst.countPages(), src, i);
+    }
+    const out = dst.saveToBuffer('compress');
+    const u8 = out.asUint8Array();
+    if (u8 && u8.length) return Buffer.from(u8);
+    throw new Error('mupdf gerou saida vazia');
+  } catch (eMupdf) {
+    // Fallback pdf-lib
+    const { PDFDocument } = require('pdf-lib');
+    const merged = await PDFDocument.create();
+    for (const buf of buffers) {
+      const src = await PDFDocument.load(buf, { ignoreEncryption: true });
+      const paginas = await merged.copyPages(src, src.getPageIndices());
+      paginas.forEach(function (p) { merged.addPage(p); });
+    }
+    return Buffer.from(await merged.save());
+  }
+}
+
 module.exports = async function (context, req) {
   try {
     const user = await getUser(req);
@@ -164,20 +194,19 @@ module.exports = async function (context, req) {
       // So combina avulsos — combinados/lancados nao podem ser recombinados
       for (const id of ids) { if (meusIds[id].estado && meusIds[id].estado !== 'avulso') { context.res = { status: 400, body: { error: 'Selecione apenas arquivos avulsos para combinar' } }; return; } }
 
-      const { PDFDocument } = require('pdf-lib');
-      const merged = await PDFDocument.create();
+      // Baixa todos os PDFs primeiro (com teto de tamanho).
+      const buffers = [];
       let totalBytes = 0;
       for (const id of ids) {
         const buf = await baixarPdfBuffer(client, siteId, meusIds[id]);
         if (!buf || !buf.length) { context.res = { status: 502, body: { error: 'Falha ao baixar PDF da caixa' } }; return; }
         totalBytes += buf.length;
         if (totalBytes > MAX_COMBINADO) { context.res = { status: 400, body: { error: 'PDF combinado excede 12MB' } }; return; }
-        const src = await PDFDocument.load(buf, { ignoreEncryption: true });
-        const paginas = await merged.copyPages(src, src.getPageIndices());
-        paginas.forEach(function (p) { merged.addPage(p); });
+        buffers.push(buf);
       }
-      const out = await merged.save();
-      const outBuf = Buffer.from(out);
+      // Une os PDFs preservando o conteudo fielmente (ver combinarPdfsBuffers).
+      const outBuf = await combinarPdfsBuffers(buffers);
+      if (!outBuf || !outBuf.length) { context.res = { status: 500, body: { error: 'Falha ao gerar o PDF combinado' } }; return; }
 
       // Grava o PDF unificado na propria pasta da caixa (vira o item do historico).
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
