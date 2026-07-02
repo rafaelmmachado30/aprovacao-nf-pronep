@@ -3241,6 +3241,7 @@ function showView(id) {
   requestAnimationFrame(() => animateKPIs());
   if (id === 'dashboard') {
     requestAnimationFrame(() => mountDashboardCharts());
+    carregarMetricaDuplicidade();
   }
   // Refresh de notas — IMPORTANTE: Dashboard NÃO entra aqui porque o refresh
   // re-chama showView que destrói os charts recém-criados (race condition).
@@ -3666,6 +3667,26 @@ function destroyChart(id) {
   }
 }
 
+// Preenche o KPI "Duplicidade Evitada" com o numero real de NFs barradas por
+// duplicidade no mes (vem do AuditLog via /api/MetricasDuplicidade). Fallback
+// seguro: qualquer falha so mostra "—", nunca quebra o painel.
+async function carregarMetricaDuplicidade() {
+  var elV = document.getElementById('kpi-dup-value');
+  var elD = document.getElementById('kpi-dup-delta');
+  if (!elV) return;
+  try {
+    var r = await fetch('/api/MetricasDuplicidade', { credentials: 'include' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var d = await r.json();
+    var n = Number((d && d.duplicidadesEvitadas) || 0);
+    elV.textContent = String(n);
+    if (elD) elD.textContent = (n === 1 ? 'duplicidade barrada no mês' : 'duplicidades barradas no mês') + (d && d.amostraTruncada ? ' (+)' : '');
+  } catch (e) {
+    elV.textContent = '—';
+    if (elD) elD.textContent = 'indisponível';
+  }
+}
+
 function mountDashboardCharts() {
   console.log('[Charts] mountDashboardCharts chamado');
   if (!window.Chart) { console.warn('[Charts] window.Chart eh undefined - Chart.js nao carregou'); return; }
@@ -4017,7 +4038,7 @@ const views = {
         <div class="kpi"><div class="label">Aprovado no Mes</div><div class="value" data-count="${totalMes}" data-fmt="brl">R$ 0</div><div class="delta up">&#9650; 18% vs Abr</div></div>
         <div class="kpi"><div class="label">NFs Aprovadas</div><div class="value" data-count="${aprovadas.length}" data-fmt="int">0</div><div class="delta up">&#9650; 12 NFs</div></div>
         <div class="kpi"><div class="label">Pendentes</div><div class="value" data-count="${pendentes.length}" data-fmt="int">0</div><div class="delta small muted">Tempo medio: 6,4h</div></div>
-        <div class="kpi"><div class="label">Duplicidade Evitada</div><div class="value" data-count="${taxaDup}" data-fmt="pct">0%</div><div class="delta up">${rejeitadas.length} NF(s) barradas</div></div>
+        <div class="kpi"><div class="label">Duplicidade Evitada</div><div class="value" id="kpi-dup-value">…</div><div class="delta up" id="kpi-dup-delta">carregando…</div></div>
       </div>
 
       <div class="chart-grid">
@@ -8909,8 +8930,7 @@ function confirmApprove(id) {
   openModal(
     '<span class="close-x" onclick="closeModal()">×</span>' +
     '<h3>Aprovação da ' + id + '</h3>' +
-    '<p>Ao confirmar, o backend aplicará a marca d\'água abaixo (3 linhas, azul, transparência 70% — idêntica ao PA atual via PDF Blocks) e moverá o arquivo para ' +
-    '<span class="mono">SharePoint/Notas Aprovadas/' + n.unidade + '/' + hojeBRT() + '/</span>.</p>' +
+    '<p>Ao confirmar, um carimbo com suas informações será aplicado na NF.</p>' +
     blocoAlinhamento +
     '<div class="modal-pdf-preview" style="min-height:200px">' +
     '  [ Preview do PDF da NF ]' +
