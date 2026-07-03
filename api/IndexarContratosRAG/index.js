@@ -1,28 +1,34 @@
 /**
  * /api/IndexarContratosRAG (GET|POST) — ADMIN ONLY. Fase 1 da base de conhecimento.
  *
- * Indexa a pasta Comercial em LOTES (o front chama em loop, driblando o timeout de
- * 4min do SWA). Cada lote: pega os proximos N contratos, extrai texto, quebra em
- * trechos, gera embeddings e grava um shard JSON em _RAG/comercial/part-<offset>.json.
+ * Indexa os contratos COMERCIAIS em LOTES (o front chama em loop, driblando o timeout
+ * de 4min do SWA). Enumera pela LISTA PRONEP-NF-Contratos (Diretoria='Comercial' +
+ * DriveItemId), baixa o arquivo do drive dos contratos, extrai o texto COMPLETO,
+ * quebra em trechos, gera embeddings e grava shards JSON em _RAG/comercial/.
+ *
+ * OBS: "Comercial" NAO e uma pasta literal — e uma diretoria derivada do caminho
+ * (classificarPath). Por isso enumeramos pela lista ja sincronizada, nao por pasta.
  *
  * Query: ?offset=0&limit=10   (offset=0 recria o manifest de arquivos)
- * Resposta: { ok, total, offset, processado, chunksNoBatch, done, next }
- *
- * Idempotente: rodar de novo com o mesmo offset sobrescreve o mesmo shard.
+ * Resposta: { ok, total, offset, processado, arquivosNoBatch, chunksNoBatch, done, next }
  */
 
 require('isomorphic-fetch');
 const { requireAdmin } = require('../shared/authz');
 const {
-  getGraphClient, resolveContratosSite, crawlPasta, extrairTexto,
-  eRelevantePraContrato, ROOT_FOLDER_PATH
+  getGraphClient, garantirListaContratos, getContratoColMap,
+  resolveContratosSite, extrairTexto
 } = require('../shared/contratos');
-const {
-  embed, chunkTexto, vecToB64, salvarShard, lerJson
-} = require('../shared/ragContratos');
+const { embed, chunkTexto, vecToB64, salvarShard, lerJson } = require('../shared/ragContratos');
 
-const COMERCIAL_PATH = ROOT_FOLDER_PATH + '/Comercial';
-const EXTS_OK = ['pdf', 'docx', 'doc'];
+const EXTS_OK = ['pdf', 'docx'];
+function _norm(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+function _ext(nome) {
+  const m = /\.([a-z0-9]+)$/i.exec(String(nome || ''));
+  return m ? m[1].toLowerCase() : '';
+}
 
 module.exports = async function (context, req) {
   const diag = { step: 'start' };
@@ -34,23 +40,46 @@ module.exports = async function (context, req) {
     const limit = Math.min(20, Math.max(1, parseInt((req.query && req.query.limit) || '10', 10) || 10));
 
     const client = getGraphClient();
-    diag.step = 'resolve_site';
-    const site = await resolveContratosSite(client);
-    const driveId = site.driveId;
+    diag.step = 'resolve';
+    const listInfo = await garantirListaContratos(client);       // { siteId (app), listId }
+    const appSiteId = listInfo.siteId;
+    const listId = listInfo.listId;
+    const colMap = await getContratoColMap(client, appSiteId, listId);
+    const contr = await resolveContratosSite(client);            // { driveId } dos arquivos
+    const driveId = contr.driveId;
+    const col = function (d) { return colMap[d] || d; };
 
-    // Manifest de arquivos: no offset 0 (re)cria varrendo a pasta Comercial.
+    // Manifest de arquivos: no offset 0 (re)cria enumerando a lista (Comercial + DriveItemId).
     diag.step = 'manifest';
     let manifest = offset === 0 ? null : await lerJson(client, driveId, '_files.json');
     if (!manifest || !Array.isArray(manifest.files)) {
-      const crawl = await crawlPasta(client, driveId, COMERCIAL_PATH, { maxArquivos: 5000 });
-      const files = crawl
-        .filter(function (f) {
-          const ext = String(f.ext || '').toLowerCase();
-          return EXTS_OK.indexOf(ext) >= 0 && eRelevantePraContrato(f.nome).relevante;
-        })
-        .map(function (f) {
-          return { id: f.id, nome: f.nome, ext: String(f.ext || '').toLowerCase(), ancestors: f.ancestors || [], webUrl: f.webUrl || '' };
-        });
+      const files = [];
+      let url = '/sites/' + appSiteId + '/lists/' + listId + '/items?expand=fields&$top=500';
+      let pages = 0;
+      while (url && pages < 40) {
+        const resp = await client.api(url).get();
+        for (const it of (resp.value || [])) {
+          const f = it.fields || {};
+          const diretoria = _norm(f[col('Diretoria')]);
+          if (diretoria !== 'comercial') continue;
+          const driveItemId = f[col('DriveItemId')] || '';
+          if (!driveItemId) continue;
+          const nome = f[col('NomeArquivo')] || f[col('Title')] || '';
+          const ext = _ext(nome);
+          if (EXTS_OK.indexOf(ext) < 0) continue;
+          files.push({
+            listItemId: it.id,
+            driveItemId: driveItemId,
+            nome: nome,
+            ext: ext,
+            fornecedor: f[col('Fornecedor')] || '',
+            subpasta: f[col('PathRelativoSP')] || f[col('CaminhoSharepoint')] || '',
+            webUrl: f[col('CaminhoSharepoint')] || ''
+          });
+        }
+        pages++;
+        url = resp['@odata.nextLink'] ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '') : null;
+      }
       manifest = { total: files.length, files: files, criadoEm: new Date().toISOString() };
       await salvarShard(client, driveId, '_files.json', manifest);
     }
@@ -63,24 +92,20 @@ module.exports = async function (context, req) {
     const arquivosOk = [];
     for (const f of slice) {
       try {
-        const texto = await extrairTexto(client, driveId, f.id, f.ext, {});
-        if (!texto || texto.length < 40) continue; // provavelmente imagem/scan sem texto
+        const texto = await extrairTexto(client, driveId, f.driveItemId, f.ext, {});
+        if (!texto || texto.length < 40) continue; // imagem/scan sem texto
         const pedacos = chunkTexto(texto);
         if (!pedacos.length) continue;
         const vecs = await embed(pedacos);
-        const anc = f.ancestors || [];
-        const subpasta = anc.join(' / ');
-        const fornecedor = anc.length ? anc[anc.length - 1] : '';
         for (let i = 0; i < pedacos.length; i++) {
           chunksOut.push({
-            contratoId: f.id, contratoNome: f.nome,
-            diretoria: 'Comercial', subpasta: subpasta, fornecedor: fornecedor,
+            contratoId: f.listItemId, contratoNome: f.nome,
+            diretoria: 'Comercial', subpasta: f.subpasta, fornecedor: f.fornecedor,
             webUrl: f.webUrl, chunkIdx: i, texto: pedacos[i], vec: vecToB64(vecs[i])
           });
         }
         arquivosOk.push(f.nome);
       } catch (e) {
-        // pula arquivo problematico (protegido/scan/corrompido) sem parar o lote
         diag.ultimoErro = { arquivo: f.nome, erro: (e && e.message) || String(e) };
       }
     }
