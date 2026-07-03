@@ -158,8 +158,32 @@ async function buscar(client, driveId, pergunta, opts) {
   });
 }
 
+// Fichas estruturadas (Fase 3) — carga paralela + cache.
+const _fichaCache = { ts: 0, fichas: null };
+async function carregarFichas(client, driveId, force) {
+  if (!force && _fichaCache.fichas && (Date.now() - _fichaCache.ts) < _IDX_TTL) return _fichaCache.fichas;
+  let shards = [];
+  try {
+    const resp = await client.api('/drives/' + driveId + '/root:/' + _encPath(RAG_FOLDER) + ':/children')
+      .select('name,@microsoft.graph.downloadUrl').top(999).get();
+    shards = (resp.value || [])
+      .filter(function (x) { return /^fichas-.*\.json$/i.test(x.name || ''); })
+      .map(function (x) { return { name: x.name, url: x['@microsoft.graph.downloadUrl'] || null }; });
+  } catch (e) { shards = []; }
+  const parts = await Promise.all(shards.map(async function (s) {
+    try {
+      if (s.url) { const r = await fetch(s.url); if (r.ok) return await r.json(); }
+      return await lerJson(client, driveId, s.name);
+    } catch (e) { return null; }
+  }));
+  const all = [];
+  for (const obj of parts) { if (obj && Array.isArray(obj.fichas)) all.push.apply(all, obj.fichas); }
+  _fichaCache.fichas = all; _fichaCache.ts = Date.now();
+  return all;
+}
+
 module.exports = {
   EMBED_MODEL, EMBED_DIMS, RAG_FOLDER,
   getOpenAI, embed, chunkTexto, vecToB64, b64ToVec, cosine,
-  salvarShard, lerJson, listarShards, carregarIndice, buscar
+  salvarShard, lerJson, listarShards, carregarIndice, buscar, carregarFichas
 };

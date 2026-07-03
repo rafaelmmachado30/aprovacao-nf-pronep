@@ -6440,19 +6440,19 @@ async function indexarComercialRAG(btn) {
   });
   if (!ok) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Indexando...'; }
-  var offset = 0, total = null, chunks = 0, arqs = 0, lotes = 0;
+  var offset = 0, total = null, chunks = 0, arqs = 0, fichas = 0, lotes = 0;
   try {
     while (true) {
-      var r = await fetch('/api/IndexarContratosRAG?offset=' + offset + '&limit=10', { method: 'POST', credentials: 'include' });
+      var r = await fetch('/api/IndexarContratosRAG?offset=' + offset + '&limit=6', { method: 'POST', credentials: 'include' });
       var d = await r.json().catch(function () { return {}; });
       if (!r.ok || !d.ok) {
         if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha no lote (offset ' + offset + '): ' + escHtml((d && d.error) || ('HTTP ' + r.status)) + '</span>';
         break;
       }
-      total = d.total; chunks += (d.chunksNoBatch || 0); arqs += (d.arquivosNoBatch || 0); lotes++;
-      if (prog) prog.innerHTML = '⏳ Indexando Comercial: <b>' + d.processado + '/' + total + '</b> contratos · ' + arqs + ' com texto · ' + chunks + ' trechos gerados';
+      total = d.total; chunks += (d.chunksNoBatch || 0); arqs += (d.arquivosNoBatch || 0); fichas += (d.fichasNoBatch || 0); lotes++;
+      if (prog) prog.innerHTML = '⏳ Indexando Comercial: <b>' + d.processado + '/' + total + '</b> contratos · ' + arqs + ' com texto · ' + chunks + ' trechos · ' + fichas + ' fichas';
       if (d.done) {
-        if (prog) prog.innerHTML = '✅ Base de conhecimento pronta: <b>' + arqs + '</b> contratos indexados (' + chunks + ' trechos) de ' + total + ' arquivos. A IA já pode consultar (Fase 2).';
+        if (prog) prog.innerHTML = '✅ Base pronta: <b>' + arqs + '</b> contratos (' + chunks + ' trechos, ' + fichas + ' fichas) de ' + total + ' arquivos. A IA já consulta e compara.';
         break;
       }
       offset = d.next;

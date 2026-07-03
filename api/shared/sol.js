@@ -40,6 +40,7 @@ const { getManualForView } = require('./sanManual');
 
 const MODEL_HAIKU = process.env.ANTHROPIC_MODEL_HAIKU || 'claude-haiku-4-5-20251001';
 const MODEL_SONNET = process.env.ANTHROPIC_MODEL_SONNET || 'claude-sonnet-4-6';
+const MODEL_OPUS = process.env.ANTHROPIC_MODEL_OPUS || 'claude-opus-4-8';
 const DEFAULT_MODEL = process.env.ANTHROPIC_MODEL || MODEL_HAIKU;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
@@ -136,8 +137,8 @@ const VIEW_SCOPES = {
   'configuracoes': { titulo: 'Configuracoes', foco: 'orientacao sobre opcoes de admin/usuario. Tambem pode consultar qualquer dado do sistema (NFs, contratos) se o usuario perguntar.', tools: [] },
   'contratos':    {
     titulo: 'Contratos',
-    foco: 'consulta da base de contratos vigentes e historicos da Pronep. Para METADADOS (vigencia, valor, fornecedor, vencimento) use listar_contratos/detalhes_contrato/agregar_contratos/contratos_vencendo. Para o TEOR / CLAUSULAS (reajuste, multa, rescisao, SLA, obrigacoes, condicoes) e para ANALISE (comparar contratos, achar melhorias/oportunidades de renegociacao) use buscar_conteudo_contrato — ela le o texto dos contratos Comerciais (base de conhecimento) e retorna trechos com a origem; SEMPRE cite o contrato/fornecedor e NAO invente clausulas fora dos trechos. NAO ha aprovar/rejeitar contratos aqui. CRITICO: quando o usuario pedir "link", "PDF", "abre" ou "me mostra" um contrato especifico, chame detalhes_contrato + abrir_contrato na mesma turn.',
-    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato','buscar_conteudo_contrato']
+    foco: 'consulta e ANALISE da base de contratos Comerciais da Pronep. Escolha a ferramenta certa: (1) METADADOS de 1 fornecedor/status (vigencia, valor, vencimento) -> listar_contratos/detalhes_contrato/agregar_contratos/contratos_vencendo. (2) TEOR/CLAUSULA especifica em texto ("qual a clausula de reajuste do contrato X", "quais tem multa de rescisao") -> buscar_conteudo_contrato (retorna trechos com origem). (3) COMPARAR/RANQUEAR a carteira ("qual a melhor negociacao/mais rentavel", "onde renegociar", "maiores riscos", "top N por valor") -> comparar_contratos (traz as FICHAS estruturadas de todos os contratos pra voce ranquear). SEMPRE cite os contratos/fornecedores e NUNCA invente dados/clausulas fora do que as tools retornaram — se faltar, diga que nao consta. NUNCA mande o usuario "acessar o SharePoint" ou "contatar o financeiro" pra algo que essas tools respondem. NAO ha aprovar/rejeitar contratos aqui.',
+    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato','buscar_conteudo_contrato','comparar_contratos']
   }
 };
 
@@ -152,7 +153,7 @@ const READ_TOOLS_UNIVERSAIS = [
   'listar_fila', 'listar_aprovadas', 'listar_rejeitadas', 'detalhes_nf',
   'agregar_por_fornecedor', 'detectar_anomalia', 'abrir_nf', 'buscar_fornecedor',
   'listar_contratos', 'detalhes_contrato', 'agregar_contratos', 'contratos_vencendo', 'abrir_contrato',
-  'buscar_conteudo_contrato'
+  'buscar_conteudo_contrato', 'comparar_contratos'
 ];
 
 function getToolsForView(viewAtual) {
@@ -560,6 +561,21 @@ const TOOLS = [
           top_k: { type: 'integer', description: 'Quantos trechos retornar (default 8, max 15).' }
         },
         required: ['pergunta']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'comparar_contratos',
+      description: 'Compara/ranqueia a CARTEIRA de contratos Comerciais usando as FICHAS estruturadas (valor, vigencia, reajuste, multa, rescisao, SLA, prazo de pagamento, exclusividade, riscos). Use para perguntas ANALITICAS ou de RANKING sobre varios contratos: "qual a melhor negociacao / mais rentavel", "onde da pra renegociar", "maiores riscos de multa", "quais reajustam por IGPM", "top N por valor", "quais vencem e devo renegociar". Diferente de buscar_conteudo_contrato (que traz trechos de texto), esta tool traz DADOS estruturados de TODOS os contratos pra voce ranquear/comparar. Explique o criterio do ranking e cite os contratos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          fornecedor: { type: 'string', description: 'Opcional: filtra por substring do fornecedor/contrato.' },
+          apenas_vigentes: { type: 'boolean', description: 'Se true, considera apenas contratos vigentes (vigenciaFim >= hoje).' },
+          limite: { type: 'integer', description: 'Maximo de fichas a retornar (default 150, max 200).' }
+        }
       }
     }
   },
@@ -1312,6 +1328,58 @@ async function tool_buscar_conteudo_contrato(args, ctx) {
   }
 }
 
+// RAG Fase 3: compara/ranqueia a carteira via FICHAS estruturadas.
+async function tool_comparar_contratos(args, ctx) {
+  const cr = (ctx && ctx.contratos) || {};
+  let pode = !!cr.veTodos;
+  if (!pode) {
+    try {
+      const { podeVerContrato } = require('./acessoContratos');
+      pode = podeVerContrato('Comercial', cr.email || '', cr.roles || [], cr.mapa || {});
+    } catch (e) { /* nega */ }
+  }
+  if (!pode) return { aviso: 'Voce nao tem acesso aos contratos Comerciais.' };
+  try {
+    const rag = require('./ragContratos');
+    const { getGraphClient, resolveContratosSite } = require('./contratos');
+    const client = (ctx.gr && ctx.gr.client) ? ctx.gr.client : getGraphClient();
+    const site = await resolveContratosSite(client);
+    let fichas = await rag.carregarFichas(client, site.driveId, false);
+    if (!fichas || !fichas.length) {
+      return { aviso: 'As fichas estruturadas dos contratos ainda nao foram geradas. Rode "Indexar Comercial (IA)" na tela Contratos.', contratos: [] };
+    }
+    const forn = String(args.fornecedor || '').toLowerCase().trim();
+    if (forn) {
+      fichas = fichas.filter(function (f) {
+        return (String(f.fornecedor || '') + ' ' + String(f.fornecedorPasta || '') + ' ' + String(f.contratoNome || '')).toLowerCase().indexOf(forn) >= 0;
+      });
+    }
+    if (args.apenas_vigentes) {
+      const hoje = new Date().toISOString().slice(0, 10);
+      fichas = fichas.filter(function (f) { return !f.vigenciaFim || String(f.vigenciaFim) >= hoje; });
+    }
+    const limite = Math.min(200, Math.max(1, parseInt(args.limite || 150, 10) || 150));
+    const truncado = fichas.length > limite;
+    const contratos = fichas.slice(0, limite).map(function (f) {
+      return {
+        contrato: f.contratoNome, fornecedor: f.fornecedor || f.fornecedorPasta, objeto: f.objeto,
+        valorMensal: f.valorMensal, valorTotal: f.valorTotal,
+        vigencia: (f.vigenciaInicio || '?') + ' a ' + (f.vigenciaFim || '?'), renovacaoAutomatica: f.renovacaoAutomatica,
+        reajuste: [f.reajusteIndice, f.reajusteFrequencia].filter(Boolean).join(' ') || null,
+        prazoPagamentoDias: f.prazoPagamentoDias, multaRescisao: f.multaRescisao, avisoPrevioDias: f.avisoPrevioDias,
+        sla: f.sla, exclusividade: f.exclusividade, riscos: f.riscos, link: f.webUrl
+      };
+    });
+    return {
+      total: fichas.length, retornados: contratos.length, truncado: truncado,
+      instrucao: 'Compare/ranqueie SO com base nestas fichas. Explique o criterio. Cite os contratos/fornecedores. Se um campo estiver null, diga que nao consta no contrato — nao invente.',
+      contratos: contratos
+    };
+  } catch (e) {
+    return { erro: 'Falha ao comparar contratos: ' + ((e && e.message) || String(e)) };
+  }
+}
+
 async function tool_contratos_vencendo(args, ctx) {
   if (!ctx.gr.listContratosId) return { erro: 'Lista PRONEP-NF-Contratos nao disponivel' };
   const dias = args.dias || 30;
@@ -1422,6 +1490,7 @@ const TOOL_IMPL = {
   contratos_vencendo: tool_contratos_vencendo,
   abrir_contrato: tool_abrir_contrato,
   buscar_conteudo_contrato: tool_buscar_conteudo_contrato,
+  comparar_contratos: tool_comparar_contratos,
   listar_rejeitadas: tool_listar_rejeitadas
 };
 
@@ -1538,22 +1607,47 @@ async function runSolAnthropic(client, history, userMessage, systemPrompt, ctx, 
   let totalTokens = 0;
   let resposta = '';
   let toolCallsCount = 0;
+  // Nivel de analise exigido (0=nenhum, 1=Sonnet, 2=Opus). Setado apos usar tools
+  // analiticas de contrato, pra a SINTESE seguinte rodar num modelo mais forte.
+  let analiseNivel = 0;
+
+  // ordem de "forca" dos modelos (p/ nao rebaixar)
+  const _rank = function (m) { return m === MODEL_OPUS ? 3 : (m === MODEL_SONNET ? 2 : 1); };
 
   for (let i = 0; i < maxIter; i++) {
-    // Escalation: se ja chamou >3 tools nesta turn, sobe pra Sonnet
-    if (toolCallsCount >= 3 && model === MODEL_HAIKU) {
-      model = MODEL_SONNET;
-      console.log('[SOL] Escalando Haiku → Sonnet apos', toolCallsCount, 'tool calls');
-    }
+    // Escalonamento de modelo:
+    //  - >=3 tools na turn -> Sonnet (consulta complexa)
+    //  - tool de conteudo de contrato usada -> Sonnet (analise textual)
+    //  - tool de comparacao/ranking usada -> Opus (analitico pesado)
+    let alvo = safeOverride || DEFAULT_MODEL;
+    if (toolCallsCount >= 3 && _rank(alvo) < _rank(MODEL_SONNET)) alvo = MODEL_SONNET;
+    if (analiseNivel >= 1 && _rank(alvo) < _rank(MODEL_SONNET)) alvo = MODEL_SONNET;
+    if (analiseNivel >= 2 && _rank(alvo) < _rank(MODEL_OPUS)) alvo = MODEL_OPUS;
+    if (alvo !== model) { console.log('[SOL] modelo ->', alvo, '(analiseNivel=' + analiseNivel + ', tools=' + toolCallsCount + ')'); model = alvo; }
 
-    const completion = await client.messages.create({
-      model: model,
-      max_tokens: 2000,
-      temperature: 0.2,
-      system: systemPrompt,
-      messages: messages,
-      ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
-    });
+    const _params = function (mdl) {
+      return {
+        model: mdl,
+        max_tokens: analiseNivel > 0 ? 4000 : 2000,
+        temperature: 0.2,
+        system: systemPrompt,
+        messages: messages,
+        ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {})
+      };
+    };
+    // Fallback de modelo: se o modelo escalado nao estiver disponivel/permitido,
+    // rebaixa (Opus->Sonnet->Haiku) em vez de derrubar a resposta.
+    let completion;
+    try {
+      completion = await client.messages.create(_params(model));
+    } catch (eMdl) {
+      const lower = model === MODEL_OPUS ? MODEL_SONNET : (model === MODEL_SONNET ? MODEL_HAIKU : null);
+      if (lower) {
+        console.warn('[SOL] modelo', model, 'falhou (', (eMdl && eMdl.message) || eMdl, ') -> caindo pra', lower);
+        model = lower;
+        completion = await client.messages.create(_params(model));
+      } else { throw eMdl; }
+    }
 
     totalTokens += (completion.usage && (completion.usage.input_tokens + completion.usage.output_tokens)) || 0;
 
@@ -1586,6 +1680,9 @@ async function runSolAnthropic(client, history, userMessage, systemPrompt, ctx, 
         }
       }
       toolCallsCount++;
+      // Exige modelo mais forte na sintese apos tools analiticas de contrato.
+      if (fnName === 'comparar_contratos') analiseNivel = Math.max(analiseNivel, 2);
+      else if (fnName === 'buscar_conteudo_contrato') analiseNivel = Math.max(analiseNivel, 1);
       toolCallsDebug.push({
         tool: fnName,
         args: args,

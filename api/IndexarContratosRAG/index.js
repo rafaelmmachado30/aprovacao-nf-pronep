@@ -20,6 +20,7 @@ const {
   resolveContratosSite, extrairTexto
 } = require('../shared/contratos');
 const { embed, chunkTexto, vecToB64, salvarShard, lerJson, RAG_FOLDER } = require('../shared/ragContratos');
+const { extrairFicha } = require('../shared/fichaContrato');
 
 // Subpastas/documentos que NAO sao contratos (poluem o RAG). Excluidos do indice.
 const EXCLUIR_SUBPASTA = /glosa|recurso de glosas/i;
@@ -30,7 +31,7 @@ async function _limparShards(client, driveId) {
     const enc = encodeURIComponent(RAG_FOLDER).replace(/%2F/g, '/');
     const resp = await client.api('/drives/' + driveId + '/root:/' + enc + ':/children').select('id,name').top(999).get();
     for (const x of (resp.value || [])) {
-      if (/^part-.*\.json$/i.test(x.name || '')) {
+      if (/^(part|fichas)-.*\.json$/i.test(x.name || '')) {
         try { await client.api('/drives/' + driveId + '/items/' + x.id).delete(); } catch (e) { /* ignora */ }
       }
     }
@@ -112,6 +113,7 @@ module.exports = async function (context, req) {
 
     diag.step = 'process_batch';
     const chunksOut = [];
+    const fichasOut = [];
     const arquivosOk = [];
     for (const f of slice) {
       try {
@@ -127,6 +129,18 @@ module.exports = async function (context, req) {
             webUrl: f.webUrl, chunkIdx: i, texto: pedacos[i], vec: vecToB64(vecs[i])
           });
         }
+        // Ficha estruturada (Fase 3) — pra comparacao/ranking da carteira.
+        try {
+          const ficha = await extrairFicha(texto);
+          if (ficha) {
+            ficha.contratoId = f.listItemId;
+            ficha.contratoNome = f.nome;
+            ficha.fornecedorPasta = f.fornecedor;
+            ficha.subpasta = f.subpasta;
+            ficha.webUrl = f.webUrl;
+            fichasOut.push(ficha);
+          }
+        } catch (e) { /* ficha e best-effort; segue sem ela */ }
         arquivosOk.push(f.nome);
       } catch (e) {
         diag.ultimoErro = { arquivo: f.nome, erro: (e && e.message) || String(e) };
@@ -134,15 +148,16 @@ module.exports = async function (context, req) {
     }
 
     diag.step = 'save_shard';
-    const shardNome = 'part-' + String(offset).padStart(5, '0') + '.json';
-    await salvarShard(client, driveId, shardNome, { offset: offset, gerado: new Date().toISOString(), chunks: chunksOut });
+    const suf = String(offset).padStart(5, '0');
+    await salvarShard(client, driveId, 'part-' + suf + '.json', { offset: offset, gerado: new Date().toISOString(), chunks: chunksOut });
+    await salvarShard(client, driveId, 'fichas-' + suf + '.json', { offset: offset, gerado: new Date().toISOString(), fichas: fichasOut });
 
     const processado = Math.min(offset + limit, total);
     context.res = {
       status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       body: {
         ok: true, total: total, offset: offset, processado: processado,
-        arquivosNoBatch: arquivosOk.length, chunksNoBatch: chunksOut.length,
+        arquivosNoBatch: arquivosOk.length, chunksNoBatch: chunksOut.length, fichasNoBatch: fichasOut.length,
         done: processado >= total, next: processado < total ? processado : null,
         ultimoErro: diag.ultimoErro || null
       }
