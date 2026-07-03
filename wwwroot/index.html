@@ -5749,7 +5749,9 @@ function renderContratosView() {
         <button class="btn btn-secondary" onclick="abrirSincronizarContratos()">Sincronizar pasta</button>
         <button class="btn btn-primary" onclick="abrirSincronizarTudo()" title="Varre as 10 diretorias da Pronep em sequencia">⚡ Sincronizar TUDO</button>
         ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="limparDuplicatasContratos()" title="Remove contratos duplicados (mesmo arquivo repetido), mantendo 1 de cada">🧹 Limpar duplicatas</button>' : ''}
+        ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="indexarComercialRAG(this)" title="Cria a base de conhecimento (RAG) dos contratos Comerciais para a IA consultar">🧠 Indexar Comercial (IA)</button>' : ''}
       </div>
+      <div id="rag-index-progress" class="small muted" style="margin-top:8px"></div>
     </div>
 
     <div id="contratos-arvore">
@@ -6425,6 +6427,41 @@ function abrirSincronizarContratos() {
     <div id="syc-resultado" style="margin-top:14px"></div>
   `;
   openModal(html);
+}
+
+// Indexa a pasta Comercial para a base de conhecimento (RAG) da IA. Roda em lotes,
+// chamando /api/IndexarContratosRAG em loop (dribla o timeout de 4min da Function).
+async function indexarComercialRAG(btn) {
+  var prog = document.getElementById('rag-index-progress');
+  var ok = await confirmarAcao({
+    titulo: 'Indexar contratos Comerciais para a IA?',
+    mensagem: 'Vou ler os contratos da pasta <b>Comercial</b>, extrair o texto e criar a base de conhecimento (embeddings) que a IA vai consultar. Pode levar alguns minutos e roda em segundo plano. Pode acompanhar o progresso aqui.',
+    tipo: 'info', confirmLabel: 'Indexar agora', cancelLabel: 'Cancelar'
+  });
+  if (!ok) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Indexando...'; }
+  var offset = 0, total = null, chunks = 0, arqs = 0, lotes = 0;
+  try {
+    while (true) {
+      var r = await fetch('/api/IndexarContratosRAG?offset=' + offset + '&limit=10', { method: 'POST', credentials: 'include' });
+      var d = await r.json().catch(function () { return {}; });
+      if (!r.ok || !d.ok) {
+        if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha no lote (offset ' + offset + '): ' + escHtml((d && d.error) || ('HTTP ' + r.status)) + '</span>';
+        break;
+      }
+      total = d.total; chunks += (d.chunksNoBatch || 0); arqs += (d.arquivosNoBatch || 0); lotes++;
+      if (prog) prog.innerHTML = '⏳ Indexando Comercial: <b>' + d.processado + '/' + total + '</b> contratos · ' + arqs + ' com texto · ' + chunks + ' trechos gerados';
+      if (d.done) {
+        if (prog) prog.innerHTML = '✅ Base de conhecimento pronta: <b>' + arqs + '</b> contratos indexados (' + chunks + ' trechos) de ' + total + ' arquivos. A IA já pode consultar (Fase 2).';
+        break;
+      }
+      offset = d.next;
+    }
+  } catch (e) {
+    if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Erro: ' + escHtml(e.message || String(e)) + '</span>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🧠 Indexar Comercial (IA)'; }
+  }
 }
 
 async function executarSincronizarBFS() {
