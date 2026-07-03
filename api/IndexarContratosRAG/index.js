@@ -76,9 +76,10 @@ module.exports = async function (context, req) {
       for (const f of files.slice(0, n)) {
         const info = { nome: f.nome, ext: f.ext };
         try {
-          const texto = await extrairTexto(client, driveId, f.driveItemId, f.ext, {});
-          info.textoLen = texto ? texto.length : 0;
-          const ficha = await extrairFicha(texto || '');
+          const ex = await extrairTexto(client, driveId, f.driveItemId, f.ext, {});
+          const texto = (ex && ex.texto) || '';
+          info.textoLen = texto.length;
+          const ficha = await extrairFicha(texto);
           info.fichaOk = !!ficha;
           info.fichaErro = ficha ? null : ultimoErroFicha();
           if (ficha) info.fichaSample = { fornecedor: ficha.fornecedor, objeto: ficha.objeto, valorMensal: ficha.valorMensal, vigenciaFim: ficha.vigenciaFim };
@@ -143,7 +144,8 @@ module.exports = async function (context, req) {
     const arquivosOk = [];
     for (const f of slice) {
       try {
-        const texto = await extrairTexto(client, driveId, f.driveItemId, f.ext, {});
+        const ex = await extrairTexto(client, driveId, f.driveItemId, f.ext, {});
+        const texto = (ex && ex.texto) || ''; // extrairTexto devolve { texto, paginas, vazio }
         if (!texto || texto.length < 40) continue; // imagem/scan sem texto
         const pedacos = chunkTexto(texto);
         if (!pedacos.length) continue;
