@@ -19,7 +19,23 @@ const {
   getGraphClient, garantirListaContratos, getContratoColMap,
   resolveContratosSite, extrairTexto
 } = require('../shared/contratos');
-const { embed, chunkTexto, vecToB64, salvarShard, lerJson } = require('../shared/ragContratos');
+const { embed, chunkTexto, vecToB64, salvarShard, lerJson, RAG_FOLDER } = require('../shared/ragContratos');
+
+// Subpastas/documentos que NAO sao contratos (poluem o RAG). Excluidos do indice.
+const EXCLUIR_SUBPASTA = /glosa|recurso de glosas/i;
+
+// Apaga os shards antigos (part-*.json) antes de reindexar do zero (offset 0).
+async function _limparShards(client, driveId) {
+  try {
+    const enc = encodeURIComponent(RAG_FOLDER).replace(/%2F/g, '/');
+    const resp = await client.api('/drives/' + driveId + '/root:/' + enc + ':/children').select('id,name').top(999).get();
+    for (const x of (resp.value || [])) {
+      if (/^part-.*\.json$/i.test(x.name || '')) {
+        try { await client.api('/drives/' + driveId + '/items/' + x.id).delete(); } catch (e) { /* ignora */ }
+      }
+    }
+  } catch (e) { /* pasta ainda nao existe */ }
+}
 
 const EXTS_OK = ['pdf', 'docx'];
 function _norm(s) {
@@ -51,6 +67,10 @@ module.exports = async function (context, req) {
 
     // Manifest de arquivos: no offset 0 (re)cria enumerando a lista (Comercial + DriveItemId).
     diag.step = 'manifest';
+    // No inicio (offset 0), limpa os shards antigos pra reindexar do zero (evita
+    // sobrar chunk de indexacao anterior, ex.: os "Recurso de Glosas" ja indexados).
+    if (offset === 0) await _limparShards(client, driveId);
+
     let manifest = offset === 0 ? null : await lerJson(client, driveId, '_files.json');
     if (!manifest || !Array.isArray(manifest.files)) {
       const files = [];
@@ -67,6 +87,9 @@ module.exports = async function (context, req) {
           const nome = f[col('NomeArquivo')] || f[col('Title')] || '';
           const ext = _ext(nome);
           if (EXTS_OK.indexOf(ext) < 0) continue;
+          // Exclui documentos que nao sao contratos (Recurso de Glosas etc.)
+          const caminho = String(f[col('PathRelativoSP')] || '') + ' ' + String(f[col('CaminhoSharepoint')] || '') + ' ' + String(nome);
+          if (EXCLUIR_SUBPASTA.test(caminho)) continue;
           files.push({
             listItemId: it.id,
             driveItemId: driveItemId,

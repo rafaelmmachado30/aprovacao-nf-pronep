@@ -1291,7 +1291,7 @@ async function tool_buscar_conteudo_contrato(args, ctx) {
     const { getGraphClient, resolveContratosSite } = require('./contratos');
     const client = (ctx.gr && ctx.gr.client) ? ctx.gr.client : getGraphClient();
     const site = await resolveContratosSite(client);
-    const topK = Math.min(15, Math.max(1, parseInt(args.top_k || 8, 10) || 8));
+    const topK = Math.min(20, Math.max(1, parseInt(args.top_k || 12, 10) || 12));
     const trechos = await rag.buscar(client, site.driveId, pergunta, { topK: topK, diretoriasPermitidas: ['comercial'] });
     if (!trechos || !trechos.length) {
       return { aviso: 'Nada encontrado na base de conhecimento (ou os contratos Comerciais ainda nao foram indexados na tela Contratos).', trechos: [] };
