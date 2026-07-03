@@ -136,8 +136,8 @@ const VIEW_SCOPES = {
   'configuracoes': { titulo: 'Configuracoes', foco: 'orientacao sobre opcoes de admin/usuario. Tambem pode consultar qualquer dado do sistema (NFs, contratos) se o usuario perguntar.', tools: [] },
   'contratos':    {
     titulo: 'Contratos',
-    foco: 'consulta da base de contratos vigentes e historicos da Pronep. Responda duvidas sobre vigencias, valores, fornecedores, vencimentos. Use as tools de contratos sempre que o usuario perguntar algo factual sobre contratos. NAO ha aprovar/rejeitar contratos aqui. CRITICO: quando o usuario pedir "link", "PDF", "abre" ou "me mostra" um contrato especifico, chame detalhes_contrato + abrir_contrato na mesma turn — o frontend abre automaticamente em nova aba. Resposta breve tipo "Abrindo o contrato da BMS de R$3.194,03..."',
-    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato']
+    foco: 'consulta da base de contratos vigentes e historicos da Pronep. Para METADADOS (vigencia, valor, fornecedor, vencimento) use listar_contratos/detalhes_contrato/agregar_contratos/contratos_vencendo. Para o TEOR / CLAUSULAS (reajuste, multa, rescisao, SLA, obrigacoes, condicoes) e para ANALISE (comparar contratos, achar melhorias/oportunidades de renegociacao) use buscar_conteudo_contrato — ela le o texto dos contratos Comerciais (base de conhecimento) e retorna trechos com a origem; SEMPRE cite o contrato/fornecedor e NAO invente clausulas fora dos trechos. NAO ha aprovar/rejeitar contratos aqui. CRITICO: quando o usuario pedir "link", "PDF", "abre" ou "me mostra" um contrato especifico, chame detalhes_contrato + abrir_contrato na mesma turn.',
+    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato','buscar_conteudo_contrato']
   }
 };
 
@@ -151,7 +151,8 @@ function getViewScope(viewAtual) {
 const READ_TOOLS_UNIVERSAIS = [
   'listar_fila', 'listar_aprovadas', 'listar_rejeitadas', 'detalhes_nf',
   'agregar_por_fornecedor', 'detectar_anomalia', 'abrir_nf', 'buscar_fornecedor',
-  'listar_contratos', 'detalhes_contrato', 'agregar_contratos', 'contratos_vencendo', 'abrir_contrato'
+  'listar_contratos', 'detalhes_contrato', 'agregar_contratos', 'contratos_vencendo', 'abrir_contrato',
+  'buscar_conteudo_contrato'
 ];
 
 function getToolsForView(viewAtual) {
@@ -544,6 +545,21 @@ const TOOLS = [
           id: { type: 'string', description: 'spListItemId do contrato (retornado por listar_contratos ou detalhes_contrato)' },
           busca: { type: 'string', description: 'Substring pra encontrar o contrato (fornecedor ou titulo) - usa se ainda nao tem o id' }
         }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'buscar_conteudo_contrato',
+      description: 'Busca no CONTEUDO / CLAUSULAS dos contratos Comerciais (base de conhecimento / RAG) por semelhanca semantica. Use SEMPRE que a pergunta for sobre o TEOR do contrato: clausula de reajuste, multa, rescisao, SLA, obrigacoes, condicoes de pagamento, comparar contratos, achar oportunidades de melhoria/renegociacao. Diferente de listar_contratos (que so tem METADADOS: vigencia/valor/fornecedor), esta tool LE o texto dos contratos. Retorna os trechos mais relevantes COM a origem (contrato, fornecedor, subpasta, link) — SEMPRE cite a origem na resposta e nao invente clausulas que nao apareceram nos trechos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pergunta: { type: 'string', description: 'O topico/pergunta a buscar no conteudo, em linguagem natural (ex: "clausula de reajuste anual", "multa por rescisao antecipada", "prazo de pagamento").' },
+          top_k: { type: 'integer', description: 'Quantos trechos retornar (default 8, max 15).' }
+        },
+        required: ['pergunta']
       }
     }
   },
@@ -1256,6 +1272,46 @@ async function tool_abrir_contrato(args, ctx) {
   };
 }
 
+// RAG: busca semantica no CONTEUDO dos contratos Comerciais (base de conhecimento).
+// Respeita o acesso a contratos Comerciais (mesmo criterio das outras tools de contrato).
+async function tool_buscar_conteudo_contrato(args, ctx) {
+  const pergunta = String((args && args.pergunta) || '').trim();
+  if (!pergunta) return { erro: 'pergunta obrigatoria' };
+  const cr = (ctx && ctx.contratos) || {};
+  let podeComercial = !!cr.veTodos;
+  if (!podeComercial) {
+    try {
+      const { podeVerContrato } = require('./acessoContratos');
+      podeComercial = podeVerContrato('Comercial', cr.email || '', cr.roles || [], cr.mapa || {});
+    } catch (e) { /* nega por seguranca */ }
+  }
+  if (!podeComercial) return { aviso: 'Voce nao tem acesso aos contratos Comerciais.' };
+  try {
+    const rag = require('./ragContratos');
+    const { getGraphClient, resolveContratosSite } = require('./contratos');
+    const client = (ctx.gr && ctx.gr.client) ? ctx.gr.client : getGraphClient();
+    const site = await resolveContratosSite(client);
+    const topK = Math.min(15, Math.max(1, parseInt(args.top_k || 8, 10) || 8));
+    const trechos = await rag.buscar(client, site.driveId, pergunta, { topK: topK, diretoriasPermitidas: ['comercial'] });
+    if (!trechos || !trechos.length) {
+      return { aviso: 'Nada encontrado na base de conhecimento (ou os contratos Comerciais ainda nao foram indexados na tela Contratos).', trechos: [] };
+    }
+    return {
+      total: trechos.length,
+      instrucao: 'Responda com base SO nestes trechos. Cite o contrato/fornecedor de origem. Se a informacao nao estiver aqui, diga que nao encontrou.',
+      trechos: trechos.map(function (t) {
+        return {
+          contrato: t.contratoNome, fornecedor: t.fornecedor, subpasta: t.subpasta,
+          link: t.webUrl, relevancia: Math.round((t.score || 0) * 100) / 100,
+          trecho: String(t.texto || '').slice(0, 1500)
+        };
+      })
+    };
+  } catch (e) {
+    return { erro: 'Falha na busca de conteudo dos contratos: ' + ((e && e.message) || String(e)) };
+  }
+}
+
 async function tool_contratos_vencendo(args, ctx) {
   if (!ctx.gr.listContratosId) return { erro: 'Lista PRONEP-NF-Contratos nao disponivel' };
   const dias = args.dias || 30;
@@ -1365,6 +1421,7 @@ const TOOL_IMPL = {
   agregar_contratos: tool_agregar_contratos,
   contratos_vencendo: tool_contratos_vencendo,
   abrir_contrato: tool_abrir_contrato,
+  buscar_conteudo_contrato: tool_buscar_conteudo_contrato,
   listar_rejeitadas: tool_listar_rejeitadas
 };
 
