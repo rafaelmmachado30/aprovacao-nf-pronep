@@ -89,12 +89,19 @@ async function _viaOpenAI(texto) {
   return _normalizar(_parseJson(t));
 }
 
+// Guarda o motivo da ultima falha (pra diagnostico via IndexarContratosRAG?debug=1).
+let _ultimoErro = null;
+function ultimoErroFicha() { return _ultimoErro; }
+
 // Retorna a ficha normalizada ou null (best-effort — nunca lanca).
 async function extrairFicha(texto) {
-  if (!texto || texto.length < 40) return null;
-  try { const a = await _viaAnthropic(texto); if (a) return a; } catch (e) { /* fallback */ }
-  try { const o = await _viaOpenAI(texto); if (o) return o; } catch (e) { /* desiste */ }
+  _ultimoErro = null;
+  if (!texto || texto.length < 40) { _ultimoErro = 'texto muito curto'; return null; }
+  try { const a = await _viaAnthropic(texto); if (a) return a; _ultimoErro = 'anthropic: retorno sem JSON valido'; }
+  catch (e) { _ultimoErro = 'anthropic: ' + ((e && e.message) || String(e)); }
+  try { const o = await _viaOpenAI(texto); if (o) return o; _ultimoErro = (_ultimoErro || '') + ' | openai: retorno sem JSON valido'; }
+  catch (e) { _ultimoErro = (_ultimoErro || '') + ' | openai: ' + ((e && e.message) || String(e)); }
   return null;
 }
 
-module.exports = { extrairFicha, CAMPOS };
+module.exports = { extrairFicha, ultimoErroFicha, CAMPOS };

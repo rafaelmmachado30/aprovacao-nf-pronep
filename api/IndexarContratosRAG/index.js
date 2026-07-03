@@ -20,7 +20,7 @@ const {
   resolveContratosSite, extrairTexto
 } = require('../shared/contratos');
 const { embed, chunkTexto, vecToB64, salvarShard, lerJson, RAG_FOLDER } = require('../shared/ragContratos');
-const { extrairFicha } = require('../shared/fichaContrato');
+const { extrairFicha, ultimoErroFicha } = require('../shared/fichaContrato');
 
 // Subpastas/documentos que NAO sao contratos (poluem o RAG). Excluidos do indice.
 const EXCLUIR_SUBPASTA = /glosa|recurso de glosas/i;
@@ -65,6 +65,32 @@ module.exports = async function (context, req) {
     const contr = await resolveContratosSite(client);            // { driveId } dos arquivos
     const driveId = contr.driveId;
     const col = function (d) { return colMap[d] || d; };
+
+    // ===== MODO DEBUG (nao-destrutivo): mostra por que as fichas vem vazias.
+    // Ex: /api/IndexarContratosRAG?debug=1&limit=1  — nao limpa nem grava nada.
+    if (req.query && (req.query.debug === '1' || req.query.debug === 'true')) {
+      const man = await lerJson(client, driveId, '_files.json');
+      const files = (man && man.files) || [];
+      const n = Math.min(limit, 3);
+      const amostra = [];
+      for (const f of files.slice(0, n)) {
+        const info = { nome: f.nome, ext: f.ext };
+        try {
+          const texto = await extrairTexto(client, driveId, f.driveItemId, f.ext, {});
+          info.textoLen = texto ? texto.length : 0;
+          const ficha = await extrairFicha(texto || '');
+          info.fichaOk = !!ficha;
+          info.fichaErro = ficha ? null : ultimoErroFicha();
+          if (ficha) info.fichaSample = { fornecedor: ficha.fornecedor, objeto: ficha.objeto, valorMensal: ficha.valorMensal, vigenciaFim: ficha.vigenciaFim };
+        } catch (e) { info.erro = (e && e.message) || String(e); }
+        amostra.push(info);
+      }
+      context.res = {
+        status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        body: { ok: true, debug: true, hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY, hasOpenAIKey: !!process.env.OPENAI_API_KEY, totalManifest: files.length, amostra: amostra }
+      };
+      return;
+    }
 
     // Manifest de arquivos: no offset 0 (re)cria enumerando a lista (Comercial + DriveItemId).
     diag.step = 'manifest';
@@ -139,8 +165,10 @@ module.exports = async function (context, req) {
             ficha.subpasta = f.subpasta;
             ficha.webUrl = f.webUrl;
             fichasOut.push(ficha);
+          } else if (!diag.fichaErro) {
+            diag.fichaErro = ultimoErroFicha();
           }
-        } catch (e) { /* ficha e best-effort; segue sem ela */ }
+        } catch (e) { if (!diag.fichaErro) diag.fichaErro = (e && e.message) || String(e); }
         arquivosOk.push(f.nome);
       } catch (e) {
         diag.ultimoErro = { arquivo: f.nome, erro: (e && e.message) || String(e) };
@@ -159,7 +187,7 @@ module.exports = async function (context, req) {
         ok: true, total: total, offset: offset, processado: processado,
         arquivosNoBatch: arquivosOk.length, chunksNoBatch: chunksOut.length, fichasNoBatch: fichasOut.length,
         done: processado >= total, next: processado < total ? processado : null,
-        ultimoErro: diag.ultimoErro || null
+        ultimoErro: diag.ultimoErro || null, fichaErro: diag.fichaErro || null
       }
     };
   } catch (err) {
