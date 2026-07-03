@@ -103,26 +103,32 @@ async function lerJson(client, driveId, nome) {
   } catch (e) { return null; }
 }
 
+// Lista os shards do indice JA com a downloadUrl (evita 1 round-trip extra por shard).
 async function listarShards(client, driveId) {
   try {
     const resp = await client.api('/drives/' + driveId + '/root:/' + _encPath(RAG_FOLDER) + ':/children')
-      .select('name').top(999).get();
-    return (resp.value || []).map(function (x) { return x.name; })
-      .filter(function (n) { return /^part-.*\.json$/i.test(n); });
+      .select('name,@microsoft.graph.downloadUrl').top(999).get();
+    return (resp.value || [])
+      .filter(function (x) { return /^part-.*\.json$/i.test(x.name || ''); })
+      .map(function (x) { return { name: x.name, url: x['@microsoft.graph.downloadUrl'] || null }; });
   } catch (e) { return []; }
 }
 
 // Carrega e cacheia (memoria do processo) todos os chunks p/ busca.
+// Carga PARALELA (Promise.all) — com ~65 shards, sequencial estourava o timeout do SolChat.
 const _idxCache = { ts: 0, chunks: null };
 const _IDX_TTL = 10 * 60 * 1000;
 async function carregarIndice(client, driveId, force) {
   if (!force && _idxCache.chunks && (Date.now() - _idxCache.ts) < _IDX_TTL) return _idxCache.chunks;
   const shards = await listarShards(client, driveId);
+  const parts = await Promise.all(shards.map(async function (s) {
+    try {
+      if (s.url) { const r = await fetch(s.url); if (r.ok) return await r.json(); }
+      return await lerJson(client, driveId, s.name); // fallback (downloadUrl ausente)
+    } catch (e) { return null; }
+  }));
   const all = [];
-  for (const s of shards) {
-    const obj = await lerJson(client, driveId, s);
-    if (obj && Array.isArray(obj.chunks)) all.push.apply(all, obj.chunks);
-  }
+  for (const obj of parts) { if (obj && Array.isArray(obj.chunks)) all.push.apply(all, obj.chunks); }
   _idxCache.chunks = all; _idxCache.ts = Date.now();
   return all;
 }
