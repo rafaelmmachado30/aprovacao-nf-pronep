@@ -137,8 +137,8 @@ const VIEW_SCOPES = {
   'configuracoes': { titulo: 'Configuracoes', foco: 'orientacao sobre opcoes de admin/usuario. Tambem pode consultar qualquer dado do sistema (NFs, contratos) se o usuario perguntar.', tools: [] },
   'contratos':    {
     titulo: 'Contratos',
-    foco: 'consulta e ANALISE da base de contratos Comerciais da Pronep. Escolha a ferramenta certa: (1) METADADOS de 1 fornecedor/status (vigencia, valor, vencimento) -> listar_contratos/detalhes_contrato/agregar_contratos/contratos_vencendo. (2) TEOR/CLAUSULA especifica em texto ("qual a clausula de reajuste do contrato X", "quais tem multa de rescisao") -> buscar_conteudo_contrato (retorna trechos com origem). (3) COMPARAR/RANQUEAR a carteira ("qual a melhor negociacao/mais rentavel", "onde renegociar", "maiores riscos", "top N por valor") -> comparar_contratos (traz as FICHAS estruturadas de todos os contratos pra voce ranquear). SEMPRE cite os contratos/fornecedores e NUNCA invente dados/clausulas fora do que as tools retornaram — se faltar, diga que nao consta. NUNCA mande o usuario "acessar o SharePoint" ou "contatar o financeiro" pra algo que essas tools respondem. NAO ha aprovar/rejeitar contratos aqui.',
-    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato','buscar_conteudo_contrato','comparar_contratos']
+    foco: 'consulta e ANALISE da base de contratos Comerciais da Pronep. Escolha a ferramenta certa: (1) METADADOS de 1 fornecedor/status (vigencia, valor, vencimento) -> listar_contratos/detalhes_contrato/agregar_contratos/contratos_vencendo. (2) TEOR/CLAUSULA especifica em texto ("qual a clausula de reajuste do contrato X", "quais tem multa de rescisao") -> buscar_conteudo_contrato (retorna trechos com origem). (3) COMPARAR/RANQUEAR a carteira ("qual a melhor negociacao/mais rentavel", "onde renegociar", "maiores riscos", "top N por valor") -> comparar_contratos (traz as FICHAS estruturadas de todos os contratos pra voce ranquear). (4) Perguntas sobre AMIL, BRADESCO ou CABESP (diarias/valores vigentes, inclusos/exclusos, reajustes, aditivos, liminar, riscos, MatMed, vigencia) -> consultar_contratos_curados (base CURADA e auditada, com selo de confianca — e a fonte MAIS confiavel; cada estado e um contrato independente). SEMPRE cite os contratos/fornecedores e NUNCA invente dados/clausulas fora do que as tools retornaram — se faltar, diga que nao consta. NUNCA mande o usuario "acessar o SharePoint" ou "contatar o financeiro" pra algo que essas tools respondem. NAO ha aprovar/rejeitar contratos aqui.',
+    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato','buscar_conteudo_contrato','comparar_contratos','consultar_contratos_curados']
   }
 };
 
@@ -153,7 +153,7 @@ const READ_TOOLS_UNIVERSAIS = [
   'listar_fila', 'listar_aprovadas', 'listar_rejeitadas', 'detalhes_nf',
   'agregar_por_fornecedor', 'detectar_anomalia', 'abrir_nf', 'buscar_fornecedor',
   'listar_contratos', 'detalhes_contrato', 'agregar_contratos', 'contratos_vencendo', 'abrir_contrato',
-  'buscar_conteudo_contrato', 'comparar_contratos'
+  'buscar_conteudo_contrato', 'comparar_contratos', 'consultar_contratos_curados'
 ];
 
 function getToolsForView(viewAtual) {
@@ -575,6 +575,22 @@ const TOOLS = [
           fornecedor: { type: 'string', description: 'Opcional: filtra por substring do fornecedor/contrato.' },
           apenas_vigentes: { type: 'boolean', description: 'Se true, considera apenas contratos vigentes (vigenciaFim >= hoje).' },
           limite: { type: 'integer', description: 'Maximo de fichas a retornar (default 150, max 200).' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_contratos_curados',
+      description: 'Consulta a BASE CURADA de contratos (fonte unica auditada, piloto: Amil, Bradesco, CABESP). Esta e a fonte MAIS CONFIAVEL: cada dado vem da LEITURA do contrato, com selo de confianca (CONFIRMADO/PARCIAL/PENDENTE) e confianca de preco (NATIVO/OCR). PREFIRA esta tool a comparar_contratos/buscar_conteudo_contrato quando a pergunta for sobre Amil, Bradesco ou CABESP e envolver: diarias e valores vigentes, itens inclusos/exclusos, reajustes (indice/%/data-base/proximo), aditivos e se melhoram para a Pronep, liminar, riscos, regra de MatMed (Simpro/Brasindice), vigencia/status, qualidade de redacao. Cada estado (SP/RJ/ES) e um contrato INDEPENDENTE — nunca funda estados. SEMPRE cite operadora+estado e o selo de confianca; se um campo vier null, diga que nao consta (nao invente).',
+      parameters: {
+        type: 'object',
+        properties: {
+          operadora: { type: 'string', description: 'Opcional: filtra por operadora (ex: "Amil", "Bradesco", "CABESP").' },
+          estado: { type: 'string', description: 'Opcional: filtra por UF (SP, RJ, ES).' },
+          apenas_vigentes: { type: 'boolean', description: 'Se true, so contratos com status VIGENTE.' },
+          incluir_clausulas: { type: 'boolean', description: 'Se true, inclui o texto literal das clausulas (mais tokens). Default false.' }
         }
       }
     }
@@ -1380,6 +1396,61 @@ async function tool_comparar_contratos(args, ctx) {
   }
 }
 
+async function tool_consultar_contratos_curados(args, ctx) {
+  const cr = (ctx && ctx.contratos) || {};
+  let pode = !!cr.veTodos;
+  if (!pode) {
+    try {
+      const { podeVerContrato } = require('./acessoContratos');
+      pode = podeVerContrato('Comercial', cr.email || '', cr.roles || [], cr.mapa || {});
+    } catch (e) { /* nega */ }
+  }
+  if (!pode) return { aviso: 'Voce nao tem acesso aos contratos Comerciais.' };
+  try {
+    const rag = require('./ragContratos');
+    const { getGraphClient, resolveContratosSite } = require('./contratos');
+    const client = (ctx.gr && ctx.gr.client) ? ctx.gr.client : getGraphClient();
+    const site = await resolveContratosSite(client);
+    let itens = await rag.carregarCurados(client, site.driveId, false);
+    if (!itens || !itens.length) {
+      return { aviso: 'A base CURADA ainda nao foi gerada. Rode "Curar piloto (Amil/Bradesco/CABESP)" na tela Contratos.', contratos: [] };
+    }
+    const nrm = function (s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); };
+    const fop = nrm(args.operadora).trim();
+    const fuf = String(args.estado || '').toUpperCase().trim();
+    if (fop) itens = itens.filter(function (c) { return nrm(c.operadora && c.operadora.nome).indexOf(fop) >= 0; });
+    if (fuf) itens = itens.filter(function (c) { return String(c.estado_uf || '').toUpperCase() === fuf; });
+    if (args.apenas_vigentes) itens = itens.filter(function (c) { return (c.contrato && c.contrato.status) === 'VIGENTE'; });
+    const incCl = !!args.incluir_clausulas;
+    const contratos = itens.slice(0, 60).map(function (c) {
+      const ct = c.contrato || {};
+      const out = {
+        operadora: c.operadora && c.operadora.nome, estado: c.estado_uf,
+        numero: ct.numero, objeto: ct.objeto, status: ct.status,
+        vigencia: (ct.inicio_vigencia || '?') + ' a ' + (ct.fim_vigencia || '?'), prazo: ct.prazo,
+        tem_liminar: ct.tem_liminar, qualidade_redacao: ct.qualidade_redacao_score,
+        completude: c.completude || null,
+        diarias: (c.diarias || []).map(function (d) { return { descricao: d.descricao, valor: d.valor_diaria, confianca_preco: d.confianca_preco, inclusos: d.inclusos, exclusos: d.exclusos }; }),
+        reajustes: (c.reajustes || []).map(function (r) { return { tipo: r.tipo, indice: r.indice, percentual: r.percentual, data_base: r.data_base, proximo: r.proximo_reajuste_previsto }; }),
+        aditivos: (c.aditivos || []).map(function (a) { return { objeto: a.objeto, melhora_para_pronep: a.melhora_para_pronep, justificativa: a.melhora_justificativa }; }),
+        matmed: (c.matmed || []).map(function (m) { return { base: m.base, operador: m.operador, percentual: m.percentual, categoria: m.categoria }; }),
+        riscos: (c.riscos || []).map(function (r) { return { descricao: r.descricao, categoria: r.categoria, severidade: r.severidade }; }),
+        selo_confianca: (c.proveniencia && c.proveniencia.selo_confianca) || 'PENDENTE',
+        fonte: c._arquivo
+      };
+      if (incCl) out.clausulas = (c.clausulas || []).map(function (cl) { return { tipo: cl.tipo, paragrafo: cl.paragrafo_ref, texto: cl.texto_literal }; });
+      return out;
+    });
+    return {
+      total: itens.length, retornados: contratos.length,
+      instrucao: 'Responda SO com base nestes dados curados. Cite operadora+estado e o selo_confianca. Cada estado e um contrato independente — nao funda estados. Campo null = nao consta no contrato (nao invente).',
+      contratos: contratos
+    };
+  } catch (e) {
+    return { erro: 'Falha ao consultar base curada: ' + ((e && e.message) || String(e)) };
+  }
+}
+
 async function tool_contratos_vencendo(args, ctx) {
   if (!ctx.gr.listContratosId) return { erro: 'Lista PRONEP-NF-Contratos nao disponivel' };
   const dias = args.dias || 30;
@@ -1491,6 +1562,7 @@ const TOOL_IMPL = {
   abrir_contrato: tool_abrir_contrato,
   buscar_conteudo_contrato: tool_buscar_conteudo_contrato,
   comparar_contratos: tool_comparar_contratos,
+  consultar_contratos_curados: tool_consultar_contratos_curados,
   listar_rejeitadas: tool_listar_rejeitadas
 };
 
@@ -1683,6 +1755,7 @@ async function runSolAnthropic(client, history, userMessage, systemPrompt, ctx, 
       // Exige modelo mais forte na sintese apos tools analiticas de contrato.
       if (fnName === 'comparar_contratos') analiseNivel = Math.max(analiseNivel, 2);
       else if (fnName === 'buscar_conteudo_contrato') analiseNivel = Math.max(analiseNivel, 1);
+      else if (fnName === 'consultar_contratos_curados') analiseNivel = Math.max(analiseNivel, 1);
       toolCallsDebug.push({
         tool: fnName,
         args: args,

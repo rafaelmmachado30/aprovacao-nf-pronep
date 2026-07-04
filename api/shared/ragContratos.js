@@ -182,8 +182,49 @@ async function carregarFichas(client, driveId, force) {
   return all;
 }
 
+// Fonte unica CURADA (nova arquitetura) — le _RAG/curado/*.md, extrai o bloco
+// ```json``` (o canonico completo) e cacheia. Carga paralela via downloadUrl.
+const CURADO_FOLDER = '_RAG/curado';
+const _curadoCache = { ts: 0, itens: null };
+function _extrairCanonico(md) {
+  try {
+    const m = /```json\s*([\s\S]*?)```/i.exec(String(md || ''));
+    if (!m) return null;
+    return JSON.parse(m[1]);
+  } catch (e) { return null; }
+}
+async function carregarCurados(client, driveId, force) {
+  if (!force && _curadoCache.itens && (Date.now() - _curadoCache.ts) < _IDX_TTL) return _curadoCache.itens;
+  let arquivos = [];
+  try {
+    const resp = await client.api('/drives/' + driveId + '/root:/' + _encPath(CURADO_FOLDER) + ':/children')
+      .select('name,@microsoft.graph.downloadUrl').top(999).get();
+    arquivos = (resp.value || [])
+      .filter(function (x) { return /\.md$/i.test(x.name || ''); })
+      .map(function (x) { return { name: x.name, url: x['@microsoft.graph.downloadUrl'] || null }; });
+  } catch (e) { arquivos = []; }
+  const parts = await Promise.all(arquivos.map(async function (a) {
+    try {
+      let txt = null;
+      if (a.url) { const r = await fetch(a.url); if (r.ok) txt = await r.text(); }
+      if (txt == null) {
+        const meta = await client.api('/drives/' + driveId + '/root:/' + _encPath(CURADO_FOLDER + '/' + a.name)).select('id').get();
+        const ab = await client.api('/drives/' + driveId + '/items/' + meta.id + '/content').responseType('arraybuffer').get();
+        txt = Buffer.from(ab).toString('utf-8');
+      }
+      const canon = _extrairCanonico(txt);
+      if (!canon) return null;
+      canon._arquivo = a.name;
+      return canon;
+    } catch (e) { return null; }
+  }));
+  const all = parts.filter(function (x) { return !!x; });
+  _curadoCache.itens = all; _curadoCache.ts = Date.now();
+  return all;
+}
+
 module.exports = {
-  EMBED_MODEL, EMBED_DIMS, RAG_FOLDER,
+  EMBED_MODEL, EMBED_DIMS, RAG_FOLDER, CURADO_FOLDER,
   getOpenAI, embed, chunkTexto, vecToB64, b64ToVec, cosine,
-  salvarShard, lerJson, listarShards, carregarIndice, buscar, carregarFichas
+  salvarShard, lerJson, listarShards, carregarIndice, buscar, carregarFichas, carregarCurados
 };
