@@ -3988,6 +3988,39 @@ const views = {
     const notasNoEscopo = notas.filter(matchUnit);
     const taxaDup = (notasNoEscopo.filter(n => n.status === 'duplicada').length / Math.max(notasNoEscopo.length,1) * 100).toFixed(1);
 
+    // ===== Métrica mensal DINÂMICA (mês de referência = mês mais recente com
+    // aprovações; comparação sempre com o mês anterior). Antes era fixo "vs Abr".
+    function _mesKeyDe(dstr) {
+      if (!dstr) return null;
+      const s = String(dstr).trim();
+      let mm = /^(\d{4})-(\d{2})/.exec(s);
+      if (mm) return (+mm[1]) * 12 + (+mm[2] - 1);
+      const br = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s);
+      if (br) return (+br[3]) * 12 + (+br[2] - 1);
+      return null;
+    }
+    const _mNomes = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+    const _mAbrev = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
+    const _hojeBRT = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const _mesesComAprov = aprovadas.map(n => _mesKeyDe(n.aprovadoEm)).filter(k => k != null);
+    const mesRef = _mesesComAprov.length ? Math.max.apply(null, _mesesComAprov) : (_hojeBRT.getUTCFullYear() * 12 + _hojeBRT.getUTCMonth());
+    const _somaMes = (mk) => aprovadas.reduce((s, n) => (_mesKeyDe(n.aprovadoEm) === mk ? s + (Number(n.valor) || 0) : s), 0);
+    const totalMesRef = _somaMes(mesRef);
+    const totalMesAnt = _somaMes(mesRef - 1);
+    const nfsMesRef = aprovadas.filter(n => _mesKeyDe(n.aprovadoEm) === mesRef).length;
+    const _refMi = ((mesRef % 12) + 12) % 12, _refAno = Math.floor(mesRef / 12);
+    const _antMi = (((mesRef - 1) % 12) + 12) % 12;
+    const labelMesRef = _mNomes[_refMi] + '/' + _refAno;
+    let deltaMesTxt, deltaMesClass;
+    if (totalMesAnt > 0) {
+      const pct = Math.round((totalMesRef - totalMesAnt) / totalMesAnt * 100);
+      const up = pct >= 0;
+      deltaMesClass = up ? 'delta up' : 'delta down';
+      deltaMesTxt = (up ? '&#9650; ' : '&#9660; ') + Math.abs(pct) + '% vs ' + _mAbrev[_antMi];
+    } else {
+      deltaMesClass = 'delta'; deltaMesTxt = 'sem base de ' + _mAbrev[_antMi];
+    }
+
     // Dados pros graficos
     // Diretoria x Unidade (barras empilhadas) — pq o gestor ja ve so a propria diretoria,
     // e a quebra por unidade da contexto util
@@ -4022,7 +4055,7 @@ const views = {
 
     return `
       <h2>Dashboard Analitico</h2>
-      <div class="view-sub">${currentPersona.shortRole === 'Gestor' ? 'Visão consolidada das NFs do seu escopo de aprovação' : 'Visao consolidada de aprovacoes e indicadores · Maio/2026'}</div>
+      <div class="view-sub">${currentPersona.shortRole === 'Gestor' ? 'Visão consolidada das NFs do seu escopo de aprovação' : ('Visao consolidada de aprovacoes e indicadores · ' + labelMesRef)}</div>
       ${currentPersona.shortRole === 'Gestor' ? '<div class="small muted" style="background:#E1F5FE;padding:8px 12px;border-radius:6px;margin-bottom:10px;color:#1F4E79"><b>Escopo restrito:</b> mostrando apenas as NFs onde você é o aprovador responsável.</div>' : ''}
 
       <div class="filter-bar" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
@@ -4035,15 +4068,15 @@ const views = {
       </div>
 
       <div class="kpi-row">
-        <div class="kpi"><div class="label">Aprovado no Mes</div><div class="value" data-count="${totalMes}" data-fmt="brl">R$ 0</div><div class="delta up">&#9650; 18% vs Abr</div></div>
-        <div class="kpi"><div class="label">NFs Aprovadas</div><div class="value" data-count="${aprovadas.length}" data-fmt="int">0</div><div class="delta up">&#9650; 12 NFs</div></div>
+        <div class="kpi"><div class="label">Aprovado no Mês (${labelMesRef})</div><div class="value" data-count="${totalMesRef}" data-fmt="brl">R$ 0</div><div class="${deltaMesClass}">${deltaMesTxt}</div></div>
+        <div class="kpi"><div class="label">NFs Aprovadas</div><div class="value" data-count="${aprovadas.length}" data-fmt="int">0</div><div class="delta up">${nfsMesRef} no mês</div></div>
         <div class="kpi"><div class="label">Pendentes</div><div class="value" data-count="${pendentes.length}" data-fmt="int">0</div><div class="delta small muted">Tempo medio: 6,4h</div></div>
         <div class="kpi"><div class="label">Duplicidade Evitada</div><div class="value" id="kpi-dup-value">…</div><div class="delta up" id="kpi-dup-delta">carregando…</div></div>
       </div>
 
       <div class="chart-grid">
         <div class="card">
-          <h3>Valor Aprovado por Diretoria × Unidade <span class="pill">Maio/2026</span></h3>
+          <h3>Valor Aprovado por Diretoria × Unidade <span class="pill">${labelMesRef}</span></h3>
           <div style="position:relative;height:320px"><canvas id="chart-diretoria"></canvas></div>
         </div>
         <div class="card">
