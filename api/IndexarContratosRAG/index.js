@@ -30,11 +30,10 @@ async function _limparShards(client, driveId) {
   try {
     const enc = encodeURIComponent(RAG_FOLDER).replace(/%2F/g, '/');
     const resp = await client.api('/drives/' + driveId + '/root:/' + enc + ':/children').select('id,name').top(999).get();
-    for (const x of (resp.value || [])) {
-      if (/^(part|fichas)-.*\.json$/i.test(x.name || '')) {
-        try { await client.api('/drives/' + driveId + '/items/' + x.id).delete(); } catch (e) { /* ignora */ }
-      }
-    }
+    const alvos = (resp.value || []).filter(function (x) { return /^(part|fichas)-.*\.json$/i.test(x.name || ''); });
+    await Promise.all(alvos.map(async function (x) {
+      try { await client.api('/drives/' + driveId + '/items/' + x.id).delete(); } catch (e) { /* ignora */ }
+    }));
   } catch (e) { /* pasta ainda nao existe */ }
 }
 
@@ -142,39 +141,43 @@ module.exports = async function (context, req) {
     const chunksOut = [];
     const fichasOut = [];
     const arquivosOk = [];
-    for (const f of slice) {
+    // Processa os contratos do lote EM PARALELO — cada um faz download + embed + ficha
+    // (chamada de IA). Sequencial estourava o timeout do gateway do SWA (~45s).
+    const resultados = await Promise.all(slice.map(async function (f) {
       try {
         const ex = await extrairTexto(client, driveId, f.driveItemId, f.ext, {});
         const texto = (ex && ex.texto) || ''; // extrairTexto devolve { texto, paginas, vazio }
-        if (!texto || texto.length < 40) continue; // imagem/scan sem texto
+        if (!texto || texto.length < 40) return null; // imagem/scan sem texto
         const pedacos = chunkTexto(texto);
-        if (!pedacos.length) continue;
+        if (!pedacos.length) return null;
         const vecs = await embed(pedacos);
-        for (let i = 0; i < pedacos.length; i++) {
-          chunksOut.push({
+        const chunks = pedacos.map(function (p, i) {
+          return {
             contratoId: f.listItemId, contratoNome: f.nome,
             diretoria: 'Comercial', subpasta: f.subpasta, fornecedor: f.fornecedor,
-            webUrl: f.webUrl, chunkIdx: i, texto: pedacos[i], vec: vecToB64(vecs[i])
-          });
-        }
-        // Ficha estruturada (Fase 3) — pra comparacao/ranking da carteira.
+            webUrl: f.webUrl, chunkIdx: i, texto: p, vec: vecToB64(vecs[i])
+          };
+        });
+        let ficha = null;
         try {
-          const ficha = await extrairFicha(texto);
-          if (ficha) {
-            ficha.contratoId = f.listItemId;
-            ficha.contratoNome = f.nome;
-            ficha.fornecedorPasta = f.fornecedor;
-            ficha.subpasta = f.subpasta;
-            ficha.webUrl = f.webUrl;
-            fichasOut.push(ficha);
-          } else if (!diag.fichaErro) {
-            diag.fichaErro = ultimoErroFicha();
-          }
+          const fi = await extrairFicha(texto);
+          if (fi) {
+            fi.contratoId = f.listItemId; fi.contratoNome = f.nome;
+            fi.fornecedorPasta = f.fornecedor; fi.subpasta = f.subpasta; fi.webUrl = f.webUrl;
+            ficha = fi;
+          } else if (!diag.fichaErro) { diag.fichaErro = ultimoErroFicha(); }
         } catch (e) { if (!diag.fichaErro) diag.fichaErro = (e && e.message) || String(e); }
-        arquivosOk.push(f.nome);
+        return { nome: f.nome, chunks: chunks, ficha: ficha };
       } catch (e) {
         diag.ultimoErro = { arquivo: f.nome, erro: (e && e.message) || String(e) };
+        return null;
       }
+    }));
+    for (const r of resultados) {
+      if (!r) continue;
+      for (const c of r.chunks) chunksOut.push(c);
+      if (r.ficha) fichasOut.push(r.ficha);
+      arquivosOk.push(r.nome);
     }
 
     diag.step = 'save_shard';
