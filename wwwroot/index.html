@@ -4014,9 +4014,11 @@ const views = {
     let deltaMesTxt, deltaMesClass;
     if (totalMesAnt > 0) {
       const pct = Math.round((totalMesRef - totalMesAnt) / totalMesAnt * 100);
-      const up = pct >= 0;
-      deltaMesClass = up ? 'delta up' : 'delta down';
-      deltaMesTxt = (up ? '&#9650; ' : '&#9660; ') + Math.abs(pct) + '% vs ' + _mAbrev[_antMi];
+      // Semantica de DESPESA: gastar MENOS que o mes anterior e BOM (verde);
+      // gastar mais e ruim (vermelho). A seta indica a direcao, a cor o sentido.
+      const seta = pct < 0 ? '&#9660; ' : (pct > 0 ? '&#9650; ' : '');
+      deltaMesClass = pct < 0 ? 'delta up' : (pct > 0 ? 'delta down' : 'delta');
+      deltaMesTxt = seta + Math.abs(pct) + '% vs ' + _mAbrev[_antMi];
     } else {
       deltaMesClass = 'delta'; deltaMesTxt = 'sem base de ' + _mAbrev[_antMi];
     }
