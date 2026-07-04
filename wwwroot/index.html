@@ -5785,8 +5785,10 @@ function renderContratosView() {
         <button class="btn btn-primary" onclick="abrirSincronizarTudo()" title="Varre as 10 diretorias da Pronep em sequencia">⚡ Sincronizar TUDO</button>
         ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="limparDuplicatasContratos()" title="Remove contratos duplicados (mesmo arquivo repetido), mantendo 1 de cada">🧹 Limpar duplicatas</button>' : ''}
         ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="indexarComercialRAG(this)" title="Cria a base de conhecimento (RAG) dos contratos Comerciais para a IA consultar">🧠 Indexar Comercial (IA)</button>' : ''}
+        ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="curarPilotoContratos(this)" title="Ingestão curada (nova arquitetura): lê Amil, Bradesco e CABESP, extrai o modelo canônico e grava a fonte única (Markdown+YAML)">📚 Curar piloto (Amil/Bradesco/CABESP)</button>' : ''}
       </div>
       <div id="rag-index-progress" class="small muted" style="margin-top:8px"></div>
+      <div id="curado-progress" class="small muted" style="margin-top:8px"></div>
     </div>
 
     <div id="contratos-arvore">
@@ -6496,6 +6498,41 @@ async function indexarComercialRAG(btn) {
     if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Erro: ' + escHtml(e.message || String(e)) + '</span>';
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🧠 Indexar Comercial (IA)'; }
+  }
+}
+
+// Ingestao CURADA do piloto (nova arquitetura). Le Amil/Bradesco/CABESP, extrai o
+// modelo canonico e grava a fonte unica (Markdown+YAML) em _RAG/curado/. Roda em lotes.
+async function curarPilotoContratos(btn) {
+  var prog = document.getElementById('curado-progress');
+  var ok = await confirmarAcao({
+    titulo: 'Curar contratos do piloto (Amil, Bradesco, CABESP)?',
+    mensagem: 'Vou ler os contratos dessas 3 operadoras, extrair o <b>modelo canônico</b> (diárias, reajustes, cláusulas, riscos, proveniência) e gravar a <b>fonte única curada</b> (Markdown+YAML). É dela que os demais trilhos são derivados depois. Roda em segundo plano.',
+    tipo: 'info', confirmLabel: 'Curar agora', cancelLabel: 'Cancelar'
+  });
+  if (!ok) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Curando...'; }
+  var offset = 0, total = null, curados = 0, arqs = 0, lotes = 0;
+  try {
+    while (true) {
+      var r = await fetch('/api/CurarContratos?offset=' + offset + '&limit=4', { method: 'POST', credentials: 'include' });
+      var d = await r.json().catch(function () { return {}; });
+      if (!r.ok || !d.ok) {
+        if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha no lote (offset ' + offset + '): ' + escHtml((d && d.error) || ('HTTP ' + r.status)) + '</span>';
+        break;
+      }
+      total = d.total; curados += (d.curadosNoBatch || 0); arqs += (d.arquivosNoBatch || 0); lotes++;
+      if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + d.processado + '/' + total + '</b> arquivos · ' + curados + ' fontes únicas gravadas';
+      if (d.done) {
+        if (prog) prog.innerHTML = '✅ Curadoria pronta: <b>' + curados + '</b> fontes únicas de ' + total + ' arquivos (Amil/Bradesco/CABESP). Base curada em _RAG/curado/.';
+        break;
+      }
+      offset = d.next;
+    }
+  } catch (e) {
+    if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Erro: ' + escHtml(e.message || String(e)) + '</span>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '📚 Curar piloto (Amil/Bradesco/CABESP)'; }
   }
 }
 
