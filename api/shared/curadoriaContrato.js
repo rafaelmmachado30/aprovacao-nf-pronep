@@ -15,7 +15,7 @@ require('isomorphic-fetch');
 
 const MODEL = process.env.ANTHROPIC_MODEL_CURADORIA || process.env.ANTHROPIC_MODEL_SONNET || 'claude-sonnet-4-6';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const MAX_TEXTO = 45000; // Sonnet aguenta bem; cobre a maioria dos contratos
+const MAX_TEXTO = 32000; // enxuto p/ caber no timeout do gateway (SWA ~45s) por documento
 
 const INSTRUCAO =
   'Voce e um curador juridico de contratos de operadoras de saude (home care). Le o documento e ' +

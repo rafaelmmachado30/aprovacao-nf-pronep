@@ -6532,21 +6532,23 @@ async function curarPilotoContratos(btn) {
       if (btn) { btn.disabled = false; btn.textContent = '📚 Curar piloto (Amil/Bradesco/CABESP)'; }
       return;
     }
-    while (true) {
-      var r = await fetch('/api/CurarContratos?offset=' + offset + '&limit=2', { method: 'POST', credentials: 'include' });
+    var falhas = 0;
+    while (offset < total) {
+      var r = await fetch('/api/CurarContratos?offset=' + offset + '&limit=1', { method: 'POST', credentials: 'include' });
       var d = await r.json().catch(function () { return {}; });
       if (!r.ok || !d.ok) {
-        if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha no lote (offset ' + offset + '): ' + escHtml((d && d.error) || ('HTTP ' + r.status)) + '</span>';
-        break;
+        // Um documento falhou/estourou o tempo: pula e segue (nao aborta o piloto).
+        falhas++;
+        offset++;
+        if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + offset + '/' + total + '</b> · ' + curados + ' gravadas · ' + falhas + ' puladas';
+        continue;
       }
       total = d.total; curados += (d.curadosNoBatch || 0); arqs += (d.arquivosNoBatch || 0); lotes++;
-      if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + d.processado + '/' + total + '</b> arquivos · ' + curados + ' fontes únicas gravadas';
-      if (d.done) {
-        if (prog) prog.innerHTML = '✅ Curadoria pronta: <b>' + curados + '</b> fontes únicas de ' + total + ' arquivos (Amil/Bradesco/CABESP). Base curada em _RAG/curado/.';
-        break;
-      }
-      offset = d.next;
+      offset = (d.next != null) ? d.next : (offset + 1);
+      if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + Math.min(offset, total) + '/' + total + '</b> · ' + curados + ' fontes únicas gravadas' + (falhas ? (' · ' + falhas + ' puladas') : '');
+      if (d.done) break;
     }
+    if (prog) prog.innerHTML = '✅ Curadoria concluída: <b>' + curados + '</b> fontes únicas de ' + total + ' arquivos (Amil/Bradesco/CABESP)' + (falhas ? (' · ' + falhas + ' puladas') : '') + '. Base curada em _RAG/curado/.';
   } catch (e) {
     if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Erro: ' + escHtml(e.message || String(e)) + '</span>';
   } finally {
