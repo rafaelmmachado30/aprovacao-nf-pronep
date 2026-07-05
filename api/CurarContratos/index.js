@@ -1,37 +1,51 @@
 /**
  * /api/CurarContratos (GET|POST) — ADMIN ONLY. Fase 1 da NOVA arquitetura (ingestao curada).
  *
- * Le os contratos das operadoras PILOTO (Amil, Bradesco, CABESP), extrai o modelo
- * CANONICO (curadoriaContrato) e grava a FONTE UNICA curada (Markdown+YAML) em
- * _RAG/curado/ no drive dos contratos. Dessa fonte unica os trilhos (relacional/
- * vetorial/grafo) sao derivados depois — sem perda e regeneravel.
+ * Cura as operadoras PILOTO (Amil, Bradesco, CABESP) a partir do TEXTO JA EXTRAIDO no
+ * indice RAG (_RAG/comercial/part-*.json). Reusar o indice evita os 404 de DriveItemId
+ * desatualizado e os PDFs sem texto (que nem entram no indice). Para cada contrato,
+ * remonta o texto dos seus chunks, extrai o modelo CANONICO (curadoriaContrato) e grava
+ * a FONTE UNICA curada (Markdown+YAML) em _RAG/curado/. Dessa fonte os trilhos
+ * (relacional/vetorial/grafo) sao derivados depois — sem perda e regeneravel.
  *
- * Roda em LOTES (o front chama em loop, driblando o timeout do SWA). offset=0 recria
- * o manifest do piloto e limpa a pasta curado/.
+ * Roda em LOTES (o front chama em loop). prep=1 limpa curado/ + monta o manifesto (sem IA).
  *
- * Query: ?offset=0&limit=4   |   ?debug=1&limit=1 (nao-destrutivo)
- * Resposta: { ok, total, offset, processado, arquivosNoBatch, curadosNoBatch, done, next }
+ * Query: ?prep=1 | ?offset=0&limit=1 | ?debug=1&limit=1 (nao-destrutivo)
  */
 
 require('isomorphic-fetch');
 const { requireAdmin } = require('../shared/authz');
-const {
-  getGraphClient, garantirListaContratos, getContratoColMap,
-  resolveContratosSite, extrairTexto
-} = require('../shared/contratos');
-const { salvarShard, lerJson } = require('../shared/ragContratos');
+const { getGraphClient, resolveContratosSite } = require('../shared/contratos');
+const rag = require('../shared/ragContratos');
+const { salvarShard, lerJson } = rag;
 const { curar, ultimoErroCuradoria, MODEL } = require('../shared/curadoriaContrato');
 const { nomeCurado, montarMarkdown, salvarCurado, limparCurado } = require('../shared/fonteUnica');
 
-// Operadoras do piloto (por Fornecedor). CABESP tolera acento/variacoes.
 const PILOTO = /amil|bradesco|cabesp/i;
-const EXCLUIR_SUBPASTA = /glosa|recurso de glosas/i;
-const EXTS_OK = ['pdf', 'docx'];
-
+const EXCLUIR = /glosa|recurso de glosas/i;
 const MANIFEST_PILOTO = '_curado_files.json';
+const MAX_TEXTO_JOIN = 60000; // texto remontado por contrato (curar depois corta em 32k)
 
-function _norm(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim(); }
-function _ext(nome) { const m = /\.([a-z0-9]+)$/i.exec(String(nome || '')); return m ? m[1].toLowerCase() : ''; }
+// Agrupa os chunks do indice por contrato, so os que casam com o piloto.
+function _agruparPiloto(chunks) {
+  const map = {};
+  for (const c of (chunks || [])) {
+    const hay = String(c.fornecedor || '') + ' ' + String(c.subpasta || '') + ' ' + String(c.contratoNome || '');
+    if (!PILOTO.test(hay)) continue;
+    if (EXCLUIR.test(hay)) continue;
+    const id = c.contratoId;
+    if (!id) continue;
+    if (!map[id]) map[id] = { contratoId: id, nome: c.contratoNome || '', fornecedor: c.fornecedor || '', subpasta: c.subpasta || '', webUrl: c.webUrl || '', chunks: [] };
+    map[id].chunks.push({ idx: (c.chunkIdx != null ? c.chunkIdx : 0), texto: c.texto || '' });
+  }
+  return map;
+}
+function _textoDoContrato(entry) {
+  const cs = (entry.chunks || []).slice().sort(function (a, b) { return a.idx - b.idx; });
+  let t = cs.map(function (x) { return x.texto; }).join('\n');
+  if (t.length > MAX_TEXTO_JOIN) t = t.slice(0, MAX_TEXTO_JOIN);
+  return t;
+}
 
 module.exports = async function (context, req) {
   const diag = { step: 'start', modelo: MODEL };
@@ -40,107 +54,79 @@ module.exports = async function (context, req) {
     if (!authz) return;
 
     const offset = Math.max(0, parseInt((req.query && req.query.offset) || '0', 10) || 0);
-    const limit = Math.min(8, Math.max(1, parseInt((req.query && req.query.limit) || '4', 10) || 4));
+    const limit = Math.min(8, Math.max(1, parseInt((req.query && req.query.limit) || '1', 10) || 1));
     const prep = req.query && (req.query.prep === '1' || req.query.prep === 'true');
 
     const client = getGraphClient();
     diag.step = 'resolve';
-    const listInfo = await garantirListaContratos(client);
-    const appSiteId = listInfo.siteId;
-    const listId = listInfo.listId;
-    const colMap = await getContratoColMap(client, appSiteId, listId);
     const contr = await resolveContratosSite(client);
     const driveId = contr.driveId;
-    const col = function (d) { return colMap[d] || d; };
 
-    // Monta o manifesto do piloto (enumera a lista). Sem IA — rapido.
-    async function _montarManifest() {
-      const files = [];
-      let url = '/sites/' + appSiteId + '/lists/' + listId + '/items?expand=fields&$top=500';
-      let pages = 0;
-      while (url && pages < 40) {
-        const resp = await client.api(url).get();
-        for (const it of (resp.value || [])) {
-          const f = it.fields || {};
-          if (_norm(f[col('Diretoria')]) !== 'comercial') continue;
-          const driveItemId = f[col('DriveItemId')] || '';
-          if (!driveItemId) continue;
-          const nome = f[col('NomeArquivo')] || f[col('Title')] || '';
-          const ext = _ext(nome);
-          if (EXTS_OK.indexOf(ext) < 0) continue;
-          const fornecedor = f[col('Fornecedor')] || '';
-          const caminho = String(f[col('PathRelativoSP')] || '') + ' ' + String(f[col('CaminhoSharepoint')] || '') + ' ' + String(nome);
-          if (EXCLUIR_SUBPASTA.test(caminho)) continue;
-          if (!PILOTO.test(fornecedor) && !PILOTO.test(caminho)) continue;
-          files.push({
-            listItemId: it.id, driveItemId: driveItemId, nome: nome, ext: ext,
-            fornecedor: fornecedor,
-            subpasta: f[col('PathRelativoSP')] || f[col('CaminhoSharepoint')] || '',
-            webUrl: f[col('CaminhoSharepoint')] || ''
-          });
-        }
-        pages++;
-        url = resp['@odata.nextLink'] ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '') : null;
-      }
-      const man = { total: files.length, files: files, criadoEm: new Date().toISOString() };
-      await salvarShard(client, driveId, MANIFEST_PILOTO, man);
-      return man;
-    }
-
-    // ===== FASE PREP (rapida, sem IA): limpa curado/ + (re)monta o manifesto.
-    // O front chama isto UMA vez antes do loop de processamento (dribla o timeout).
+    // ===== FASE PREP: limpa curado/ + monta manifesto a partir do indice RAG.
     diag.step = 'manifest';
     if (prep) {
       await limparCurado(client, driveId);
-      const man = await _montarManifest();
+      const chunks = await rag.carregarIndice(client, driveId, true);
+      const map = _agruparPiloto(chunks);
+      const files = Object.keys(map).map(function (id) {
+        const e = map[id];
+        return { contratoId: e.contratoId, nome: e.nome, fornecedor: e.fornecedor, subpasta: e.subpasta, webUrl: e.webUrl };
+      });
+      const man = { total: files.length, files: files, criadoEm: new Date().toISOString() };
+      await salvarShard(client, driveId, MANIFEST_PILOTO, man);
       context.res = { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-        body: { ok: true, prepared: true, total: man.total, next: 0 } };
+        body: { ok: true, prepared: true, total: man.total, next: 0, fonte: 'indice_rag' } };
       return;
     }
 
-    // Processamento: le o manifesto (monta se faltar; NAO limpa aqui).
+    // Manifesto (monta se faltar). Indice carregado (cache) p/ remontar o texto.
     let manifest = await lerJson(client, driveId, MANIFEST_PILOTO);
-    if (!manifest || !Array.isArray(manifest.files)) manifest = await _montarManifest();
+    const chunks = await rag.carregarIndice(client, driveId, false);
+    const map = _agruparPiloto(chunks);
+    if (!manifest || !Array.isArray(manifest.files)) {
+      const files = Object.keys(map).map(function (id) {
+        const e = map[id];
+        return { contratoId: e.contratoId, nome: e.nome, fornecedor: e.fornecedor, subpasta: e.subpasta, webUrl: e.webUrl };
+      });
+      manifest = { total: files.length, files: files };
+    }
 
     const total = manifest.files.length;
     const slice = manifest.files.slice(offset, offset + limit);
 
-    // ===== MODO DEBUG (nao-destrutivo).
+    // ===== DEBUG (nao-destrutivo).
     if (req.query && (req.query.debug === '1' || req.query.debug === 'true')) {
       const amostra = [];
       for (const f of slice.slice(0, Math.min(limit, 2))) {
-        const info = { nome: f.nome, fornecedor: f.fornecedor, ext: f.ext };
+        const info = { nome: f.nome, fornecedor: f.fornecedor };
         try {
-          const ex = await extrairTexto(client, driveId, f.driveItemId, f.ext, {});
-          const texto = (ex && ex.texto) || '';
+          const e = map[f.contratoId];
+          const texto = e ? _textoDoContrato(e) : '';
           info.textoLen = texto.length;
-          const canonico = await curar(texto, 'nativo');
-          info.curadoOk = !!canonico;
-          info.curadoErro = canonico ? null : ultimoErroCuradoria();
-          if (canonico) info.amostraCanonico = { doc_tipo: canonico.doc_tipo, operadora: canonico.operadora && canonico.operadora.nome, estado: canonico.estado_uf, status: canonico.contrato && canonico.contrato.status, diarias: (canonico.diarias || []).length, clausulas: (canonico.clausulas || []).length };
+          const canon = await curar(texto, 'nativo');
+          info.curadoOk = !!canon;
+          info.curadoErro = canon ? null : ultimoErroCuradoria();
+          if (canon) info.amostra = { doc_tipo: canon.doc_tipo, operadora: canon.operadora && canon.operadora.nome, estado: canon.estado_uf, diarias: (canon.diarias || []).length, clausulas: (canon.clausulas || []).length };
         } catch (e) { info.erro = (e && e.message) || String(e); }
         amostra.push(info);
       }
       context.res = { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-        body: { ok: true, debug: true, modelo: MODEL, hasAnthropicKey: !!process.env.ANTHROPIC_API_KEY, hasOpenAIKey: !!process.env.OPENAI_API_KEY, totalManifest: total, amostra: amostra } };
+        body: { ok: true, debug: true, modelo: MODEL, totalManifest: total, amostra: amostra } };
       return;
     }
 
-    // ===== Processa o lote EM PARALELO: extrai texto -> cura -> grava fonte unica.
+    // ===== Processa o lote.
     diag.step = 'process_batch';
     const curadosOut = [];
     const ignorados = [];
     const resultados = await Promise.all(slice.map(async function (f) {
       try {
-        const ex = await extrairTexto(client, driveId, f.driveItemId, f.ext, {});
-        const texto = (ex && ex.texto) || '';
-        if (!texto || texto.length < 60) return { nome: f.nome, motivo: 'sem_texto' };
+        const e = map[f.contratoId];
+        const texto = e ? _textoDoContrato(e) : '';
+        if (!texto || texto.length < 60) return { nome: f.nome, motivo: 'sem_texto_indice' };
         const canonico = await curar(texto, 'nativo');
         if (!canonico) return { nome: f.nome, motivo: 'curadoria_falhou', erro: ultimoErroCuradoria() };
-        // So contrato/aditivo viram fonte unica; glosa/outro sao ruido (nao entram).
-        if (canonico.doc_tipo && ['glosa', 'outro'].indexOf(canonico.doc_tipo) >= 0) {
-          return { nome: f.nome, motivo: 'doc_tipo_' + canonico.doc_tipo };
-        }
+        if (canonico.doc_tipo && ['glosa', 'outro'].indexOf(canonico.doc_tipo) >= 0) return { nome: f.nome, motivo: 'doc_tipo_' + canonico.doc_tipo };
         const md = montarMarkdown(canonico, { arquivoOrigem: f.nome, webUrl: f.webUrl });
         const nome = nomeCurado(canonico, f.fornecedor || f.nome);
         await salvarCurado(client, driveId, nome, md);
