@@ -5786,9 +5786,11 @@ function renderContratosView() {
         ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="limparDuplicatasContratos()" title="Remove contratos duplicados (mesmo arquivo repetido), mantendo 1 de cada">🧹 Limpar duplicatas</button>' : ''}
         ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="indexarComercialRAG(this)" title="Cria a base de conhecimento (RAG) dos contratos Comerciais para a IA consultar">🧠 Indexar Comercial (IA)</button>' : ''}
         ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="curarPilotoContratos(this)" title="Ingestão curada (nova arquitetura): lê Amil, Bradesco e CABESP, extrai o modelo canônico e grava a fonte única (Markdown+YAML)">📚 Curar piloto (Amil/Bradesco/CABESP)</button>' : ''}
+        ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="carregarBaseRelacional(this)" title="Deriva o banco relacional (Supabase) a partir da fonte única curada — trilho de números/agregações/temporal">🗄️ Carregar base relacional (Supabase)</button>' : ''}
       </div>
       <div id="rag-index-progress" class="small muted" style="margin-top:8px"></div>
       <div id="curado-progress" class="small muted" style="margin-top:8px"></div>
+      <div id="relacional-progress" class="small muted" style="margin-top:8px"></div>
     </div>
 
     <div id="contratos-arvore">
@@ -6533,6 +6535,36 @@ async function curarPilotoContratos(btn) {
     if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Erro: ' + escHtml(e.message || String(e)) + '</span>';
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '📚 Curar piloto (Amil/Bradesco/CABESP)'; }
+  }
+}
+
+// Deriva o trilho RELACIONAL (Supabase) a partir da fonte unica curada. Roda de uma vez
+// (a fonte ja esta curada; sem chamada de IA aqui). Faz TRUNCATE + reload limpo.
+async function carregarBaseRelacional(btn) {
+  var prog = document.getElementById('relacional-progress');
+  var ok = await confirmarAcao({
+    titulo: 'Carregar base relacional (Supabase)?',
+    mensagem: 'Vou ler a <b>fonte única curada</b> e (re)popular as tabelas do Postgres/Supabase (operadora, contrato, diárias, reajustes, cláusulas, riscos...). A base é recriada do zero a cada carga — sem perda, é derivada da fonte única. Pré-requisito: já ter rodado "Curar piloto" e configurado a conexão do Supabase.',
+    tipo: 'info', confirmLabel: 'Carregar agora', cancelLabel: 'Cancelar'
+  });
+  if (!ok) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Carregando...'; }
+  if (prog) prog.innerHTML = '⏳ Carregando base relacional...';
+  try {
+    var r = await fetch('/api/CarregarBaseCurada', { method: 'POST', credentials: 'include' });
+    var d = await r.json().catch(function () { return {}; });
+    if (!r.ok || !d.ok) {
+      if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha: ' + escHtml((d && (d.error || d.aviso)) || ('HTTP ' + r.status)) + '</span>';
+    } else if (d.carregados === 0 && d.aviso) {
+      if (prog) prog.innerHTML = '<span style="color:var(--amarelo,#b8860b)">' + escHtml(d.aviso) + '</span>';
+    } else {
+      var extra = d.pulados ? (' · ' + d.pulados + ' pulados') : '';
+      if (prog) prog.innerHTML = '✅ Base relacional pronta: <b>' + d.carregados + '</b> contratos carregados de ' + (d.fontes || d.carregados) + ' fontes' + extra + '. A SAN já roda SQL sobre eles.';
+    }
+  } catch (e) {
+    if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Erro: ' + escHtml(e.message || String(e)) + '</span>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🗄️ Carregar base relacional (Supabase)'; }
   }
 }
 

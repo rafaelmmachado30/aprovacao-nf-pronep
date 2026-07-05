@@ -137,8 +137,8 @@ const VIEW_SCOPES = {
   'configuracoes': { titulo: 'Configuracoes', foco: 'orientacao sobre opcoes de admin/usuario. Tambem pode consultar qualquer dado do sistema (NFs, contratos) se o usuario perguntar.', tools: [] },
   'contratos':    {
     titulo: 'Contratos',
-    foco: 'consulta e ANALISE da base de contratos Comerciais da Pronep. Escolha a ferramenta certa: (1) METADADOS de 1 fornecedor/status (vigencia, valor, vencimento) -> listar_contratos/detalhes_contrato/agregar_contratos/contratos_vencendo. (2) TEOR/CLAUSULA especifica em texto ("qual a clausula de reajuste do contrato X", "quais tem multa de rescisao") -> buscar_conteudo_contrato (retorna trechos com origem). (3) COMPARAR/RANQUEAR a carteira ("qual a melhor negociacao/mais rentavel", "onde renegociar", "maiores riscos", "top N por valor") -> comparar_contratos (traz as FICHAS estruturadas de todos os contratos pra voce ranquear). (4) Perguntas sobre AMIL, BRADESCO ou CABESP (diarias/valores vigentes, inclusos/exclusos, reajustes, aditivos, liminar, riscos, MatMed, vigencia) -> consultar_contratos_curados (base CURADA e auditada, com selo de confianca — e a fonte MAIS confiavel; cada estado e um contrato independente). SEMPRE cite os contratos/fornecedores e NUNCA invente dados/clausulas fora do que as tools retornaram — se faltar, diga que nao consta. NUNCA mande o usuario "acessar o SharePoint" ou "contatar o financeiro" pra algo que essas tools respondem. NAO ha aprovar/rejeitar contratos aqui.',
-    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato','buscar_conteudo_contrato','comparar_contratos','consultar_contratos_curados']
+    foco: 'consulta e ANALISE da base de contratos Comerciais da Pronep. Escolha a ferramenta certa: (1) METADADOS de 1 fornecedor/status (vigencia, valor, vencimento) -> listar_contratos/detalhes_contrato/agregar_contratos/contratos_vencendo. (2) TEOR/CLAUSULA especifica em texto ("qual a clausula de reajuste do contrato X", "quais tem multa de rescisao") -> buscar_conteudo_contrato (retorna trechos com origem). (3) COMPARAR/RANQUEAR a carteira ("qual a melhor negociacao/mais rentavel", "onde renegociar", "maiores riscos", "top N por valor") -> comparar_contratos (traz as FICHAS estruturadas de todos os contratos pra voce ranquear). (4) Perguntas sobre AMIL, BRADESCO ou CABESP (diarias/valores vigentes, inclusos/exclusos, reajustes, aditivos, liminar, riscos, MatMed, vigencia) -> consultar_contratos_curados (base CURADA e auditada, com selo de confianca — e a fonte MAIS confiavel; cada estado e um contrato independente). (5) Perguntas NUMERICAS/TEMPORAIS/AGREGADAS do piloto (vence em X dias, reajuste vencido pela data_base, sem reajuste ha 12 meses, media de diarias por operadora, comparar mesma operadora entre estados, contar VIGENTES) -> consultar_base_relacional (roda SQL SELECT read-only no Postgres). SEMPRE cite os contratos/fornecedores e NUNCA invente dados/clausulas fora do que as tools retornaram — se faltar, diga que nao consta. NUNCA mande o usuario "acessar o SharePoint" ou "contatar o financeiro" pra algo que essas tools respondem. NAO ha aprovar/rejeitar contratos aqui.',
+    tools: ['listar_contratos','detalhes_contrato','agregar_contratos','contratos_vencendo','abrir_contrato','buscar_conteudo_contrato','comparar_contratos','consultar_contratos_curados','consultar_base_relacional']
   }
 };
 
@@ -153,7 +153,7 @@ const READ_TOOLS_UNIVERSAIS = [
   'listar_fila', 'listar_aprovadas', 'listar_rejeitadas', 'detalhes_nf',
   'agregar_por_fornecedor', 'detectar_anomalia', 'abrir_nf', 'buscar_fornecedor',
   'listar_contratos', 'detalhes_contrato', 'agregar_contratos', 'contratos_vencendo', 'abrir_contrato',
-  'buscar_conteudo_contrato', 'comparar_contratos', 'consultar_contratos_curados'
+  'buscar_conteudo_contrato', 'comparar_contratos', 'consultar_contratos_curados', 'consultar_base_relacional'
 ];
 
 function getToolsForView(viewAtual) {
@@ -576,6 +576,33 @@ const TOOLS = [
           apenas_vigentes: { type: 'boolean', description: 'Se true, considera apenas contratos vigentes (vigenciaFim >= hoje).' },
           limite: { type: 'integer', description: 'Maximo de fichas a retornar (default 150, max 200).' }
         }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'consultar_base_relacional',
+      description: 'Executa uma consulta SQL (SELECT read-only) na BASE RELACIONAL curada (Postgres/Supabase) dos contratos do piloto (Amil, Bradesco, CABESP). Use para perguntas NUMERICAS/TEMPORAIS/AGREGADAS que SQL responde melhor que ler texto: "contratos que vencem em 60 dias", "reajuste vencido (passou da data_base)", "sem reajuste ha mais de 12 meses", "media/valor das diarias vigentes por operadora", "comparar a mesma operadora entre estados", "quantos contratos VIGENTES por operadora". Escreva UM comando SELECT valido em Postgres (sem ; e sem escrita). ' +
+        'ESQUEMA (todos com contrato_id FK, exceto operadora): ' +
+        'operadora(id, nome, cnpj, registro_ans, segmento); ' +
+        'contrato(id, operadora_id, estado_uf[SP|RJ|ES], numero, cnpj_pronep_contratada, objeto, data_assinatura, inicio_vigencia, fim_vigencia, prazo, status[VIGENTE|HISTORICO], tem_liminar bool, qualidade_redacao_score 0-5, completude jsonb); ' +
+        'reajuste(id, contrato_id, numero_rp, tipo[GERAL|pontual], indice, percentual, inicio_vigencia, data_base, proximo_reajuste_previsto); ' +
+        'aditivo(id, contrato_id, objeto, inicio_vigencia, tipo, melhora_para_pronep[sim|nao|neutro], melhora_justificativa); ' +
+        'diaria(id, contrato_id, descricao, valor_diaria numeric, inclusos jsonb, exclusos jsonb, vigencia_inicio, vigencia_fim, confianca_preco[NATIVO|OCR-VALIDADO|OCR-A-VALIDAR]); ' +
+        'procedimento(id, contrato_id, codigo_tuss, descricao, valor, unidade, confianca_preco); ' +
+        'regra_matmed(id, contrato_id, base[Simpro|Brasindice], operador[deflator|acrescimo], percentual, categoria); ' +
+        'clausula(id, contrato_id, tipo, texto_literal, paragrafo_ref); ' +
+        'risco(id, contrato_id, descricao, categoria[financeiro|juridico|operacional], severidade[alto|medio|baixo]); ' +
+        'proveniencia(id, arquivo_origem, web_url, metodo_extracao, selo_confianca[CONFIRMADO|PARCIAL|PENDENTE]) referenciada por contrato.proveniencia_id. ' +
+        'Regra: cada estado e um contrato INDEPENDENTE (join operadora + filtre/agrupe por estado_uf; nunca funda estados). Datas sao date (use CURRENT_DATE, interval). SEMPRE explique o resultado e o criterio; nao invente colunas fora do esquema.',
+      parameters: {
+        type: 'object',
+        properties: {
+          sql: { type: 'string', description: 'Um SELECT valido em Postgres (sem ; final, sem comandos de escrita).' },
+          max_linhas: { type: 'integer', description: 'Limite de linhas (default 200, max 500).' }
+        },
+        required: ['sql']
       }
     }
   },
@@ -1396,6 +1423,30 @@ async function tool_comparar_contratos(args, ctx) {
   }
 }
 
+async function tool_consultar_base_relacional(args, ctx) {
+  const cr = (ctx && ctx.contratos) || {};
+  let pode = !!cr.veTodos;
+  if (!pode) {
+    try {
+      const { podeVerContrato } = require('./acessoContratos');
+      pode = podeVerContrato('Comercial', cr.email || '', cr.roles || [], cr.mapa || {});
+    } catch (e) { /* nega */ }
+  }
+  if (!pode) return { aviso: 'Voce nao tem acesso aos contratos Comerciais.' };
+  try {
+    const pg = require('./pgContratos');
+    if (!pg.getPool()) return { aviso: 'A base relacional (Supabase) ainda nao esta configurada. Rode "Carregar base relacional" depois de configurar a conexao.' };
+    const r = await pg.runSelectSeguro(args.sql, args.max_linhas);
+    if (r.erro) return { erro: r.erro, dica: 'Reveja o SQL (apenas SELECT, colunas do esquema informado).' };
+    return {
+      colunas: r.colunas, total: r.total, linhas: r.linhas,
+      instrucao: 'Responda com base SO nestes resultados. Explique o criterio da consulta e cite operadora/estado. Cada estado e um contrato independente. Se vazio, diga que nenhum registro atende.'
+    };
+  } catch (e) {
+    return { erro: 'Falha na consulta relacional: ' + ((e && e.message) || String(e)) };
+  }
+}
+
 async function tool_consultar_contratos_curados(args, ctx) {
   const cr = (ctx && ctx.contratos) || {};
   let pode = !!cr.veTodos;
@@ -1563,6 +1614,7 @@ const TOOL_IMPL = {
   buscar_conteudo_contrato: tool_buscar_conteudo_contrato,
   comparar_contratos: tool_comparar_contratos,
   consultar_contratos_curados: tool_consultar_contratos_curados,
+  consultar_base_relacional: tool_consultar_base_relacional,
   listar_rejeitadas: tool_listar_rejeitadas
 };
 
@@ -1756,6 +1808,7 @@ async function runSolAnthropic(client, history, userMessage, systemPrompt, ctx, 
       if (fnName === 'comparar_contratos') analiseNivel = Math.max(analiseNivel, 2);
       else if (fnName === 'buscar_conteudo_contrato') analiseNivel = Math.max(analiseNivel, 1);
       else if (fnName === 'consultar_contratos_curados') analiseNivel = Math.max(analiseNivel, 1);
+      else if (fnName === 'consultar_base_relacional') analiseNivel = Math.max(analiseNivel, 1);
       toolCallsDebug.push({
         tool: fnName,
         args: args,
