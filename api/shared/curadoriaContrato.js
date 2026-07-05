@@ -13,9 +13,12 @@
 
 require('isomorphic-fetch');
 
-const MODEL = process.env.ANTHROPIC_MODEL_CURADORIA || process.env.ANTHROPIC_MODEL_SONNET || 'claude-sonnet-4-6';
+// Haiku por padrao: Sonnet estoura os 45s fixos do gateway SWA em contratos grandes.
+// Para reprocessar com Sonnet (mais qualidade) quando houver fila/durable, basta setar
+// ANTHROPIC_MODEL_CURADORIA com o id do Sonnet.
+const MODEL = process.env.ANTHROPIC_MODEL_CURADORIA || process.env.ANTHROPIC_MODEL_HAIKU || 'claude-haiku-4-5-20251001';
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-const MAX_TEXTO = 32000; // enxuto p/ caber no timeout do gateway (SWA ~45s) por documento
+const MAX_TEXTO = 28000; // enxuto p/ caber no timeout do gateway (SWA ~45s) por documento
 
 const INSTRUCAO =
   'Voce e um curador juridico de contratos de operadoras de saude (home care). Le o documento e ' +
@@ -48,14 +51,41 @@ function _parseJson(txt) {
   try { return JSON.parse(s); } catch (e) { return null; }
 }
 
-async function _viaAnthropic(texto) {
+// Ids dos modelos (mesmos strings usados pela SAN).
+const MODEL_HAIKU = process.env.ANTHROPIC_MODEL_HAIKU || 'claude-haiku-4-5-20251001';
+const MODEL_SONNET = process.env.ANTHROPIC_MODEL_SONNET || 'claude-sonnet-4-6';
+const MODEL_OPUS = process.env.ANTHROPIC_MODEL_OPUS || 'claude-opus-4-8';
+const FORCE_MODEL = process.env.ANTHROPIC_MODEL_CURADORIA || null; // se setado, manda
+const SMALL_CHARS = 8000; // ate aqui, Sonnet cabe nos 45s do gateway
+
+function _resolveModelo(alias) {
+  if (!alias) return null;
+  const a = String(alias).toLowerCase();
+  if (a === 'haiku') return MODEL_HAIKU;
+  if (a === 'sonnet') return MODEL_SONNET;
+  if (a === 'opus') return MODEL_OPUS;
+  return alias; // ja e um id completo
+}
+
+// Escada de modelos: do melhor que cabe -> fallback pra baixo (resiliencia).
+// override (?model=) tem prioridade; senao, decide pelo TAMANHO do texto (tempo).
+function _escadaModelos(len, override) {
+  const desc = [MODEL_OPUS, MODEL_SONNET, MODEL_HAIKU];
+  const alvo = _resolveModelo(override) || FORCE_MODEL;
+  if (alvo) { const i = desc.indexOf(alvo); return i >= 0 ? desc.slice(i) : [alvo, MODEL_HAIKU]; }
+  if (len <= SMALL_CHARS) return [MODEL_SONNET, MODEL_HAIKU]; // pequeno: tenta Sonnet
+  return [MODEL_HAIKU];                                      // grande: so Haiku cabe no tempo
+}
+
+async function _viaAnthropic(texto, model) {
   const key = process.env.ANTHROPIC_API_KEY;
   if (!key) return null;
   const mod = require('@anthropic-ai/sdk');
   const Anthropic = mod.default || mod.Anthropic || mod;
   const client = new Anthropic({ apiKey: key });
+  const maxTokens = (model === MODEL_HAIKU) ? 4000 : 3000; // limita geracao dos lentos
   const resp = await client.messages.create({
-    model: MODEL, max_tokens: 4000, temperature: 0,
+    model: model, max_tokens: maxTokens, temperature: 0,
     system: INSTRUCAO,
     messages: [{ role: 'user', content: 'Documento:\n\n' + texto.slice(0, MAX_TEXTO) }]
   });
@@ -81,17 +111,28 @@ let _ultimoErro = null;
 function ultimoErroCuradoria() { return _ultimoErro; }
 
 // Retorna o objeto canonico (ou null). metodo = 'nativo'|'OCR' (define selo/confianca_preco).
-async function curar(texto, metodo) {
+// opts.model = 'haiku'|'sonnet'|'opus'|<id> (override; senao escada por tamanho).
+async function curar(texto, metodo, opts) {
   _ultimoErro = null;
+  opts = opts || {};
   if (!texto || texto.length < 60) { _ultimoErro = 'texto curto'; return null; }
+
+  const escada = _escadaModelos(texto.length, opts.model);
   let canonico = null;
-  try { canonico = await _viaAnthropic(texto); if (!canonico) _ultimoErro = 'anthropic: JSON invalido'; }
-  catch (e) { _ultimoErro = 'anthropic: ' + ((e && e.message) || String(e)); }
-  if (!canonico) {
-    try { canonico = await _viaOpenAI(texto); if (!canonico) _ultimoErro = (_ultimoErro || '') + ' | openai: JSON invalido'; }
-    catch (e) { _ultimoErro = (_ultimoErro || '') + ' | openai: ' + ((e && e.message) || String(e)); }
+  let modeloUsado = null;
+  const erros = [];
+  for (const m of escada) {
+    try {
+      const c = await _viaAnthropic(texto, m);
+      if (c) { canonico = c; modeloUsado = m; break; }
+      erros.push(m + ': JSON invalido');
+    } catch (e) { erros.push(m + ': ' + ((e && e.message) || String(e))); }
   }
-  if (!canonico) return null;
+  if (!canonico) {
+    try { canonico = await _viaOpenAI(texto); if (canonico) modeloUsado = OPENAI_MODEL; else erros.push('openai: JSON invalido'); }
+    catch (e) { erros.push('openai: ' + ((e && e.message) || String(e))); }
+  }
+  if (!canonico) { _ultimoErro = erros.join(' | '); return null; }
 
   // Selo/confianca a partir do metodo de extracao (nativo = texto digital).
   const nativo = (metodo || 'nativo') === 'nativo';
@@ -100,6 +141,7 @@ async function curar(texto, metodo) {
   (canonico.procedimentos || []).forEach(function (p) { if (!p.confianca_preco) p.confianca_preco = conf; });
   canonico.proveniencia = canonico.proveniencia || {};
   canonico.proveniencia.metodo_extracao = metodo || 'nativo';
+  canonico.proveniencia.modelo_curadoria = modeloUsado;
   // Uma fonte so (sem cruzamento ainda) => PARCIAL; se doc nao-nativo => PENDENTE.
   canonico.proveniencia.selo_confianca = nativo ? 'PARCIAL' : 'PENDENTE';
   return canonico;

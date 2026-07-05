@@ -55,6 +55,7 @@ module.exports = async function (context, req) {
     const offset = Math.max(0, parseInt((req.query && req.query.offset) || '0', 10) || 0);
     const limit = Math.min(8, Math.max(1, parseInt((req.query && req.query.limit) || '1', 10) || 1));
     const prep = req.query && (req.query.prep === '1' || req.query.prep === 'true');
+    const modeloOverride = (req.query && req.query.model) || null; // 'sonnet'|'opus'|'haiku'
 
     const client = getGraphClient();
     diag.step = 'resolve';
@@ -92,7 +93,7 @@ module.exports = async function (context, req) {
       for (const f of slice.slice(0, Math.min(limit, 2))) {
         const info = { nome: f.nome, fornecedor: f.fornecedor, textoLen: (f.texto || '').length };
         try {
-          const canon = await curar(f.texto, 'nativo');
+          const canon = await curar(f.texto, 'nativo', { model: modeloOverride });
           info.curadoOk = !!canon;
           info.curadoErro = canon ? null : ultimoErroCuradoria();
           if (canon) info.amostra = { doc_tipo: canon.doc_tipo, operadora: canon.operadora && canon.operadora.nome, estado: canon.estado_uf, diarias: (canon.diarias || []).length, clausulas: (canon.clausulas || []).length };
@@ -112,7 +113,7 @@ module.exports = async function (context, req) {
       try {
         const texto = f.texto || '';
         if (texto.length < 60) return { nome: f.nome, motivo: 'sem_texto_indice' };
-        const canonico = await curar(texto, 'nativo');
+        const canonico = await curar(texto, 'nativo', { model: modeloOverride });
         if (!canonico) return { nome: f.nome, motivo: 'curadoria_falhou', erro: ultimoErroCuradoria() };
         if (canonico.doc_tipo && ['glosa', 'outro'].indexOf(canonico.doc_tipo) >= 0) return { nome: f.nome, motivo: 'doc_tipo_' + canonico.doc_tipo };
         const md = montarMarkdown(canonico, { arquivoOrigem: f.nome, webUrl: f.webUrl });
