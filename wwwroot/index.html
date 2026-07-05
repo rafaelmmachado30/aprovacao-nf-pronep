@@ -6533,22 +6533,28 @@ async function curarPilotoContratos(btn) {
       return;
     }
     var falhas = 0;
+    var motivos = {};
+    function _addMotivo(m) { m = m || 'desconhecido'; motivos[m] = (motivos[m] || 0) + 1; }
+    function _resumoMotivos() {
+      var ks = Object.keys(motivos); if (!ks.length) return '';
+      return ' · motivos: ' + ks.map(function (k) { return k + '×' + motivos[k]; }).join(', ');
+    }
     while (offset < total) {
       var r = await fetch('/api/CurarContratos?offset=' + offset + '&limit=1', { method: 'POST', credentials: 'include' });
       var d = await r.json().catch(function () { return {}; });
       if (!r.ok || !d.ok) {
-        // Um documento falhou/estourou o tempo: pula e segue (nao aborta o piloto).
-        falhas++;
+        falhas++; _addMotivo('http_' + r.status);
         offset++;
         if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + offset + '/' + total + '</b> · ' + curados + ' gravadas · ' + falhas + ' puladas';
         continue;
       }
       total = d.total; curados += (d.curadosNoBatch || 0); arqs += (d.arquivosNoBatch || 0); lotes++;
+      (d.ignorados || []).forEach(function (ig) { _addMotivo(ig && (ig.motivo + (ig.erro ? (':' + String(ig.erro).slice(0, 40)) : ''))); });
       offset = (d.next != null) ? d.next : (offset + 1);
-      if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + Math.min(offset, total) + '/' + total + '</b> · ' + curados + ' fontes únicas gravadas' + (falhas ? (' · ' + falhas + ' puladas') : '');
+      if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + Math.min(offset, total) + '/' + total + '</b> · ' + curados + ' gravadas' + (falhas ? (' · ' + falhas + ' puladas') : '') + _resumoMotivos();
       if (d.done) break;
     }
-    if (prog) prog.innerHTML = '✅ Curadoria concluída: <b>' + curados + '</b> fontes únicas de ' + total + ' arquivos (Amil/Bradesco/CABESP)' + (falhas ? (' · ' + falhas + ' puladas') : '') + '. Base curada em _RAG/curado/.';
+    if (prog) prog.innerHTML = '✅ Curadoria concluída: <b>' + curados + '</b> fontes únicas de ' + total + ' (Amil/Bradesco/CABESP)' + (falhas ? (' · ' + falhas + ' puladas') : '') + _resumoMotivos() + '.';
   } catch (e) {
     if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Erro: ' + escHtml(e.message || String(e)) + '</span>';
   } finally {
