@@ -6543,7 +6543,7 @@ async function curarPilotoContratos(btn) {
       var r = await fetch('/api/CurarContratos?offset=' + offset + '&limit=1', { method: 'POST', credentials: 'include' });
       var d = await r.json().catch(function () { return {}; });
       if (!r.ok || !d.ok) {
-        falhas++; _addMotivo('http_' + r.status);
+        falhas++; _addMotivo((d && d.error) ? ('erro:' + String(d.error).slice(0, 50)) : ('http_' + r.status));
         offset++;
         if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + offset + '/' + total + '</b> · ' + curados + ' gravadas · ' + falhas + ' puladas';
         continue;

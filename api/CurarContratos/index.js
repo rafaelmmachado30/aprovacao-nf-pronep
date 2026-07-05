@@ -3,14 +3,14 @@
  *
  * Cura as operadoras PILOTO (Amil, Bradesco, CABESP) a partir do TEXTO JA EXTRAIDO no
  * indice RAG (_RAG/comercial/part-*.json). Reusar o indice evita os 404 de DriveItemId
- * desatualizado e os PDFs sem texto (que nem entram no indice). Para cada contrato,
- * remonta o texto dos seus chunks, extrai o modelo CANONICO (curadoriaContrato) e grava
- * a FONTE UNICA curada (Markdown+YAML) em _RAG/curado/. Dessa fonte os trilhos
- * (relacional/vetorial/grafo) sao derivados depois — sem perda e regeneravel.
+ * desatualizado e os PDFs sem texto (que nem entram no indice).
  *
- * Roda em LOTES (o front chama em loop). prep=1 limpa curado/ + monta o manifesto (sem IA).
+ * DESEMPENHO: a fase prep remonta o texto do piloto e SALVA num unico arquivo
+ * (_curado_textos.json). Cada request de processamento so LE esse arquivo (pequeno) e
+ * cura 1 documento — nunca recarrega o indice de ~65 shards (o que estourava o timeout).
  *
- * Query: ?prep=1 | ?offset=0&limit=1 | ?debug=1&limit=1 (nao-destrutivo)
+ * Fluxo: prep=1 (limpa curado/ + monta textos, sem IA) -> offset/limit=1 em loop.
+ * Query: ?prep=1 | ?offset=0&limit=1 | ?debug=1&limit=1
  */
 
 require('isomorphic-fetch');
@@ -23,28 +23,27 @@ const { nomeCurado, montarMarkdown, salvarCurado, limparCurado } = require('../s
 
 const PILOTO = /amil|bradesco|cabesp/i;
 const EXCLUIR = /glosa|recurso de glosas/i;
-const MANIFEST_PILOTO = '_curado_files.json';
-const MAX_TEXTO_JOIN = 60000; // texto remontado por contrato (curar depois corta em 32k)
+const TEXTOS_PILOTO = '_curado_textos.json';
+const MAX_TEXTO_JOIN = 40000; // curar corta em 32k; guardamos um pouco mais de margem
 
-// Agrupa os chunks do indice por contrato, so os que casam com o piloto.
-function _agruparPiloto(chunks) {
+// Agrupa os chunks do indice por contrato (so os do piloto) e remonta o texto.
+function _montarTextos(chunks) {
   const map = {};
   for (const c of (chunks || [])) {
     const hay = String(c.fornecedor || '') + ' ' + String(c.subpasta || '') + ' ' + String(c.contratoNome || '');
-    if (!PILOTO.test(hay)) continue;
-    if (EXCLUIR.test(hay)) continue;
+    if (!PILOTO.test(hay) || EXCLUIR.test(hay)) continue;
     const id = c.contratoId;
     if (!id) continue;
-    if (!map[id]) map[id] = { contratoId: id, nome: c.contratoNome || '', fornecedor: c.fornecedor || '', subpasta: c.subpasta || '', webUrl: c.webUrl || '', chunks: [] };
-    map[id].chunks.push({ idx: (c.chunkIdx != null ? c.chunkIdx : 0), texto: c.texto || '' });
+    if (!map[id]) map[id] = { contratoId: id, nome: c.contratoNome || '', fornecedor: c.fornecedor || '', subpasta: c.subpasta || '', webUrl: c.webUrl || '', _chunks: [] };
+    map[id]._chunks.push({ idx: (c.chunkIdx != null ? c.chunkIdx : 0), texto: c.texto || '' });
   }
-  return map;
-}
-function _textoDoContrato(entry) {
-  const cs = (entry.chunks || []).slice().sort(function (a, b) { return a.idx - b.idx; });
-  let t = cs.map(function (x) { return x.texto; }).join('\n');
-  if (t.length > MAX_TEXTO_JOIN) t = t.slice(0, MAX_TEXTO_JOIN);
-  return t;
+  return Object.keys(map).map(function (id) {
+    const e = map[id];
+    const cs = e._chunks.sort(function (a, b) { return a.idx - b.idx; });
+    let t = cs.map(function (x) { return x.texto; }).join('\n');
+    if (t.length > MAX_TEXTO_JOIN) t = t.slice(0, MAX_TEXTO_JOIN);
+    return { contratoId: e.contratoId, nome: e.nome, fornecedor: e.fornecedor, subpasta: e.subpasta, webUrl: e.webUrl, texto: t };
+  });
 }
 
 module.exports = async function (context, req) {
@@ -62,48 +61,38 @@ module.exports = async function (context, req) {
     const contr = await resolveContratosSite(client);
     const driveId = contr.driveId;
 
-    // ===== FASE PREP: limpa curado/ + monta manifesto a partir do indice RAG.
-    diag.step = 'manifest';
+    // ===== FASE PREP: limpa curado/ + remonta e salva os textos do piloto (sem IA).
     if (prep) {
+      diag.step = 'prep';
       await limparCurado(client, driveId);
       const chunks = await rag.carregarIndice(client, driveId, true);
-      const map = _agruparPiloto(chunks);
-      const files = Object.keys(map).map(function (id) {
-        const e = map[id];
-        return { contratoId: e.contratoId, nome: e.nome, fornecedor: e.fornecedor, subpasta: e.subpasta, webUrl: e.webUrl };
-      });
-      const man = { total: files.length, files: files, criadoEm: new Date().toISOString() };
-      await salvarShard(client, driveId, MANIFEST_PILOTO, man);
+      const files = _montarTextos(chunks);
+      await salvarShard(client, driveId, TEXTOS_PILOTO, { total: files.length, files: files, criadoEm: new Date().toISOString() });
       context.res = { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-        body: { ok: true, prepared: true, total: man.total, next: 0, fonte: 'indice_rag' } };
+        body: { ok: true, prepared: true, total: files.length, next: 0, fonte: 'indice_rag' } };
       return;
     }
 
-    // Manifesto (monta se faltar). Indice carregado (cache) p/ remontar o texto.
-    let manifest = await lerJson(client, driveId, MANIFEST_PILOTO);
-    const chunks = await rag.carregarIndice(client, driveId, false);
-    const map = _agruparPiloto(chunks);
-    if (!manifest || !Array.isArray(manifest.files)) {
-      const files = Object.keys(map).map(function (id) {
-        const e = map[id];
-        return { contratoId: e.contratoId, nome: e.nome, fornecedor: e.fornecedor, subpasta: e.subpasta, webUrl: e.webUrl };
-      });
-      manifest = { total: files.length, files: files };
+    // ===== Processamento: le SO o arquivo de textos (nao recarrega o indice).
+    diag.step = 'ler_textos';
+    let bundle = await lerJson(client, driveId, TEXTOS_PILOTO);
+    if (!bundle || !Array.isArray(bundle.files)) {
+      // Sem prep previo: monta na hora (uma vez) e segue.
+      const chunks = await rag.carregarIndice(client, driveId, false);
+      bundle = { total: 0, files: _montarTextos(chunks) };
+      bundle.total = bundle.files.length;
+      await salvarShard(client, driveId, TEXTOS_PILOTO, bundle);
     }
-
-    const total = manifest.files.length;
-    const slice = manifest.files.slice(offset, offset + limit);
+    const total = bundle.files.length;
+    const slice = bundle.files.slice(offset, offset + limit);
 
     // ===== DEBUG (nao-destrutivo).
     if (req.query && (req.query.debug === '1' || req.query.debug === 'true')) {
       const amostra = [];
       for (const f of slice.slice(0, Math.min(limit, 2))) {
-        const info = { nome: f.nome, fornecedor: f.fornecedor };
+        const info = { nome: f.nome, fornecedor: f.fornecedor, textoLen: (f.texto || '').length };
         try {
-          const e = map[f.contratoId];
-          const texto = e ? _textoDoContrato(e) : '';
-          info.textoLen = texto.length;
-          const canon = await curar(texto, 'nativo');
+          const canon = await curar(f.texto, 'nativo');
           info.curadoOk = !!canon;
           info.curadoErro = canon ? null : ultimoErroCuradoria();
           if (canon) info.amostra = { doc_tipo: canon.doc_tipo, operadora: canon.operadora && canon.operadora.nome, estado: canon.estado_uf, diarias: (canon.diarias || []).length, clausulas: (canon.clausulas || []).length };
@@ -115,15 +104,14 @@ module.exports = async function (context, req) {
       return;
     }
 
-    // ===== Processa o lote.
+    // ===== Cura o lote (1 por request).
     diag.step = 'process_batch';
     const curadosOut = [];
     const ignorados = [];
     const resultados = await Promise.all(slice.map(async function (f) {
       try {
-        const e = map[f.contratoId];
-        const texto = e ? _textoDoContrato(e) : '';
-        if (!texto || texto.length < 60) return { nome: f.nome, motivo: 'sem_texto_indice' };
+        const texto = f.texto || '';
+        if (texto.length < 60) return { nome: f.nome, motivo: 'sem_texto_indice' };
         const canonico = await curar(texto, 'nativo');
         if (!canonico) return { nome: f.nome, motivo: 'curadoria_falhou', erro: ultimoErroCuradoria() };
         if (canonico.doc_tipo && ['glosa', 'outro'].indexOf(canonico.doc_tipo) >= 0) return { nome: f.nome, motivo: 'doc_tipo_' + canonico.doc_tipo };
