@@ -6516,8 +6516,24 @@ async function curarPilotoContratos(btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Curando...'; }
   var offset = 0, total = null, curados = 0, arqs = 0, lotes = 0;
   try {
+    // Fase PREP (rapida): limpa a pasta curada + monta o manifesto, sem IA. Dribla o
+    // timeout do gateway (offset 0 nao acumula limpeza+enumeracao+IA no mesmo request).
+    if (prog) prog.innerHTML = '⏳ Preparando (lendo Amil/Bradesco/CABESP)...';
+    var rp = await fetch('/api/CurarContratos?prep=1', { method: 'POST', credentials: 'include' });
+    var dp = await rp.json().catch(function () { return {}; });
+    if (!rp.ok || !dp.ok) {
+      if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha ao preparar: ' + escHtml((dp && dp.error) || ('HTTP ' + rp.status)) + '</span>';
+      if (btn) { btn.disabled = false; btn.textContent = '📚 Curar piloto (Amil/Bradesco/CABESP)'; }
+      return;
+    }
+    total = dp.total;
+    if (!total) {
+      if (prog) prog.innerHTML = '⚠️ Nenhum arquivo do piloto encontrado (Amil/Bradesco/CABESP).';
+      if (btn) { btn.disabled = false; btn.textContent = '📚 Curar piloto (Amil/Bradesco/CABESP)'; }
+      return;
+    }
     while (true) {
-      var r = await fetch('/api/CurarContratos?offset=' + offset + '&limit=4', { method: 'POST', credentials: 'include' });
+      var r = await fetch('/api/CurarContratos?offset=' + offset + '&limit=2', { method: 'POST', credentials: 'include' });
       var d = await r.json().catch(function () { return {}; });
       if (!r.ok || !d.ok) {
         if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha no lote (offset ' + offset + '): ' + escHtml((d && d.error) || ('HTTP ' + r.status)) + '</span>';

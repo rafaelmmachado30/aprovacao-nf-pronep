@@ -41,6 +41,7 @@ module.exports = async function (context, req) {
 
     const offset = Math.max(0, parseInt((req.query && req.query.offset) || '0', 10) || 0);
     const limit = Math.min(8, Math.max(1, parseInt((req.query && req.query.limit) || '4', 10) || 4));
+    const prep = req.query && (req.query.prep === '1' || req.query.prep === 'true');
 
     const client = getGraphClient();
     diag.step = 'resolve';
@@ -52,11 +53,8 @@ module.exports = async function (context, req) {
     const driveId = contr.driveId;
     const col = function (d) { return colMap[d] || d; };
 
-    // ===== Manifest do piloto (offset 0 recria e limpa curado/).
-    diag.step = 'manifest';
-    if (offset === 0) await limparCurado(client, driveId);
-    let manifest = offset === 0 ? null : await lerJson(client, driveId, MANIFEST_PILOTO);
-    if (!manifest || !Array.isArray(manifest.files)) {
+    // Monta o manifesto do piloto (enumera a lista). Sem IA — rapido.
+    async function _montarManifest() {
       const files = [];
       let url = '/sites/' + appSiteId + '/lists/' + listId + '/items?expand=fields&$top=500';
       let pages = 0;
@@ -73,7 +71,6 @@ module.exports = async function (context, req) {
           const fornecedor = f[col('Fornecedor')] || '';
           const caminho = String(f[col('PathRelativoSP')] || '') + ' ' + String(f[col('CaminhoSharepoint')] || '') + ' ' + String(nome);
           if (EXCLUIR_SUBPASTA.test(caminho)) continue;
-          // Piloto: casa pelo Fornecedor OU pelo caminho (pasta da operadora).
           if (!PILOTO.test(fornecedor) && !PILOTO.test(caminho)) continue;
           files.push({
             listItemId: it.id, driveItemId: driveItemId, nome: nome, ext: ext,
@@ -85,9 +82,25 @@ module.exports = async function (context, req) {
         pages++;
         url = resp['@odata.nextLink'] ? resp['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '') : null;
       }
-      manifest = { total: files.length, files: files, criadoEm: new Date().toISOString() };
-      await salvarShard(client, driveId, MANIFEST_PILOTO, manifest);
+      const man = { total: files.length, files: files, criadoEm: new Date().toISOString() };
+      await salvarShard(client, driveId, MANIFEST_PILOTO, man);
+      return man;
     }
+
+    // ===== FASE PREP (rapida, sem IA): limpa curado/ + (re)monta o manifesto.
+    // O front chama isto UMA vez antes do loop de processamento (dribla o timeout).
+    diag.step = 'manifest';
+    if (prep) {
+      await limparCurado(client, driveId);
+      const man = await _montarManifest();
+      context.res = { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        body: { ok: true, prepared: true, total: man.total, next: 0 } };
+      return;
+    }
+
+    // Processamento: le o manifesto (monta se faltar; NAO limpa aqui).
+    let manifest = await lerJson(client, driveId, MANIFEST_PILOTO);
+    if (!manifest || !Array.isArray(manifest.files)) manifest = await _montarManifest();
 
     const total = manifest.files.length;
     const slice = manifest.files.slice(offset, offset + limit);
