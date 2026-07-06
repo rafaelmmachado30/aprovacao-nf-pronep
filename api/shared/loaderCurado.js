@@ -76,8 +76,11 @@ async function _insProveniencia(client, canon, meta) {
 // Carrega 1 canonico. Retorna { ok, contratoId } ou { skip, motivo }.
 async function carregar(client, canon, meta) {
   canon = canon || {};
+  // UF e OBRIGATORIA (regra Pronep: contrato mora na pasta da unidade SP/RJ/ES).
+  // A curadoria ja deriva a UF da pasta quando o conteudo e omisso; se ainda faltar,
+  // e um contrato mal arquivado — pula e sinaliza, em vez de gravar sem unidade.
   const estado = _enum(canon.estado_uf, UF, null);
-  if (!estado) return { skip: true, motivo: 'estado_uf ausente/invalido', arquivo: canon._arquivo };
+  if (!estado) return { skip: true, motivo: 'sem_uf (verificar pasta da unidade)', arquivo: canon._arquivo };
 
   const provId = await _insProveniencia(client, canon, meta);
   const opId = await _upsertOperadora(client, canon.operadora);

@@ -18,11 +18,13 @@ function _slug(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) || 'contrato';
 }
-function nomeCurado(canonico, fallback) {
+function nomeCurado(canonico, fallback, id) {
   const op = _slug((canonico && canonico.operadora && canonico.operadora.nome) || fallback || 'contrato');
   const uf = _slug((canonico && canonico.estado_uf) || 'na');
   const num = _slug((canonico && canonico.contrato && canonico.contrato.numero) || '');
-  return [op, uf, num].filter(Boolean).join('_') + '.md';
+  // Sufixo com o id garante unicidade (evita 2 contratos gerarem o mesmo arquivo).
+  const sufixo = id != null ? String(id).replace(/[^a-z0-9]/gi, '') : '';
+  return [op, uf, num].filter(Boolean).join('_') + (sufixo ? ('_' + sufixo) : '') + '.md';
 }
 
 // YAML-escapa um escalar simples.

@@ -5801,7 +5801,7 @@ function renderContratosView() {
         <button class="btn btn-primary" onclick="abrirSincronizarTudo()" title="Varre as 10 diretorias da Pronep em sequencia">⚡ Sincronizar TUDO</button>
         ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="limparDuplicatasContratos()" title="Remove contratos duplicados (mesmo arquivo repetido), mantendo 1 de cada">🧹 Limpar duplicatas</button>' : ''}
         ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="indexarComercialRAG(this)" title="Cria a base de conhecimento (RAG) dos contratos Comerciais para a IA consultar">🧠 Indexar Comercial (IA)</button>' : ''}
-        ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="curarPilotoContratos(this)" title="Ingestão curada (nova arquitetura): lê Amil, Bradesco e CABESP, extrai o modelo canônico e grava a fonte única (Markdown+YAML)">📚 Curar piloto (Amil/Bradesco/CABESP)</button>' : ''}
+        ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="curarPilotoContratos(this)" title="Ingestão curada: lê os contratos Comerciais do índice, extrai o modelo canônico e grava a fonte única (Markdown+YAML)">📚 Curar contratos (IA)</button>' : ''}
         ${(window._contratosScope && window._contratosScope.isAdmin) ? '<button class="btn btn-secondary" onclick="carregarBaseRelacional(this)" title="Deriva o banco relacional (Supabase) a partir da fonte única curada — trilho de números/agregações/temporal">🗄️ Carregar base relacional (Supabase)</button>' : ''}
       </div>
       <div id="rag-index-progress" class="small muted" style="margin-top:8px"></div>
@@ -6524,28 +6524,28 @@ async function indexarComercialRAG(btn) {
 async function curarPilotoContratos(btn) {
   var prog = document.getElementById('curado-progress');
   var ok = await confirmarAcao({
-    titulo: 'Curar contratos do piloto (Amil, Bradesco, CABESP)?',
-    mensagem: 'Vou ler os contratos dessas 3 operadoras, extrair o <b>modelo canônico</b> (diárias, reajustes, cláusulas, riscos, proveniência) e gravar a <b>fonte única curada</b> (Markdown+YAML). É dela que os demais trilhos são derivados depois. Roda em segundo plano.',
+    titulo: 'Curar todos os contratos Comerciais?',
+    mensagem: 'Vou ler os contratos Comerciais do índice, extrair o <b>modelo canônico</b> (diárias, reajustes, cláusulas, riscos, proveniência) e gravar a <b>fonte única curada</b> (Markdown+YAML). É dela que os demais trilhos são derivados. São muitos contratos — roda 1 a 1 em segundo plano e pode levar bastante tempo; mantenha o app aberto.',
     tipo: 'info', confirmLabel: 'Curar agora', cancelLabel: 'Cancelar'
   });
   if (!ok) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Curando...'; }
   var offset = 0, total = null, curados = 0, arqs = 0, lotes = 0;
   try {
-    // Fase PREP (rapida): limpa a pasta curada + monta o manifesto, sem IA. Dribla o
+    // Fase PREP (rapida): limpa a pasta curada + monta os textos, sem IA. Dribla o
     // timeout do gateway (offset 0 nao acumula limpeza+enumeracao+IA no mesmo request).
-    if (prog) prog.innerHTML = '⏳ Preparando (lendo Amil/Bradesco/CABESP)...';
+    if (prog) prog.innerHTML = '⏳ Preparando (lendo o índice Comercial)...';
     var rp = await fetch('/api/CurarContratos?prep=1', { method: 'POST', credentials: 'include' });
     var dp = await rp.json().catch(function () { return {}; });
     if (!rp.ok || !dp.ok) {
       if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha ao preparar: ' + escHtml((dp && dp.error) || ('HTTP ' + rp.status)) + '</span>';
-      if (btn) { btn.disabled = false; btn.textContent = '📚 Curar piloto (Amil/Bradesco/CABESP)'; }
+      if (btn) { btn.disabled = false; btn.textContent = '📚 Curar contratos (IA)'; }
       return;
     }
     total = dp.total;
     if (!total) {
-      if (prog) prog.innerHTML = '⚠️ Nenhum arquivo do piloto encontrado (Amil/Bradesco/CABESP).';
-      if (btn) { btn.disabled = false; btn.textContent = '📚 Curar piloto (Amil/Bradesco/CABESP)'; }
+      if (prog) prog.innerHTML = '⚠️ Nenhum contrato Comercial encontrado no índice. Rode "Indexar Comercial (IA)" antes.';
+      if (btn) { btn.disabled = false; btn.textContent = '📚 Curar contratos (IA)'; }
       return;
     }
     var falhas = 0;
@@ -6559,22 +6559,30 @@ async function curarPilotoContratos(btn) {
       var r = await fetch('/api/CurarContratos?offset=' + offset + '&limit=1', { method: 'POST', credentials: 'include' });
       var d = await r.json().catch(function () { return {}; });
       if (!r.ok || !d.ok) {
-        falhas++; _addMotivo((d && d.error) ? ('erro:' + String(d.error).slice(0, 50)) : ('http_' + r.status));
-        offset++;
-        if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + offset + '/' + total + '</b> · ' + curados + ' gravadas · ' + falhas + ' puladas';
-        continue;
+        // Timeout/erro: a escada pode ter tentado Sonnet e estourado o tempo. Tenta 1x
+        // forcando Haiku (rapido) no MESMO documento antes de desistir.
+        var r2 = await fetch('/api/CurarContratos?offset=' + offset + '&limit=1&model=haiku', { method: 'POST', credentials: 'include' });
+        var d2 = await r2.json().catch(function () { return {}; });
+        if (r2.ok && d2.ok) {
+          d = d2; // sucesso no retry: cai no fluxo normal abaixo
+        } else {
+          falhas++; _addMotivo((d2 && d2.error) ? ('erro:' + String(d2.error).slice(0, 50)) : ('http_' + r2.status));
+          offset++;
+          if (prog) prog.innerHTML = '⏳ Curando Comercial: <b>' + offset + '/' + total + '</b> · ' + curados + ' gravadas · ' + falhas + ' puladas';
+          continue;
+        }
       }
       total = d.total; curados += (d.curadosNoBatch || 0); arqs += (d.arquivosNoBatch || 0); lotes++;
       (d.ignorados || []).forEach(function (ig) { _addMotivo(ig && (ig.motivo + (ig.erro ? (':' + String(ig.erro).slice(0, 40)) : ''))); });
       offset = (d.next != null) ? d.next : (offset + 1);
-      if (prog) prog.innerHTML = '⏳ Curando piloto: <b>' + Math.min(offset, total) + '/' + total + '</b> · ' + curados + ' gravadas' + (falhas ? (' · ' + falhas + ' puladas') : '') + _resumoMotivos();
+      if (prog) prog.innerHTML = '⏳ Curando Comercial: <b>' + Math.min(offset, total) + '/' + total + '</b> · ' + curados + ' gravadas' + (falhas ? (' · ' + falhas + ' puladas') : '') + _resumoMotivos();
       if (d.done) break;
     }
-    if (prog) prog.innerHTML = '✅ Curadoria concluída: <b>' + curados + '</b> fontes únicas de ' + total + ' (Amil/Bradesco/CABESP)' + (falhas ? (' · ' + falhas + ' puladas') : '') + _resumoMotivos() + '.';
+    if (prog) prog.innerHTML = '✅ Curadoria concluída: <b>' + curados + '</b> fontes únicas de ' + total + ' contratos Comerciais' + (falhas ? (' · ' + falhas + ' puladas') : '') + _resumoMotivos() + '.';
   } catch (e) {
     if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Erro: ' + escHtml(e.message || String(e)) + '</span>';
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '📚 Curar piloto (Amil/Bradesco/CABESP)'; }
+    if (btn) { btn.disabled = false; btn.textContent = '📚 Curar contratos (IA)'; }
   }
 }
 

@@ -21,17 +21,25 @@ const { salvarShard, lerJson } = rag;
 const { curar, ultimoErroCuradoria, MODEL } = require('../shared/curadoriaContrato');
 const { nomeCurado, montarMarkdown, salvarCurado, limparCurado } = require('../shared/fonteUnica');
 
-const PILOTO = /amil|bradesco|cabesp/i;
 const EXCLUIR = /glosa|recurso de glosas/i;
 const TEXTOS_PILOTO = '_curado_textos.json';
 const MAX_TEXTO_JOIN = 40000; // curar corta em 32k; guardamos um pouco mais de margem
 
-// Agrupa os chunks do indice por contrato (so os do piloto) e remonta o texto.
-function _montarTextos(chunks) {
+// Deriva a UF (SP/RJ/ES) do caminho/pasta da unidade. Usado como FALLBACK quando o
+// conteudo do contrato nao trouxe o estado (a pasta e obrigatoria e confiavel na Pronep).
+function _estadoDaPasta(caminho) {
+  const m = /(?:^|[^a-z])(SP|RJ|ES)(?:[^a-z]|$)/i.exec(String(caminho || ''));
+  return m ? m[1].toUpperCase() : null;
+}
+
+// Agrupa os chunks do indice por contrato e remonta o texto. filtro = regex opcional
+// (ex.: operadoras especificas). Sem filtro = TODO o acervo Comercial indexado.
+function _montarTextos(chunks, filtro) {
   const map = {};
   for (const c of (chunks || [])) {
     const hay = String(c.fornecedor || '') + ' ' + String(c.subpasta || '') + ' ' + String(c.contratoNome || '');
-    if (!PILOTO.test(hay) || EXCLUIR.test(hay)) continue;
+    if (EXCLUIR.test(hay)) continue;
+    if (filtro && !filtro.test(hay)) continue;
     const id = c.contratoId;
     if (!id) continue;
     if (!map[id]) map[id] = { contratoId: id, nome: c.contratoNome || '', fornecedor: c.fornecedor || '', subpasta: c.subpasta || '', webUrl: c.webUrl || '', _chunks: [] };
@@ -56,6 +64,10 @@ module.exports = async function (context, req) {
     const limit = Math.min(8, Math.max(1, parseInt((req.query && req.query.limit) || '1', 10) || 1));
     const prep = req.query && (req.query.prep === '1' || req.query.prep === 'true');
     const modeloOverride = (req.query && req.query.model) || null; // 'sonnet'|'opus'|'haiku'
+    // Filtro opcional por operadora(s): ?operadoras=amil,bradesco. Sem isso = TODO o Comercial.
+    let filtro = null;
+    const ops = (req.query && req.query.operadoras) || '';
+    if (ops.trim()) { try { filtro = new RegExp(ops.split(',').map(function (s) { return s.trim(); }).filter(Boolean).join('|'), 'i'); } catch (e) { filtro = null; } }
 
     const client = getGraphClient();
     diag.step = 'resolve';
@@ -67,7 +79,7 @@ module.exports = async function (context, req) {
       diag.step = 'prep';
       await limparCurado(client, driveId);
       const chunks = await rag.carregarIndice(client, driveId, true);
-      const files = _montarTextos(chunks);
+      const files = _montarTextos(chunks, filtro);
       await salvarShard(client, driveId, TEXTOS_PILOTO, { total: files.length, files: files, criadoEm: new Date().toISOString() });
       context.res = { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
         body: { ok: true, prepared: true, total: files.length, next: 0, fonte: 'indice_rag' } };
@@ -80,7 +92,7 @@ module.exports = async function (context, req) {
     if (!bundle || !Array.isArray(bundle.files)) {
       // Sem prep previo: monta na hora (uma vez) e segue.
       const chunks = await rag.carregarIndice(client, driveId, false);
-      bundle = { total: 0, files: _montarTextos(chunks) };
+      bundle = { total: 0, files: _montarTextos(chunks, filtro) };
       bundle.total = bundle.files.length;
       await salvarShard(client, driveId, TEXTOS_PILOTO, bundle);
     }
@@ -116,8 +128,18 @@ module.exports = async function (context, req) {
         const canonico = await curar(texto, 'nativo', { model: modeloOverride });
         if (!canonico) return { nome: f.nome, motivo: 'curadoria_falhou', erro: ultimoErroCuradoria() };
         if (canonico.doc_tipo && ['glosa', 'outro'].indexOf(canonico.doc_tipo) >= 0) return { nome: f.nome, motivo: 'doc_tipo_' + canonico.doc_tipo };
+        // UF: conteudo primeiro; se omisso, deriva da PASTA da unidade (regra Pronep:
+        // contrato mora em SP/RJ/ES). Registra a origem na proveniencia.
+        if (!canonico.estado_uf) {
+          const ufPasta = _estadoDaPasta(String(f.subpasta || '') + ' ' + String(f.webUrl || '') + ' ' + String(f.nome || ''));
+          if (ufPasta) {
+            canonico.estado_uf = ufPasta;
+            canonico.proveniencia = canonico.proveniencia || {};
+            canonico.proveniencia.estado_origem = 'pasta';
+          }
+        }
         const md = montarMarkdown(canonico, { arquivoOrigem: f.nome, webUrl: f.webUrl });
-        const nome = nomeCurado(canonico, f.fornecedor || f.nome);
+        const nome = nomeCurado(canonico, f.fornecedor || f.nome, f.contratoId);
         await salvarCurado(client, driveId, nome, md);
         return { nome: f.nome, curado: nome, ok: true };
       } catch (e) {
