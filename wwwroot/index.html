@@ -785,6 +785,10 @@
     box-shadow: -8px 0 28px rgba(0,0,0,0.18);
   }
   .san-panel.open { transform: translateX(0); }
+  .san-panel.expanded { width: 780px; }               /* caixa maior (nao tela cheia) */
+  .san-panel-body table {                              /* tabelas largas: scroll horizontal em vez de cortar */
+    display: block; width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch;
+  }
   .san-panel-header {
     display: flex; align-items: center; gap: 12px;
     padding: 16px 18px; border-bottom: 1px solid rgba(255,255,255,0.18);
@@ -1313,6 +1317,8 @@ window.solChat = (function() {
     var view = state.viewAtual || 'fila-aprovacao';
     if (state.open) {
       panel.classList.add('open');
+      var exp = false; try { exp = localStorage.getItem('san_expanded') === '1'; } catch (e) {}
+      panel.classList.toggle('expanded', exp);
       overlay && overlay.classList.add('open');
       if (fab) fab.classList.add('hidden');
       panel.innerHTML = renderPanel(view);
@@ -1332,7 +1338,16 @@ window.solChat = (function() {
     }
   }
 
+  function toggleExpand() {
+    var panel = document.getElementById('san-panel'); if (!panel) return;
+    var exp = !panel.classList.contains('expanded');
+    panel.classList.toggle('expanded', exp);
+    try { localStorage.setItem('san_expanded', exp ? '1' : '0'); } catch (e) {}
+    refresh(); // atualiza o icone/titulo do botao
+  }
+
   function renderPanel(viewAtual) {
+    var exp = false; try { exp = localStorage.getItem('san_expanded') === '1'; } catch (e) {}
     var sugestoes = viewAtual === 'aprovadas'
       ? ['Quanto liberei este mes?', 'Aprovadas hoje', 'Top 5 fornecedores aprovados']
       : viewAtual === 'fila-aprovacao'
@@ -1397,6 +1412,7 @@ window.solChat = (function() {
       '<div class="san-panel-header">'+
         '<div class="sol-avatar">S</div>'+
         '<div class="sol-title" style="flex:1"><h4>SAN — sua assistente</h4><p>Posso ajudar com sua fila, aprovadas, lancamentos e duvidas do sistema.</p></div>'+
+        '<button class="san-panel-close" onclick="solChat.toggleExpand()" title="'+(exp?'Recolher':'Expandir')+'" style="margin-right:4px;font-size:15px">'+(exp?'⤡':'⤢')+'</button>'+
         '<button class="san-panel-close" onclick="solChat.limparHistorico()" title="Limpar conversa" style="margin-right:4px;font-size:14px">🧹</button>'+
         '<button class="san-panel-close" onclick="solChat.toggle()" title="Fechar">✕</button>'+
       '</div>'+
@@ -2032,7 +2048,7 @@ window.solChat = (function() {
     fecharModal();
   }
 
-  return { mount: mount, init: init, setView: setView, toggle: toggle, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar, abrirModalAcao: abrirModalAcao, fecharModal: fecharModal, confirmarAcaoModal: confirmarAcaoModal, limparHistorico: limparHistorico, hidratarHistorico: hidratarHistorico, verificarPendencias: verificarPendencias };
+  return { mount: mount, init: init, setView: setView, toggle: toggle, toggleExpand: toggleExpand, send: send, sendText: sendText, confirmarAcao: confirmarAcao, cancelarAcao: cancelarAcao, refresh: refresh, exportarPDF: exportarPDF, gravar: gravar, abrirModalAcao: abrirModalAcao, fecharModal: fecharModal, confirmarAcaoModal: confirmarAcaoModal, limparHistorico: limparHistorico, hidratarHistorico: hidratarHistorico, verificarPendencias: verificarPendencias };
 })();
 
 
