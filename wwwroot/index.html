@@ -6592,23 +6592,41 @@ async function carregarBaseRelacional(btn) {
   var prog = document.getElementById('relacional-progress');
   var ok = await confirmarAcao({
     titulo: 'Carregar base relacional (Supabase)?',
-    mensagem: 'Vou ler a <b>fonte única curada</b> e (re)popular as tabelas do Postgres/Supabase (operadora, contrato, diárias, reajustes, cláusulas, riscos...). A base é recriada do zero a cada carga — sem perda, é derivada da fonte única. Pré-requisito: já ter rodado "Curar piloto" e configurado a conexão do Supabase.',
+    mensagem: 'Vou ler a <b>fonte única curada</b> e (re)popular as tabelas do Postgres/Supabase (operadora, contrato, diárias, reajustes, cláusulas, riscos...). A base é recriada do zero a cada carga — sem perda, é derivada da fonte única. Roda em lotes.',
     tipo: 'info', confirmLabel: 'Carregar agora', cancelLabel: 'Cancelar'
   });
   if (!ok) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Carregando...'; }
-  if (prog) prog.innerHTML = '⏳ Carregando base relacional...';
+  var offset = 0, total = null, carregados = 0, pulados = 0;
   try {
-    var r = await fetch('/api/CarregarBaseCurada', { method: 'POST', credentials: 'include' });
-    var d = await r.json().catch(function () { return {}; });
-    if (!r.ok || !d.ok) {
-      if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha: ' + escHtml((d && (d.error || d.aviso)) || ('HTTP ' + r.status)) + '</span>';
-    } else if (d.carregados === 0 && d.aviso) {
-      if (prog) prog.innerHTML = '<span style="color:var(--amarelo,#b8860b)">' + escHtml(d.aviso) + '</span>';
-    } else {
-      var extra = d.pulados ? (' · ' + d.pulados + ' pulados') : '';
-      if (prog) prog.innerHTML = '✅ Base relacional pronta: <b>' + d.carregados + '</b> contratos carregados de ' + (d.fontes || d.carregados) + ' fontes' + extra + '. A SAN já roda SQL sobre eles.';
+    // Fase PREP: TRUNCATE + conta fontes (sem inserts).
+    if (prog) prog.innerHTML = '⏳ Preparando (limpando base + contando fontes)...';
+    var rp = await fetch('/api/CarregarBaseCurada?prep=1', { method: 'POST', credentials: 'include' });
+    var dp = await rp.json().catch(function () { return {}; });
+    if (!rp.ok || !dp.ok) {
+      if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha ao preparar: ' + escHtml((dp && (dp.error || dp.aviso)) || ('HTTP ' + rp.status)) + '</span>';
+      if (btn) { btn.disabled = false; btn.textContent = '🗄️ Carregar base relacional (Supabase)'; }
+      return;
     }
+    total = dp.total;
+    if (!total) {
+      if (prog) prog.innerHTML = '⚠️ Nenhuma fonte curada encontrada. Rode "Curar contratos (IA)" antes.';
+      if (btn) { btn.disabled = false; btn.textContent = '🗄️ Carregar base relacional (Supabase)'; }
+      return;
+    }
+    while (offset < total) {
+      var r = await fetch('/api/CarregarBaseCurada?offset=' + offset + '&limit=10', { method: 'POST', credentials: 'include' });
+      var d = await r.json().catch(function () { return {}; });
+      if (!r.ok || !d.ok) {
+        if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Falha no lote (offset ' + offset + '): ' + escHtml((d && d.error) || ('HTTP ' + r.status)) + '</span>';
+        break;
+      }
+      total = d.total; carregados += (d.carregadosNoBatch || 0); pulados += (d.puladosNoBatch || 0);
+      offset = (d.next != null) ? d.next : total;
+      if (prog) prog.innerHTML = '⏳ Carregando base relacional: <b>' + Math.min(offset, total) + '/' + total + '</b> · ' + carregados + ' contratos' + (pulados ? (' · ' + pulados + ' pulados') : '');
+      if (d.done) break;
+    }
+    if (prog) prog.innerHTML = '✅ Base relacional pronta: <b>' + carregados + '</b> contratos' + (pulados ? (' · ' + pulados + ' pulados') : '') + '. A SAN já roda SQL sobre eles.';
   } catch (e) {
     if (prog) prog.innerHTML = '<span style="color:var(--vermelho)">Erro: ' + escHtml(e.message || String(e)) + '</span>';
   } finally {
