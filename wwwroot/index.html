@@ -3236,6 +3236,11 @@ function renderAuditRow(ev) {
 
 function showView(id) {
   currentView = id;
+  // Configurações: define o sub-painel (landing por padrão; preservado via abrirConfigSub).
+  if (id === 'configuracoes') {
+    window._configSub = (typeof window._configSubForce !== 'undefined') ? window._configSubForce : null;
+    window._configSubForce = undefined;
+  }
   // SAN: garante FAB+panel global iniciados e atualiza view atual.
   // Blindado: erro aqui NAO pode derrubar o boot do sistema.
   try {
@@ -3317,7 +3322,52 @@ async function carregarConfigSistema() {
   }
 }
 
+// Router de Configurações: landing com 2 cards -> "Configurações do Sistema" e
+// "Configuração Aprovadores". O sub-estado fica em window._configSub.
+function _configEhAdmin() { return !!(currentPersona && currentPersona.roleKey === 'admin'); }
+function _configPodeAprovadores() { return !!(currentPersona && (currentPersona.roleKey === 'admin' || currentPersona.roleKey === 'ti')); }
+
 function renderConfiguracoesView() {
+  var sub = window._configSub || null;
+  // Guarda: Configurações do Sistema é só Admin; Aprovadores é Admin ou TI.
+  if (sub === 'sistema' && !_configEhAdmin()) sub = null;
+  if (sub === 'aprovadores' && !_configPodeAprovadores()) sub = null;
+  if (sub === 'sistema') return _voltarConfigHtml() + renderConfigSistema();
+  if (sub === 'aprovadores') return _voltarConfigHtml() + renderConfigAprovadores();
+  return renderConfigLanding();
+}
+
+function _voltarConfigHtml() {
+  return '<div style="margin-bottom:14px"><a onclick="abrirConfigSub(null)" style="cursor:pointer;color:var(--azul-claro);font-weight:600;font-size:13px">← Configurações</a></div>';
+}
+
+function renderConfigLanding() {
+  return `
+    <h2>Configurações</h2>
+    <div class="view-sub">Área administrativa. Escolha o que deseja configurar.</div>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;max-width:900px;margin-top:8px">
+      ${_configEhAdmin() ? `
+      <div class="card" onclick="abrirConfigSub('sistema')" style="cursor:pointer;flex:1;min-width:280px;transition:box-shadow .15s,transform .15s" onmouseover="this.style.boxShadow='0 6px 18px rgba(31,78,121,0.18)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">
+        <h3 style="margin-top:0">⚙️ Configurações do Sistema</h3>
+        <p class="small muted" style="line-height:1.55">Aprovação multi-nível por valor (alçadas), gestão de usuários (Entra ID), notificações e reset da base.</p>
+      </div>` : ''}
+      ${_configPodeAprovadores() ? `
+      <div class="card" onclick="abrirConfigSub('aprovadores')" style="cursor:pointer;flex:1;min-width:280px;transition:box-shadow .15s,transform .15s" onmouseover="this.style.boxShadow='0 6px 18px rgba(31,78,121,0.18)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">
+        <h3 style="margin-top:0">👥 Configuração Aprovadores</h3>
+        <p class="small muted" style="line-height:1.55">Defina quem aprova cada Unidade × Diretoria. A alteração grava direto na base e passa a valer para novas NFs.</p>
+      </div>` : ''}
+    </div>
+  `;
+}
+
+// Navega entre os sub-painéis de Configurações (via showView, preservando o sub).
+function abrirConfigSub(sub) {
+  window._configSubForce = sub || null;
+  if (sub === 'aprovadores') window._aprovadoresCfg = null; // recarrega fresco da base
+  showView('configuracoes');
+}
+
+function renderConfigSistema() {
   const cfg = window._sistemConfig || { multiNivel: { habilitado: false, valorLimite: 0, modoAprovador: 'global', gestorMasterGlobal: '', gestoresPorDiretoria: {} } };
   const mn = cfg.multiNivel || {};
   const habilitado = !!mn.habilitado;
@@ -3468,6 +3518,98 @@ function renderConfiguracoesView() {
   `;
 }
 
+// ===== Configuração Aprovadores (grava na lista PRONEP-NF-Diretorias) =====
+function renderConfigAprovadores() {
+  var dados = window._aprovadoresCfg;
+  var corpo;
+  if (!dados) {
+    corpo = '<div class="muted" style="padding:20px">Carregando aprovadores...</div>';
+  } else if (!dados.length) {
+    corpo = '<div class="muted" style="padding:20px">Nenhuma diretoria cadastrada na base.</div>';
+  } else {
+    var linhas = dados.map(function (d, i) {
+      return '<tr>' +
+        '<td style="white-space:nowrap">' + escHtml(d.unidade || '—') + '</td>' +
+        '<td style="white-space:nowrap">' + escHtml(d.diretoria || '—') + '</td>' +
+        '<td><input type="text" id="apv-nome-' + i + '" value="' + escAttr(d.aprovadorNome || '') + '" placeholder="Nome" style="width:100%;min-width:150px"></td>' +
+        '<td><input type="email" id="apv-email-' + i + '" value="' + escAttr(d.aprovadorEmail || '') + '" placeholder="nome@pronep.com.br" style="width:100%;min-width:220px"></td>' +
+        '<td class="center"><button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="salvarAprovador(' + i + ', this)">Salvar</button></td>' +
+      '</tr>';
+    }).join('');
+    corpo =
+      '<div class="form-row" style="margin-bottom:12px;max-width:420px">' +
+        '<input type="text" id="apv-busca" placeholder="Filtrar por unidade, diretoria ou aprovador..." oninput="filtrarAprovadores(this.value)" style="width:100%">' +
+      '</div>' +
+      '<div style="overflow-x:auto">' +
+      '<table class="data" id="apv-tabela" style="font-size:13px;width:100%">' +
+        '<thead><tr><th>Unidade</th><th>Diretoria</th><th>Nome do aprovador</th><th>E-mail</th><th class="center">Ação</th></tr></thead>' +
+        '<tbody>' + linhas + '</tbody>' +
+      '</table></div>';
+  }
+  return `
+    <h2>Configuração Aprovadores</h2>
+    <div class="view-sub">Quem aprova cada <b>Unidade × Diretoria</b>. A alteração grava na base e vale para <b>novas NFs</b>. NFs já pendentes continuam com o aprovador atual (troca manual, se necessário).</div>
+    <div class="card" style="max-width:1000px">
+      ${corpo}
+    </div>
+  `;
+}
+
+async function carregarAprovadoresConfig() {
+  try {
+    var r = await fetch('/api/ListarDiretorias', { credentials: 'include' });
+    var d = await r.json().catch(function () { return {}; });
+    window._aprovadoresCfg = (d && d.diretorias) ? d.diretorias.slice().sort(function (a, b) {
+      return (a.diretoria + a.unidade).localeCompare(b.diretoria + b.unidade);
+    }) : [];
+  } catch (e) {
+    window._aprovadoresCfg = [];
+  }
+  // Re-renderiza só se ainda estivermos no painel de aprovadores.
+  if (window._configSub === 'aprovadores') {
+    var area = document.getElementById('content-area');
+    if (area) area.innerHTML = renderConfiguracoesView();
+  }
+}
+
+function filtrarAprovadores(termo) {
+  termo = (termo || '').toLowerCase();
+  var tb = document.getElementById('apv-tabela');
+  if (!tb) return;
+  var rows = tb.querySelectorAll('tbody tr');
+  rows.forEach(function (tr) {
+    tr.style.display = tr.textContent.toLowerCase().indexOf(termo) >= 0 ? '' : 'none';
+  });
+}
+
+async function salvarAprovador(i, btn) {
+  var dados = window._aprovadoresCfg || [];
+  var d = dados[i];
+  if (!d) return;
+  var nome = (document.getElementById('apv-nome-' + i) || {}).value || '';
+  var email = ((document.getElementById('apv-email-' + i) || {}).value || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('E-mail inválido.', 'error'); return; }
+  if (!/@pronep\.com\.br$/i.test(email)) { toast('O e-mail deve ser @pronep.com.br.', 'error'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
+  try {
+    var r = await fetch('/api/SalvarDiretoria', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: d.id, email: email, nome: nome })
+    });
+    var res = await r.json().catch(function () { return {}; });
+    if (!r.ok || !res.ok) { toast('Falha ao salvar: ' + ((res && res.error) || ('HTTP ' + r.status)), 'error'); }
+    else {
+      d.aprovadorEmail = email; d.aprovadorNome = nome; // atualiza cache local
+      toast('Aprovador de ' + (d.unidade || '') + ' · ' + (d.diretoria || '') + ' atualizado.', 'success');
+    }
+  } catch (e) {
+    toast('Erro: ' + (e.message || String(e)), 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+  }
+}
+
 // Modal de confirmacao dupla — so admin chega aqui
 function abrirModalLimparBase() {
   if (!currentPersona || currentPersona.roleKey !== 'admin') {
@@ -3539,7 +3681,7 @@ async function executarLimparBase() {
     toast('Base limpa: ' + (rem.notas || 0) + ' NFs + ' + ((rem.pdfsPendentes||0)+(rem.pdfsRejeitadas||0)) + ' PDFs removidos (pasta Notas Aprovadas preservada).', 'success');
     // Recarrega notas (vai vir vazio)
     notas = [];
-    showView('configuracoes');
+    abrirConfigSub('sistema');
   } catch (e) {
     toast('Falha de comunicacao: ' + (e && e.message), 'error');
     btn.disabled = false;
@@ -3641,7 +3783,7 @@ async function salvarConfigSistema() {
     }
     window._sistemConfig = config;
     toast('Configurações salvas com sucesso!', 'success');
-    showView('configuracoes');
+    abrirConfigSub('sistema');
   } catch (e) {
     toast('Falha de comunicacao: ' + (e && e.message), 'error');
   } finally {
@@ -4547,6 +4689,10 @@ const views = {
   configuracoes: () => {
     // Atualiza status do push apos render (precisa do DOM montado)
     setTimeout(() => { try { atualizarStatusPush(); } catch (e) {} }, 50);
+    // No painel de aprovadores, carrega os dados da lista Diretorias apos render.
+    if (window._configSub === 'aprovadores' && !window._aprovadoresCfg) {
+      setTimeout(() => { try { carregarAprovadoresConfig(); } catch (e) {} }, 30);
+    }
     return renderConfiguracoesView();
   },
   'controle-acessos': () => {
