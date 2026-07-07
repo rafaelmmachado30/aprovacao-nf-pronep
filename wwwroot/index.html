@@ -3590,6 +3590,7 @@ async function salvarAprovador(i, btn) {
   var email = ((document.getElementById('apv-email-' + i) || {}).value || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('E-mail inválido.', 'error'); return; }
   if (!/@pronep\.com\.br$/i.test(email)) { toast('O e-mail deve ser @pronep.com.br.', 'error'); return; }
+  var emailAntigo = (d.aprovadorEmail || '').trim().toLowerCase();
   if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
   try {
     var r = await fetch('/api/SalvarDiretoria', {
@@ -3598,15 +3599,48 @@ async function salvarAprovador(i, btn) {
       body: JSON.stringify({ id: d.id, email: email, nome: nome })
     });
     var res = await r.json().catch(function () { return {}; });
-    if (!r.ok || !res.ok) { toast('Falha ao salvar: ' + ((res && res.error) || ('HTTP ' + r.status)), 'error'); }
-    else {
-      d.aprovadorEmail = email; d.aprovadorNome = nome; // atualiza cache local
-      toast('Aprovador de ' + (d.unidade || '') + ' · ' + (d.diretoria || '') + ' atualizado.', 'success');
+    if (!r.ok || !res.ok) { toast('Falha ao salvar: ' + ((res && res.error) || ('HTTP ' + r.status)), 'error'); return; }
+    d.aprovadorEmail = email; d.aprovadorNome = nome; // atualiza cache local
+    toast('Aprovador de ' + (d.unidade || '') + ' · ' + (d.diretoria || '') + ' atualizado (novas NFs).', 'success');
+    // Se o e-mail mudou, oferece reatribuir as NFs pendentes do aprovador anterior.
+    if (emailAntigo && emailAntigo !== email) {
+      await oferecerReatribuirPendentes(d, emailAntigo, email);
     }
   } catch (e) {
     toast('Erro: ' + (e.message || String(e)), 'error');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Salvar'; }
+  }
+}
+
+// Pergunta se deve reatribuir as NFs pendentes (dry-run primeiro pra saber quantas).
+async function oferecerReatribuirPendentes(d, deEmail, paraEmail) {
+  var prev;
+  try {
+    var rp = await fetch('/api/ReatribuirPendentes', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unidade: d.unidade, diretoria: d.diretoria, deEmail: deEmail, dryRun: true })
+    });
+    prev = await rp.json().catch(function () { return {}; });
+    if (!rp.ok || !prev.ok) return; // silencioso: já salvou o aprovador
+  } catch (e) { return; }
+  if (!prev.total) return; // nada pendente com o aprovador anterior
+  var ok = await confirmarAcao({
+    titulo: 'Reatribuir NFs pendentes?',
+    mensagem: 'Existem <b>' + prev.total + '</b> NF(s) pendente(s) em <b>' + escHtml(d.unidade || '') + ' · ' + escHtml(d.diretoria || '') + '</b> com o aprovador anterior. Deseja reatribuí-las para <b>' + escHtml(paraEmail) + '</b> agora? (Se não, elas continuam com o aprovador anterior.)',
+    tipo: 'info', confirmLabel: 'Reatribuir ' + prev.total, cancelLabel: 'Manter como está'
+  });
+  if (!ok) return;
+  try {
+    var r = await fetch('/api/ReatribuirPendentes', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ unidade: d.unidade, diretoria: d.diretoria, deEmail: deEmail, paraEmail: paraEmail })
+    });
+    var res = await r.json().catch(function () { return {}; });
+    if (!r.ok || !res.ok) { toast('Falha ao reatribuir: ' + ((res && res.error) || ('HTTP ' + r.status)), 'error'); }
+    else { toast(res.atualizados + ' NF(s) reatribuída(s) para ' + paraEmail + '.', 'success'); }
+  } catch (e) {
+    toast('Erro ao reatribuir: ' + (e.message || String(e)), 'error');
   }
 }
 
