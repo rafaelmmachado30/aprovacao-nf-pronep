@@ -153,7 +153,8 @@ const READ_TOOLS_UNIVERSAIS = [
   'listar_fila', 'listar_aprovadas', 'listar_rejeitadas', 'detalhes_nf',
   'agregar_por_fornecedor', 'detectar_anomalia', 'abrir_nf', 'buscar_fornecedor',
   'listar_contratos', 'detalhes_contrato', 'agregar_contratos', 'contratos_vencendo', 'abrir_contrato',
-  'buscar_conteudo_contrato', 'comparar_contratos', 'consultar_contratos_curados', 'consultar_base_relacional'
+  'buscar_conteudo_contrato', 'comparar_contratos', 'consultar_contratos_curados', 'consultar_base_relacional',
+  'fechamento_pendencias'
 ];
 
 function getToolsForView(viewAtual) {
@@ -575,6 +576,20 @@ const TOOLS = [
           fornecedor: { type: 'string', description: 'Opcional: filtra por substring do fornecedor/contrato.' },
           apenas_vigentes: { type: 'boolean', description: 'Se true, considera apenas contratos vigentes (vigenciaFim >= hoje).' },
           limite: { type: 'integer', description: 'Maximo de fichas a retornar (default 150, max 200).' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'fechamento_pendencias',
+      description: 'Fechamento do Mês: contas recorrentes ainda NAO lançadas e o risco de estourar o prazo D+5. Use quando o usuario perguntar sobre o fechamento, contas/NFs que faltam lançar, o que está "atrasado" ou "perto de vencer/estourar D+5", pendencias do mes. Retorna as contas em RISCO (sem NF e vencimento dentro de 5 dias uteis) e ATRASADA (sem NF e ja venceu), com fornecedor, diretoria, unidade, vencimento esperado e dias uteis restantes. Respeita o acesso: admin ve todas; gestor ve as suas diretorias. Cite fornecedor+diretoria+unidade e destaque primeiro as atrasadas, depois as em risco por proximidade do prazo.',
+      parameters: {
+        type: 'object',
+        properties: {
+          mes: { type: 'string', description: 'Mes-alvo no formato AAAA-MM (default: mes corrente).' },
+          incluir_aguardando: { type: 'boolean', description: 'Se true, inclui tambem as que ainda tem folga (aguardando). Default false (so risco + atrasada).' }
         }
       }
     }
@@ -1423,6 +1438,49 @@ async function tool_comparar_contratos(args, ctx) {
   }
 }
 
+async function tool_fechamento_pendencias(args, ctx) {
+  try {
+    const isAdmin = !!ctx.isAdmin;
+    const roles = ctx.roles || [];
+    // Escopo: admin ve todas; gestor ve as diretorias que gerencia.
+    let scopeNorm = null;
+    if (!isAdmin) {
+      const { ROLE_LABELS } = require('./userRoles');
+      const { _norm } = require('./recorrentes');
+      const labels = roles.filter(function (r) { return typeof r === 'string' && r.indexOf('gestor') === 0; })
+        .map(function (r) { return ROLE_LABELS[r]; }).filter(Boolean);
+      if (!labels.length) return { aviso: 'Fechamento do Mês é restrito a gestores e admin.' };
+      scopeNorm = labels.map(_norm);
+    }
+    // Mes-alvo opcional (AAAA-MM).
+    let ano = null, mes = null;
+    const m = /^(\d{4})-(\d{2})$/.exec(String(args.mes || ''));
+    if (m) { ano = Number(m[1]); mes = Number(m[2]) - 1; }
+
+    const { computar } = require('./checklistRecorrentes');
+    const r = await computar(ctx.gr.client, ctx.gr.siteId, ctx.gr.listNotasId, ctx.gr.invColMap,
+      { scopeNorm: scopeNorm, ano: ano, mes: mes });
+
+    const statusAlvo = args.incluir_aguardando ? ['atrasada', 'risco', 'aguardando'] : ['atrasada', 'risco'];
+    const pend = (r.contas || []).filter(function (c) { return statusAlvo.indexOf(c.status) >= 0; })
+      .map(function (c) {
+        return {
+          fornecedor: c.fornecedor, diretoria: c.diretoria, unidade: c.unidade,
+          vencimento_esperado: c.vencEsperado, dias_uteis_restantes: c.diasUteisAteVenc,
+          valor_estimado: c.valorEstimado, situacao: c.status
+        };
+      });
+    return {
+      mes: r.mes,
+      resumo: { atrasadas: r.resumo.atrasada || 0, em_risco_d5: r.resumo.risco || 0, aguardando: r.resumo.aguardando || 0 },
+      pendentes: pend,
+      instrucao: 'Alerte o usuario: liste primeiro as ATRASADAS (ja venceram, sem NF), depois as em RISCO (D+5) por proximidade do prazo. Cite fornecedor + diretoria + unidade e os dias uteis restantes. Se a lista estiver vazia, diga que nao ha contas em risco de estourar o D+5 neste mes.'
+    };
+  } catch (e) {
+    return { erro: 'Falha ao consultar o fechamento: ' + ((e && e.message) || String(e)) };
+  }
+}
+
 async function tool_consultar_base_relacional(args, ctx) {
   const cr = (ctx && ctx.contratos) || {};
   let pode = !!cr.veTodos;
@@ -1615,6 +1673,7 @@ const TOOL_IMPL = {
   comparar_contratos: tool_comparar_contratos,
   consultar_contratos_curados: tool_consultar_contratos_curados,
   consultar_base_relacional: tool_consultar_base_relacional,
+  fechamento_pendencias: tool_fechamento_pendencias,
   listar_rejeitadas: tool_listar_rejeitadas
 };
 
@@ -1655,7 +1714,7 @@ async function runSol(history, userMessage, user, opts) {
   const client = await getGraphClient();
   const cacheResolved = await resolveSiteAndLists(client);
   const { siteId, listNotasId, invColMap, listContratosId, colMapContratos, invColMapContratos, listDirId } = cacheResolved;
-  const ctx = { user, isAdmin, isFinanceiro, gr: { client, siteId, listNotasId, invColMap, listContratosId, colMapContratos, invColMapContratos, listDirId } };
+  const ctx = { user, isAdmin, isFinanceiro, roles: (Array.isArray(opts.roles) ? opts.roles : []), gr: { client, siteId, listNotasId, invColMap, listContratosId, colMapContratos, invColMapContratos, listDirId } };
   // Resolve escopo do user (gestor de quais diretorias/unidades) pra passar pro prompt
   const escopo = await resolveEscopoUsuario(client, siteId, listDirId, user.email);
   const perfil = { isAdmin, isFinanceiro };
