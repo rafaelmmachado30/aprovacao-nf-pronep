@@ -1013,7 +1013,7 @@ const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','caixa-entrada','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
   gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','contas-recorrentes','fechamento-mes','contratos','mapa-aprovadores','arquitetura'] },
   financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','controle-acessos','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','arquitetura','configuracoes'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','controle-acessos','relatorio-acessos','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -2074,6 +2074,7 @@ const menuItems = [
   { id: 'contratos',         label: 'Contratos',                  icon: ICONS.contratos },
   { id: 'mapa-aprovadores',  label: 'Mapa de Aprovadores',        icon: ICONS.mapa },
   { id: 'controle-acessos',  label: 'Controle de Acessos',        icon: ICONS.controleAcessos },
+  { id: 'relatorio-acessos', label: 'Relatório de Acessos',        icon: ICONS.mapa },
   { id: 'contas-recorrentes',label: 'Contas Recorrentes',         icon: ICONS.recorrentes },
   { id: 'fechamento-mes',    label: 'Fechamento do Mês',          icon: ICONS.fechamento },
   { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
@@ -4744,6 +4745,10 @@ const views = {
   'caixa-entrada': () => {
     setTimeout(carregarCaixa, 30);
     return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Carregando sua caixa de entrada...</div></div>';
+  },
+  'relatorio-acessos': () => {
+    setTimeout(carregarRelatorioAcessos, 30);
+    return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Montando o relatório de acessos...</div><div class="small muted">Expandindo os grupos nas pessoas do Entra</div></div>';
   }
 };
 
@@ -5210,6 +5215,68 @@ async function ckDesfazerMerge(idx) {
     toast('✓ Conciliação desfeita.', 'success');
     carregarChecklistMes();
   } catch (e) { toast('Erro: ' + (e.message || e), 'error'); }
+}
+
+// ===== Relatório de Acessos a Contratos — quem vê o quê (grupos expandidos em pessoas) =====
+async function carregarRelatorioAcessos() {
+  var area = document.getElementById('content-area');
+  if (!area) return;
+  area.innerHTML = '<div class="card" style="text-align:center;padding:40px"><div style="font-size:16px;color:var(--azul-escuro)">Montando o relatório de acessos...</div></div>';
+  try {
+    var r = await fetch('/api/RelatorioAcessosContratos', { credentials: 'include' });
+    if (r.status === 403) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Acesso restrito a administradores.</div>'; return; }
+    var data = await r.json();
+    if (!r.ok) { area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>Falha (HTTP ' + r.status + '): ' + escHtml((data && data.error) || '') + '</div>'; return; }
+    window._relAcessos = data;
+    area.innerHTML = renderRelatorioAcessosView();
+  } catch (e) {
+    area.innerHTML = '<div class="alert alert-error"><span class="ico">x</span>' + escHtml(e.message || 'erro') + '</div>';
+  }
+}
+
+function renderRelatorioAcessosView() {
+  var data = window._relAcessos || {};
+  var pastas = data.pastas || [];
+  var html = '';
+  html += '<h2 style="margin:0 0 4px;color:var(--azul-escuro);font-size:22px">Relatório de Acessos a Contratos</h2>';
+  html += '<div class="view-sub">Quem enxerga cada pasta de contratos hoje, com os grupos já expandidos nas pessoas reais (membros do Entra).</div>';
+
+  html += '<div style="margin:8px 0 16px;padding:12px 14px;border-radius:8px;background:#D1FAE5;border-left:4px solid #10B981;color:#065F46;font-size:13px">' +
+    '<b>Admin e Jurídica veem todas as pastas</b>, sempre — por isso não aparecem repetidos abaixo. ' +
+    (data.totalPastas || 0) + ' pasta(s) · ' + (data.totalPessoasUnicas || 0) + ' pessoa(s) distinta(s) com acesso.' +
+    '</div>';
+
+  if (!pastas.length) {
+    html += '<div class="card" style="padding:30px;text-align:center"><div style="font-size:15px;color:var(--azul-escuro)">Nenhuma pasta de contrato encontrada.</div></div>';
+    return html;
+  }
+
+  pastas.forEach(function (p) {
+    var tag;
+    if (p.configurada) tag = '<span style="background:#DBEAFE;color:#1E40AF;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600">configurada</span>';
+    else if (p.fallback) tag = '<span style="background:#FEF3C7;color:#92400E;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600">padrão (grupo de mesmo nome)</span>';
+    else tag = '<span style="background:#E5E7EB;color:#374151;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:600">sem liberação extra</span>';
+
+    var corpo = '';
+    if (p.semAcessoExtra) {
+      corpo = '<div class="small muted" style="margin-top:8px">Somente Admin e Jurídica.</div>';
+    } else {
+      (p.grupos || []).forEach(function (g) {
+        var nomes = (g.membros || []).map(function (m) { return escHtml(m.nome); }).join(', ') || '<span class="muted">(grupo sem membros)</span>';
+        corpo += '<div style="margin-top:8px">' +
+          '<b>' + escHtml(g.label) + '</b> <span class="small muted">(grupo inteiro · ' + (g.membros || []).length + ')</span><br>' +
+          '<span style="font-size:13px">' + nomes + '</span></div>';
+      });
+      if ((p.pessoas || []).length) {
+        corpo += '<div style="margin-top:8px"><b>Pessoas específicas</b><br><span style="font-size:13px">' + p.pessoas.map(function (e) { return escHtml(e); }).join(', ') + '</span></div>';
+      }
+    }
+
+    html += '<div class="card" style="margin-bottom:12px">' +
+      '<div style="display:flex;align-items:center;gap:10px"><h3 style="margin:0;color:var(--azul-escuro)">' + escHtml(p.pasta) + '</h3>' + tag + '</div>' +
+      corpo + '</div>';
+  });
+  return html;
 }
 
 // ===== Caixa de Entrada de PDFs — inbox persistente (subir avulso -> combinar -> lançar) =====
