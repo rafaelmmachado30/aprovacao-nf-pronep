@@ -46,7 +46,8 @@ const ROLE_LABELS = {
   gestor_tecnica_sp: 'Técnica-SP',
   gestor_tecnica_rjes: 'Técnica-RJ/ES',
   gestor_fiscal_contabil: 'Fiscal-Contábil',
-  financeiro_nf: 'Financeiro (Gestão)'
+  financeiro_nf: 'Financeiro (Gestão)',
+  submitter: 'Submetedores'
 };
 
 // Lista canonica [{ role, label }] dos grupos atribuiveis (ordenada por label).
