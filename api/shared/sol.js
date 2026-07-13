@@ -255,6 +255,7 @@ function buildSystemPrompt(user, viewAtual, escopo, perfil) {
     '  7. Se o usuario pedir algo fora do dominio do sistema (NF, fornecedor, aprovacao), recuse educadamente.',
     '  8. PDF/RELATORIO: voce NUNCA gera PDF diretamente nem precisa. Quando o user pedir "relatorio", "exportar", "imprimir", "PDF", "documento": APENAS LISTE OS DADOS normalmente (tabela markdown). O frontend exibe AUTOMATICAMENTE um botao "Exportar PDF" abaixo da sua resposta quando detecta essas palavras. NUNCA diga "nao consigo gerar PDF", "nao tenho como exportar", "use Ctrl+P" - eh FALSO. Apenas responda a pergunta normalmente, com tabela bem organizada.',
     '  9. ACESSO TOTAL DE LEITURA: voce tem ferramentas pra consultar TODOS os dados do sistema — NFs em fila, aprovadas, rejeitadas, agregacoes por fornecedor, deteccao de anomalia, o CADASTRO DE FORNECEDORES (tool buscar_fornecedor: se existe, CNPJ/CPF, nome fantasia, diretoria, categoria, contato, se esta ativo) E contratos (vigencias, vencimentos, valores) — INDEPENDENTE da tela atual. Se o usuario perguntar qualquer coisa factual (ex: "o fornecedor NXTIA esta cadastrado?", "qual o CNPJ da TOTVS?", "NFs aprovadas hoje na minha diretoria", "contratos vencendo"), USE a tool correspondente e responda. NUNCA diga que "nao tem ferramenta pra isso", que "nao tem acesso ao cadastro de fornecedores" ou que "so tem tools de contrato/NF" — voce tem TODAS, inclusive a de fornecedores. A tela atual define apenas o seu FOCO, NAO limita o que voce pode consultar. So recuse se for assunto totalmente fora do sistema.',
+    '  10. CONTRATOS — VIGENTE x INATIVO x HISTORICO: cada contrato tem o campo "situacao" (Vigente | Inativo | Historico), definido pela PASTA no SharePoint. So situacao=Vigente vale como ATUAL/em vigor. Inativo e Historico sao ARQUIVADOS (encerrados/antigos): ao falar do "contrato atual/vigente de X" use SO os Vigentes; se precisar citar um Inativo/Historico, deixe EXPLICITO que esta inativo/no historico e NUNCA o apresente como vigente nem o conte em totais de "contratos ativos".',
     '',
     'BASE DE CONHECIMENTO (do manual oficial do sistema):',
     getManualForView(viewAtual),
@@ -466,14 +467,15 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'listar_contratos',
-      description: 'Lista contratos cadastrados da Pronep com filtros opcionais. Use quando o usuario perguntar sobre os contratos com um fornecedor especifico ("contratos da TOTVS", "contratos da Tecnologia", "contratos vencidos"). Retorna no maximo 50 itens. Cada item tem id, titulo, fornecedor, diretoria, unidade, dataInicio, dataFim, valor, status, diasParaVencer, urlSharePoint.',
+      description: 'Lista contratos cadastrados da Pronep com filtros opcionais. Use quando o usuario perguntar sobre os contratos com um fornecedor especifico ("contratos da TOTVS", "contratos da Tecnologia", "contratos vencidos"). Retorna no maximo 50 itens. Cada item tem id, titulo, fornecedor, diretoria, unidade, dataInicio, dataFim, valor, status, diasParaVencer, situacao (Vigente|Inativo|Historico — definida pela PASTA no SharePoint), urlSharePoint. Quando o usuario falar de contrato "atual/vigente/em vigor", filtre situacao=Vigente.',
       parameters: {
         type: 'object',
         properties: {
           diretoria: { type: 'string', description: 'Filtrar pela diretoria (ex: Tecnologia, RH, Juridico, Qualidade, Ouvidoria)' },
           unidade: { type: 'string', enum: ['CORPORATIVO','SP','RJ','ES'], description: 'Filtrar pela unidade' },
           fornecedor: { type: 'string', description: 'Substring (case-insensitive) do nome do fornecedor (ex: "TOTVS", "Cirion")' },
-          status: { type: 'string', enum: ['Ativo','Vencendo30','Vencendo60','Vencendo90','Vencido','Cancelado','SemVigencia'], description: 'Status do contrato' },
+          status: { type: 'string', enum: ['Ativo','Vencendo30','Vencendo60','Vencendo90','Vencido','Cancelado','SemVigencia'], description: 'Status por DATA de vigencia (calculado da dataFim)' },
+          situacao: { type: 'string', enum: ['Vigente','Inativo','Historico'], description: 'Situacao pela PASTA: Vigente (em vigor), Inativo ou Historico (arquivados). Use Vigente para "contrato atual".' },
           busca: { type: 'string', description: 'Substring livre buscada no titulo/nome do arquivo' }
         }
       }
@@ -1161,7 +1163,10 @@ async function _carregarTodosContratos(ctx) {
         Status: fl.Status || '',
         ValorContrato: fl.ValorContrato != null ? Number(fl.ValorContrato) : null,
         Observacoes: fl.Observacoes || '',
-        CaminhoSharepoint: fl.CaminhoSharepoint || ''
+        CaminhoSharepoint: fl.CaminhoSharepoint || '',
+        PathRelativoSP: fl.PathRelativoSP || '',
+        // Situacao pela PASTA: Vigente | Inativo | Historico (fallback: deduz do caminho)
+        Situacao: fl.Situacao || require('./contratos').classificarSituacao(fl.PathRelativoSP || '')
       });
     }
     const next = r['@odata.nextLink'];
@@ -1203,6 +1208,7 @@ async function tool_listar_contratos(args, ctx) {
   if (args.unidade)    todos = todos.filter(c => String(c.Unidade || '') === args.unidade);
   if (args.fornecedor) todos = todos.filter(c => String(c.Fornecedor || '').toLowerCase().indexOf(String(args.fornecedor).toLowerCase()) >= 0);
   if (args.status)     todos = todos.filter(c => String(c.Status || '') === args.status);
+  if (args.situacao)   todos = todos.filter(c => String(c.Situacao || '') === args.situacao);
   if (args.busca) {
     const b = String(args.busca).toLowerCase();
     todos = todos.filter(c => (String(c.Title || '') + ' ' + String(c.Fornecedor || '')).toLowerCase().indexOf(b) >= 0);
@@ -1226,6 +1232,7 @@ async function tool_listar_contratos(args, ctx) {
       diasParaVencer: _diasParaVencer(c.DataFim),
       valor: c.ValorContrato,
       status: c.Status,
+      situacao: c.Situacao,
       urlSharePoint: c.CaminhoSharepoint
     }))
   };
@@ -1254,6 +1261,7 @@ async function tool_detalhes_contrato(args, ctx) {
     diasParaVencer: _diasParaVencer(c.DataFim),
     valor: c.ValorContrato,
     status: c.Status,
+    situacao: c.Situacao,
     observacoes: c.Observacoes,
     urlSharePoint: c.CaminhoSharepoint
   };
@@ -1567,6 +1575,7 @@ async function tool_contratos_vencendo(args, ctx) {
   let todos = await _carregarTodosContratos(ctx);
   todos = todos.filter(c => {
     if (c.Status === 'Cancelado') return false;
+    if (c.Situacao === 'Inativo' || c.Situacao === 'Historico') return false; // nao alerta contrato arquivado
     if (!c.DataFim) return false;
     const d = _diasParaVencer(c.DataFim);
     if (d == null) return false;
@@ -1590,7 +1599,8 @@ async function tool_contratos_vencendo(args, ctx) {
       dataFim: c.DataFim,
       diasParaVencer: _diasParaVencer(c.DataFim),
       valor: c.ValorContrato,
-      status: c.Status
+      status: c.Status,
+      situacao: c.Situacao
     }))
   };
 }

@@ -181,6 +181,7 @@ module.exports = async function (context, req) {
     const cDI = colMap['DataInicio'] || 'DataInicio';
     const cDF = colMap['DataFim'] || 'DataFim';
     const cSt = colMap['Status'] || 'Status';
+    const cSituacao = colMap['Situacao'] || 'Situacao';
     const cSP = colMap['CaminhoSharepoint'] || 'CaminhoSharepoint';
     const cDriveId = colMap['DriveItemId'] || 'DriveItemId';
     const cLei = colMap['LeituraIAStatus'] || 'LeituraIAStatus';
@@ -210,6 +211,7 @@ module.exports = async function (context, req) {
         dataFim: dataFimStr,
         diasParaVencer: diasParaVencer,
         status: status,
+        situacao: fl[cSituacao] || contratosShared.classificarSituacao(fl[cPathSP] || ''),
         valor: fl[cVal] || null,
         observacoes: fl[cObs] || '',
         nomeArquivo: fl[cNomeArq] || fl.Title || '',

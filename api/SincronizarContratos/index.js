@@ -413,6 +413,8 @@ async function persistir(client, siteId, listId, colMap, arq, classif, vig, spIt
   if (vig.dataFim) set('DataFim', vig.dataFim + 'T00:00:00Z');
   if (vig.valorContrato) set('ValorContrato', vig.valorContrato);
   set('Status', require('../shared/contratos').calcularStatus(vig.dataFim, vig.indeterminado));
+  // Situacao deduzida da PASTA (Vigente | Inativo | Historico) — independe da data.
+  set('Situacao', require('../shared/contratos').classificarSituacao(arq.path));
   let leituraStatus = 'auto_alto';
   if (vig.naoEncontrou) leituraStatus = 'nao_encontrou';
   else if (vig.confidence === 'baixo') leituraStatus = 'auto_baixo';

@@ -602,6 +602,19 @@ function classificarPath(ancestors) {
   return { diretoria, unidade, fornecedor };
 }
 
+// Situacao do contrato deduzida da PASTA (nao da data): se o caminho passar por
+// "Contratos Inativos" -> 'Inativo'; por "Historico" -> 'Historico'; senao 'Vigente'.
+// Robusto a onde a pasta esteja no caminho (compara cada segmento normalizado).
+function classificarSituacao(ancestors) {
+  const arr = Array.isArray(ancestors) ? ancestors : String(ancestors || '').split('/');
+  for (let i = 0; i < arr.length; i++) {
+    const a = normalizeStr(arr[i]); // MAIUSCULO, sem acento
+    if (a.indexOf('INATIVO') >= 0) return 'Inativo';     // "CONTRATOS INATIVOS" / "INATIVOS"
+    if (a.indexOf('HISTORICO') >= 0) return 'Historico';  // "HISTORICO" / "HISTÓRICO"
+  }
+  return 'Vigente';
+}
+
 // ============================================================================
 // FILTRO DE RELEVANCIA — economiza tokens Claude pulando arquivos cadastrais.
 // ============================================================================
@@ -646,6 +659,7 @@ module.exports = {
   calcularStatus,
   calcularDiasParaVencer,
   classificarPath,
+  classificarSituacao,
   normalizeStr,
   eRelevantePraContrato,
   PATTERNS_IGNORAR_CONTRATO,

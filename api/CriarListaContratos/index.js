@@ -34,6 +34,7 @@ const COLUNAS_ESPERADAS = [
   { name: 'DataInicio',         def: { dateTime: { displayAs: 'standard', format: 'dateOnly' } } },
   { name: 'DataFim',            def: { dateTime: { displayAs: 'standard', format: 'dateOnly' } } },
   { name: 'Status',             def: { text: {} } },
+  { name: 'Situacao',           def: { text: {} } },
   { name: 'CaminhoSharepoint',  def: { text: { allowMultipleLines: true } } },
   { name: 'DriveItemId',        def: { text: {} } },
   { name: 'LeituraIAStatus',    def: { text: {} } },
