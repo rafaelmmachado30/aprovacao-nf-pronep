@@ -1013,7 +1013,7 @@ const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','caixa-entrada','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
   gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','contas-recorrentes','fechamento-mes','contratos','mapa-aprovadores','arquitetura'] },
   financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','relatorio-acessos','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','arquitetura','configuracoes'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -2074,7 +2074,6 @@ const menuItems = [
   { id: 'contratos',         label: 'Contratos',                  icon: ICONS.contratos },
   { id: 'mapa-aprovadores',  label: 'Mapa de Aprovadores',        icon: ICONS.mapa },
   { id: 'controle-acessos',  label: 'Controle de Acessos',        icon: ICONS.controleAcessos },
-  { id: 'relatorio-acessos', label: 'Relatório de Acessos',        icon: ICONS.mapa },
   { id: 'contas-recorrentes',label: 'Contas Recorrentes',         icon: ICONS.recorrentes },
   { id: 'fechamento-mes',    label: 'Fechamento do Mês',          icon: ICONS.fechamento },
   { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
@@ -4750,10 +4749,6 @@ const views = {
   'caixa-entrada': () => {
     setTimeout(carregarCaixa, 30);
     return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Carregando sua caixa de entrada...</div></div>';
-  },
-  'relatorio-acessos': () => {
-    setTimeout(carregarRelatorioAcessos, 30);
-    return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Montando o relatório de acessos...</div><div class="small muted">Expandindo os grupos nas pessoas do Entra</div></div>';
   }
 };
 
@@ -5224,7 +5219,7 @@ async function ckDesfazerMerge(idx) {
 
 // ===== Relatório de Acessos a Contratos — quem vê o quê (grupos expandidos em pessoas) =====
 async function carregarRelatorioAcessos() {
-  var area = document.getElementById('content-area');
+  var area = document.getElementById('central-pane') || document.getElementById('content-area');
   if (!area) return;
   area.innerHTML = '<div class="card" style="text-align:center;padding:40px"><div style="font-size:16px;color:var(--azul-escuro)">Montando o relatório de acessos...</div></div>';
   try {
@@ -5243,8 +5238,11 @@ function renderRelatorioAcessosView() {
   var data = window._relAcessos || {};
   var pastas = data.pastas || [];
   var html = '';
-  html += '<h2 style="margin:0 0 4px;color:var(--azul-escuro);font-size:22px">Relatório de Acessos a Contratos</h2>';
-  html += '<div class="view-sub">Quem enxerga cada pasta de contratos hoje, com os grupos já expandidos nas pessoas reais (membros do Entra).</div>';
+  html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">' +
+    '<h3 style="margin:0;color:var(--azul-escuro)">Relatório — quem vê cada pasta</h3>' +
+    '<button class="btn btn-secondary" onclick="exportarRelatorioAcessosPDF()">⬇ Exportar em PDF</button>' +
+    '</div>';
+  html += '<div class="view-sub">Cada pasta de contratos com os grupos já expandidos nas pessoas reais (membros do Entra).</div>';
 
   html += '<div style="margin:8px 0 16px;padding:12px 14px;border-radius:8px;background:#D1FAE5;border-left:4px solid #10B981;color:#065F46;font-size:13px">' +
     '<b>Admin e Jurídica veem todas as pastas</b>, sempre — por isso não aparecem repetidos abaixo. ' +
@@ -5282,6 +5280,40 @@ function renderRelatorioAcessosView() {
       corpo + '</div>';
   });
   return html;
+}
+
+// Exporta o Relatório de Acessos como PDF (abre janela imprimível -> "Salvar como PDF").
+function exportarRelatorioAcessosPDF() {
+  var data = window._relAcessos;
+  if (!data || !data.pastas) { toast('Abra o relatório antes de exportar.', 'error'); return; }
+  var hoje = new Date().toLocaleDateString('pt-BR');
+  var linhas = (data.pastas || []).map(function (p) {
+    var itens = '';
+    if (p.semAcessoExtra) {
+      itens = '<div style="color:#666">Somente Admin e Jurídica.</div>';
+    } else {
+      (p.grupos || []).forEach(function (g) {
+        var nomes = (g.membros || []).map(function (m) { return escHtml(m.nome); }).join(', ') || '(sem membros)';
+        itens += '<div style="margin-bottom:3px"><b>' + escHtml(g.label) + '</b> (' + (g.membros || []).length + '): ' + nomes + '</div>';
+      });
+      if ((p.pessoas || []).length) itens += '<div style="margin-bottom:3px"><b>Pessoas específicas:</b> ' + p.pessoas.map(function (e) { return escHtml(e); }).join(', ') + '</div>';
+    }
+    return '<tr><td style="vertical-align:top;font-weight:700;padding:8px 10px;border-bottom:1px solid #ddd;white-space:nowrap">' + escHtml(p.pasta) + '</td>' +
+      '<td style="padding:8px 10px;border-bottom:1px solid #ddd;font-size:13px">' + itens + '</td></tr>';
+  }).join('');
+  var doc = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório de Acessos a Contratos — Pronep</title>' +
+    '<style>body{font-family:Arial,Helvetica,sans-serif;color:#1f2937;padding:24px}h1{color:#1B3A5B;font-size:20px;margin:0 0 2px}.sub{color:#666;font-size:12px;margin-bottom:14px}table{width:100%;border-collapse:collapse}th{background:#f4f7fa;text-align:left;padding:8px 10px;font-size:12px;border-bottom:2px solid #ccc}.note{background:#eef7f0;border-left:4px solid #10B981;padding:8px 12px;font-size:12px;margin-bottom:14px}@media print{.noprint{display:none}}</style>' +
+    '</head><body>' +
+    '<h1>Relatório de Acessos a Contratos — Pronep</h1>' +
+    '<div class="sub">Gerado em ' + hoje + ' · ' + (data.totalPastas || 0) + ' pasta(s) · ' + (data.totalPessoasUnicas || 0) + ' pessoa(s) distinta(s) com acesso</div>' +
+    '<div class="note"><b>Admin e Jurídica veem todas as pastas</b>, sempre (não repetidos abaixo).</div>' +
+    '<table><thead><tr><th style="width:180px">Pasta</th><th>Quem tem acesso</th></tr></thead><tbody>' + linhas + '</tbody></table>' +
+    '<button class="noprint" onclick="window.print()" style="margin-top:16px;padding:8px 16px;cursor:pointer">Imprimir / Salvar em PDF</button>' +
+    '<scr' + 'ipt>setTimeout(function(){window.print();},400);</scr' + 'ipt>' +
+    '</body></html>';
+  var w = window.open('', '_blank');
+  if (!w) { toast('Permita pop-ups para exportar o PDF.', 'error'); return; }
+  w.document.open(); w.document.write(doc); w.document.close();
 }
 
 // ===== Caixa de Entrada de PDFs — inbox persistente (subir avulso -> combinar -> lançar) =====
@@ -5560,6 +5592,7 @@ function renderCentralAcessosShell() {
     '<div style="display:flex;gap:6px;margin:10px 0 16px;border-bottom:1px solid var(--cinza-borda)">' +
       '<button id="central-tab-telas" onclick="centralAcessosTab(\'telas\')" style="border:none;border-bottom:3px solid transparent;border-radius:0;background:none;font-weight:600;padding:9px 14px;cursor:pointer;color:#6B7280">Telas do sistema</button>' +
       '<button id="central-tab-contratos" onclick="centralAcessosTab(\'contratos\')" style="border:none;border-bottom:3px solid transparent;border-radius:0;background:none;font-weight:600;padding:9px 14px;cursor:pointer;color:#6B7280">Contratos</button>' +
+      '<button id="central-tab-relatorio" onclick="centralAcessosTab(\'relatorio\')" style="border:none;border-bottom:3px solid transparent;border-radius:0;background:none;font-weight:600;padding:9px 14px;cursor:pointer;color:#6B7280">Relatório</button>' +
     '</div>' +
     '<div id="central-pane"><div class="card" style="text-align:center;padding:30px"><div class="small muted">Carregando...</div></div></div>';
 }
@@ -5568,11 +5601,13 @@ function centralAcessosTab(tab) {
   window._centralTab = tab;
   const bt = document.getElementById('central-tab-telas');
   const bc = document.getElementById('central-tab-contratos');
-  if (bt) { bt.style.borderBottomColor = (tab === 'telas') ? 'var(--azul-escuro)' : 'transparent'; bt.style.color = (tab === 'telas') ? 'var(--azul-escuro)' : '#6B7280'; }
-  if (bc) { bc.style.borderBottomColor = (tab === 'contratos') ? 'var(--azul-escuro)' : 'transparent'; bc.style.color = (tab === 'contratos') ? 'var(--azul-escuro)' : '#6B7280'; }
+  const br = document.getElementById('central-tab-relatorio');
+  function _stTab(el, on) { if (el) { el.style.borderBottomColor = on ? 'var(--azul-escuro)' : 'transparent'; el.style.color = on ? 'var(--azul-escuro)' : '#6B7280'; } }
+  _stTab(bt, tab === 'telas'); _stTab(bc, tab === 'contratos'); _stTab(br, tab === 'relatorio');
   const pane = document.getElementById('central-pane');
   if (pane) pane.innerHTML = '<div class="card" style="text-align:center;padding:30px"><div class="small muted">Carregando...</div></div>';
   if (tab === 'contratos') carregarControleAcessos();
+  else if (tab === 'relatorio') carregarRelatorioAcessos();
   else carregarControleAcessosTelas();
 }
 
