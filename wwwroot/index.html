@@ -1013,7 +1013,7 @@ const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','caixa-entrada','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
   gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','contas-recorrentes','fechamento-mes','contratos','mapa-aprovadores','arquitetura'] },
   financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','controle-acessos','relatorio-acessos','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','arquitetura','configuracoes'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','relatorio-acessos','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -3357,6 +3357,11 @@ function renderConfigLanding() {
         <h3 style="margin-top:0">👥 Configuração Aprovadores</h3>
         <p class="small muted" style="line-height:1.55">Defina quem aprova cada Unidade × Diretoria. A alteração grava direto na base e passa a valer para novas NFs.</p>
       </div>` : ''}
+      ${_configEhAdmin() ? `
+      <div class="card" onclick="showView('controle-acessos')" style="cursor:pointer;flex:1;min-width:280px;transition:box-shadow .15s,transform .15s" onmouseover="this.style.boxShadow='0 6px 18px rgba(31,78,121,0.18)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">
+        <h3 style="margin-top:0">🔐 Controle de Acessos</h3>
+        <p class="small muted" style="line-height:1.55">Defina quem enxerga cada tela do sistema e cada pasta de contratos — liberando por grupo inteiro ou por pessoa específica.</p>
+      </div>` : ''}
     </div>
   `;
 }
@@ -5549,6 +5554,7 @@ function caLabelDoRole(role) {
 // ============================================================================
 function renderCentralAcessosShell() {
   return '' +
+    '<div style="margin-bottom:14px"><a onclick="showView(\'configuracoes\')" style="cursor:pointer;color:var(--azul-claro);font-weight:600;font-size:13px">← Configurações</a></div>' +
     '<h2>Central de Controle de Acessos</h2>' +
     '<div class="view-sub">Gerencie quem acessa o quê. Em <b>Telas do sistema</b>, libere telas para grupos inteiros ou pessoas específicas (soma ao que o papel já dá — nunca remove). Em <b>Contratos</b>, controle o acesso às pastas de contratos.</div>' +
     '<div style="display:flex;gap:6px;margin:10px 0 16px;border-bottom:1px solid var(--cinza-borda)">' +
