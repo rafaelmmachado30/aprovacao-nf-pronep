@@ -128,6 +128,9 @@ async function listar(filtros) {
   if (filtros.acao) {
     conds.push("fields/" + (cm['Acao'] || 'Acao') + " eq '" + String(filtros.acao).replace(/'/g, "''") + "'");
   }
+  if (filtros.resultado) {
+    conds.push("fields/" + (cm['Resultado'] || 'Resultado') + " eq '" + String(filtros.resultado).replace(/'/g, "''") + "'");
+  }
   if (filtros.userOid) {
     conds.push("fields/" + (cm['UserOid'] || 'UserOid') + " eq '" + String(filtros.userOid).replace(/'/g, "''") + "'");
   }
