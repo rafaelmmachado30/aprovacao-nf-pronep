@@ -9468,8 +9468,8 @@ function confirmApprove(id) {
     '  </div>' +
     '</div>' +
     '<div class="btn-row">' +
-    '  <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>' +
-    '  <button class="btn btn-success" onclick="doApprove(\'' + id + '\')">✓ Confirmar aprovação</button>' +
+    '  <button class="btn btn-secondary" id="btn-cancelar-aprov" onclick="closeModal()">Cancelar</button>' +
+    '  <button class="btn btn-success" id="btn-confirmar-aprov" onclick="doApprove(\'' + id + '\')">✓ Confirmar aprovação</button>' +
     '</div>'
   );
 }
@@ -9510,8 +9510,12 @@ async function doApprove(id) {
     modalBody.insertAdjacentHTML('beforeend',
       '<div id="approve-progress" class="alert alert-info" style="margin-top:12px;background:var(--azul-soft);border-left:3px solid var(--azul-claro);color:var(--azul-escuro);padding:10px;border-radius:4px"><span style="display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-top-color:transparent;border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:8px"></span>Aplicando watermark e movendo PDF para Notas Aprovadas...</div>');
   }
-  // Disable buttons no modal
-  document.querySelectorAll('.modal .btn').forEach(b => b.disabled = true);
+  // Disable buttons no modal (o container real é #modal-content) — evita duplo clique.
+  const _btnConf = document.getElementById('btn-confirmar-aprov');
+  if (_btnConf) { _btnConf.disabled = true; _btnConf.style.opacity = '0.6'; _btnConf.style.cursor = 'not-allowed'; _btnConf.textContent = 'Aprovando...'; }
+  const _btnCanc = document.getElementById('btn-cancelar-aprov');
+  if (_btnCanc) { _btnCanc.disabled = true; _btnCanc.style.opacity = '0.6'; _btnCanc.style.cursor = 'not-allowed'; }
+  document.querySelectorAll('#modal-content .btn').forEach(b => { b.disabled = true; });
 
   try {
     const r = await fetch('/api/AprovarNota', {
