@@ -58,11 +58,14 @@ function sanitizeName(name) {
   return n.slice(0, 120);
 }
 
-async function listarArquivos(client, siteId, email) {
+async function listarArquivos(client, siteId, email, opts) {
+  opts = opts || {};
+  const comUrl = opts.comUrl !== false; // default: inclui downloadUrl (combinar precisa)
   const folder = pastaDoUsuario(email);
+  const sel = 'id,name,size,createdDateTime,file,folder' + (comUrl ? ',@microsoft.graph.downloadUrl' : '');
   try {
     const resp = await client.api('/sites/' + siteId + '/drive/root:/' + folder + ':/children')
-      .select('id,name,size,createdDateTime,file,folder,@microsoft.graph.downloadUrl').get();
+      .select(sel).get();
     return (resp.value || []).filter(function (x) { return x.file && !x.folder; }).map(function (x) {
       // O estado é codificado NO NOME do arquivo (description nao persiste de
       // forma confiavel em bibliotecas SharePoint). Marcadores:
@@ -156,9 +159,35 @@ module.exports = async function (context, req) {
     const siteId = await resolveSiteId(client);
     const folder = pastaDoUsuario(email);
 
+    // ===== VER (stream direto do PDF) — GET ?raw=1&id=<id> =====
+    // Caminho rapido: transmite os bytes do PDF (Content-Type application/pdf) em vez de
+    // base64 via JSON. O front abre a URL direto (window.open sincrono), sem bloqueio de
+    // popup e sem inflar em base64. Valida posse pelo caminho da pasta do usuario.
+    if (req.method === 'GET' && (req.query.raw === '1' || req.query.raw === 'true') && req.query.id) {
+      const id = String(req.query.id);
+      let item;
+      try {
+        item = await client.api('/sites/' + siteId + '/drive/items/' + id)
+          .select('id,name,size,parentReference,@microsoft.graph.downloadUrl').get();
+      } catch (e) { context.res = { status: 404, body: { error: 'Arquivo nao encontrado' } }; return; }
+      const parentPath = decodeURIComponent(((item.parentReference && item.parentReference.path) || ''));
+      if (parentPath.indexOf(pastaDoUsuario(email)) < 0) { context.res = { status: 403, body: { error: 'Arquivo fora da sua caixa' } }; return; }
+      const buf = await baixarPdfBuffer(client, siteId, { id: item.id, urlDownload: item['@microsoft.graph.downloadUrl'] });
+      if (!buf || !buf.length) { context.res = { status: 502, body: { error: 'Falha ao baixar PDF' } }; return; }
+      context.res = {
+        status: 200, isRaw: true, body: buf,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': 'inline; filename="' + sanitizeName(item.name) + '"',
+          'Cache-Control': 'private, max-age=120'
+        }
+      };
+      return;
+    }
+
     // ===== LISTAR =====
     if (req.method === 'GET') {
-      const arquivos = await listarArquivos(client, siteId, email);
+      const arquivos = await listarArquivos(client, siteId, email, { comUrl: false }); // tela nao usa downloadUrl
       context.res = { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: { ok: true, arquivos: arquivos } };
       return;
     }

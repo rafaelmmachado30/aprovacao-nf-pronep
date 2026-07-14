@@ -2066,7 +2066,7 @@ const menuItems = [
     }},
   { id: 'minhas-nfs',        label: 'Minhas NFs',                 icon: ICONS.minhas },
   { id: 'nova-nf',           label: 'Lançamento de Notas Fiscais',icon: ICONS.lancamento },
-  { id: 'caixa-entrada',     label: 'Caixa de Entrada (PDFs)',    icon: ICONS.caixa },
+  { id: 'caixa-entrada',     label: 'Agrupar PDFs',               icon: ICONS.caixa },
   { id: 'aprovadas',         label: 'Notas Aprovadas',            icon: ICONS.aprovadas },
   { id: 'rejeitadas',        label: 'Notas Rejeitadas',           icon: ICONS.rejeitadas },
   { id: 'rejeitadas-minhas', label: 'Notas Rejeitadas',           icon: ICONS.rejeitadas },
@@ -5343,8 +5343,8 @@ function renderCaixaView() {
   var cx = window._caixa || { arquivos: [], sel: [] };
   var arqs = cx.arquivos;
   var html = '';
-  html += '<h2 style="margin:0 0 4px;color:var(--azul-escuro);font-size:22px">Caixa de Entrada (PDFs)</h2>';
-  html += '<div class="view-sub">Suba os PDFs conforme chegam (nota, boleto, anexos). Selecione os avulsos da mesma conta e clique em <b>Combinar selecionados</b> — eles viram uma única NF unificada aqui no histórico, e os avulsos são removidos. Depois é só clicar em <b>Realizar lançamento</b> na NF unificada. Só você vê os seus arquivos.</div>';
+  html += '<h2 style="margin:0 0 4px;color:var(--azul-escuro);font-size:22px">Agrupar PDFs</h2>';
+  html += '<div class="view-sub">Suba os PDFs conforme chegam (nota, boleto, anexos). Selecione os avulsos da mesma conta e clique em <b>Agrupar selecionados</b> — eles viram uma única NF unificada aqui no histórico, e os avulsos são removidos. Depois é só clicar em <b>Realizar lançamento</b> na NF unificada. Só você vê os seus arquivos.</div>';
 
   html += '<div style="margin:10px 0 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
     '<input type="file" id="caixa-file" accept="application/pdf,.pdf" multiple style="display:none" onchange="caixaUpload(this)">' +
@@ -5418,7 +5418,7 @@ function renderCaixaView() {
   html += '</tbody></table></div>';
 
   html += '<div style="margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
-    '<button id="caixa-combinar-btn" class="btn btn-success" onclick="caixaCombinar(this)">Combinar selecionados (<span id="caixa-seln">0</span>)</button>' +
+    '<button id="caixa-combinar-btn" class="btn btn-success" onclick="caixaCombinar(this)">Agrupar selecionados (<span id="caixa-seln">0</span>)</button>' +
     '<span class="small muted">Dica: marque primeiro a <b>nota</b> e depois o <b>boleto</b> — a ordem da seleção é a ordem das páginas no PDF combinado.</span>' +
     '</div>';
   return html;
@@ -5471,31 +5471,16 @@ async function caixaExcluir(id) {
   } catch (e) { toast('Erro: ' + (e.message || e), 'error'); }
 }
 
-// Abre o PDF (avulso ou unificado) numa nova aba — baixa via backend e mostra
-// num blob, pra conferir se a unificação ficou correta. Não depende de downloadUrl.
-async function caixaVer(id, el) {
-  var txt = el ? el.textContent : null;
-  if (el) { el.textContent = 'Abrindo...'; }
+// Abre o PDF (avulso ou unificado) numa nova aba. Caminho rápido: aponta direto pro
+// stream do backend (GET ?raw=1) — abre SÍNCRONO no clique (sem bloqueio de popup) e
+// sem base64. O navegador renderiza o PDF nativamente e o cookie de sessão autentica.
+function caixaVer(id, el) {
   try {
-    var r = await fetch('/api/CaixaEntrada', {
-      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'baixar', id: id })
-    });
-    var data = await r.json().catch(function () { return {}; });
-    if (!r.ok || !data.fileBase64) { toast('Não consegui abrir o PDF: ' + ((data && data.error) || ('HTTP ' + r.status)), 'error'); return; }
-    var arr = String(data.fileBase64).split(',');
-    var bstr = atob(arr[1]);
-    var n = bstr.length;
-    var u8 = new Uint8Array(n);
-    while (n--) u8[n] = bstr.charCodeAt(n);
-    var blob = new Blob([u8], { type: 'application/pdf' });
-    var url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener');
-    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+    var url = '/api/CaixaEntrada?raw=1&id=' + encodeURIComponent(id);
+    var win = window.open(url, '_blank', 'noopener');
+    if (!win) { toast('Seu navegador bloqueou a aba. Permita pop-ups para este site.', 'error'); }
   } catch (e) {
     toast('Erro ao abrir o PDF: ' + (e.message || e), 'error');
-  } finally {
-    if (el && txt !== null) { el.textContent = txt; }
   }
 }
 
@@ -5506,19 +5491,49 @@ async function caixaCombinar(btn) {
   var cx = window._caixa; if (!cx) return;
   var ids = (cx.sel || []).slice();
   if (!ids.length) { toast('Selecione ao menos 1 PDF avulso.', 'error'); return; }
-  if (btn) { btn.disabled = true; btn.textContent = 'Combinando...'; }
+  // Modal de status — visível mesmo com muitos arquivos (o botão pode ficar fora da tela).
+  openModal(
+    '<div style="text-align:center;padding:26px 10px">' +
+      '<div style="width:46px;height:46px;border:4px solid var(--azul-bg);border-top-color:var(--azul-claro);border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 18px"></div>' +
+      '<h3 style="margin:0 0 6px;color:var(--azul-escuro)">Agrupando ' + ids.length + ' arquivo(s)...</h3>' +
+      '<div class="small muted" style="line-height:1.5">Estou unindo os PDFs numa única NF. Pode levar alguns segundos — não feche esta janela.</div>' +
+    '</div>');
+  if (btn) { btn.disabled = true; btn.textContent = 'Agrupando...'; }
   try {
     var r = await fetch('/api/CaixaEntrada', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'combinar', ids: ids })
     });
     var data = await r.json().catch(function () { return {}; });
-    if (!r.ok || !data.ok) { toast('Falha ao combinar: ' + ((data && data.error) || ('HTTP ' + r.status)), 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Combinar selecionados (' + ids.length + ')'; } return; }
-    toast('✓ ' + (data.qtdArquivos || ids.length) + ' arquivo(s) unificados numa só NF. Use "Realizar lançamento".', 'success');
+    if (!r.ok || !data.ok) {
+      openModal(
+        '<span class="close-x" onclick="closeModal()">×</span>' +
+        '<div style="text-align:center;padding:20px 10px">' +
+          '<div style="font-size:32px;margin-bottom:8px">⚠️</div>' +
+          '<h3 style="margin:0 0 6px;color:var(--vermelho)">Falha ao agrupar</h3>' +
+          '<div class="small muted">' + escHtml((data && data.error) || ('HTTP ' + r.status)) + '</div>' +
+          '<button class="btn btn-secondary" style="margin-top:16px" onclick="closeModal()">Fechar</button>' +
+        '</div>');
+      if (btn) { btn.disabled = false; btn.textContent = 'Agrupar selecionados (' + ids.length + ')'; }
+      return;
+    }
+    // Sucesso: mostra rapidinho e recarrega.
+    openModal(
+      '<div style="text-align:center;padding:24px 10px">' +
+        '<div style="font-size:34px;margin-bottom:8px">✅</div>' +
+        '<h3 style="margin:0 0 6px;color:var(--verde)">' + (data.qtdArquivos || ids.length) + ' arquivo(s) agrupados</h3>' +
+        '<div class="small muted">Uma NF unificada foi criada. Use "Realizar lançamento" na lista.</div>' +
+      '</div>');
+    setTimeout(function () { closeModal(); }, 1200);
     await carregarCaixa();
   } catch (e) {
-    toast('Erro: ' + (e.message || e), 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Combinar selecionados'; }
+    openModal(
+      '<span class="close-x" onclick="closeModal()">×</span>' +
+      '<div style="text-align:center;padding:20px 10px"><div style="font-size:32px;margin-bottom:8px">⚠️</div>' +
+      '<h3 style="margin:0 0 6px;color:var(--vermelho)">Erro ao agrupar</h3>' +
+      '<div class="small muted">' + escHtml(e.message || String(e)) + '</div>' +
+      '<button class="btn btn-secondary" style="margin-top:16px" onclick="closeModal()">Fechar</button></div>');
+    if (btn) { btn.disabled = false; btn.textContent = 'Agrupar selecionados (' + ids.length + ')'; }
   }
 }
 
@@ -5527,16 +5542,31 @@ async function caixaCombinar(btn) {
 async function caixaRealizarLancamento(id, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Abrindo...'; }
   try {
-    var r = await fetch('/api/CaixaEntrada', {
-      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'baixar', id: id })
-    });
-    var data = await r.json().catch(function () { return {}; });
-    if (!r.ok || !data.fileBase64) { toast('Falha ao abrir a NF: ' + ((data && data.error) || ('HTTP ' + r.status)), 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Realizar lançamento'; } return; }
+    // Caminho rápido: baixa os BYTES do PDF (arraybuffer) do stream — sem base64/JSON.
+    var r = await fetch('/api/CaixaEntrada?raw=1&id=' + encodeURIComponent(id), { credentials: 'include' });
+    if (!r.ok) {
+      var d = await r.json().catch(function () { return {}; });
+      toast('Falha ao abrir a NF: ' + ((d && d.error) || ('HTTP ' + r.status)), 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Realizar lançamento'; }
+      return;
+    }
+    var cd = r.headers.get('Content-Disposition') || '';
+    var mFn = /filename="?([^"]+)"?/i.exec(cd);
+    var fileName = (mFn && mFn[1]) || 'combinada.pdf';
+    var buf = await r.arrayBuffer();
+    var file = new File([buf], fileName, { type: 'application/pdf' });
     // Marca para o hook de pós-lançamento (submitNF) saber qual item marcar como lançado.
     window._caixaLancandoId = id;
-    window._caixaLancandoFile = data.fileName || null;
-    caixaLancarCombinado(data.fileName, data.fileBase64);
+    window._caixaLancandoFile = fileName;
+    window.fakeFile = file;
+    window.selectedFile = file;
+    showView('nova-nf');
+    setTimeout(function () {
+      var fd = document.getElementById('file-drop'); if (fd) fd.classList.add('has-file');
+      var m = document.getElementById('fd-main'); if (m) { m.textContent = '✓ ' + file.name; m.style.color = ''; }
+      var s = document.getElementById('fd-sub'); if (s) s.textContent = (file.size / 1024 / 1024).toFixed(2) + ' MB · NF unificada da Caixa de Entrada';
+      toast('NF unificada pronta. Preencha os dados e envie — ela será marcada como lançada.', 'success');
+    }, 150);
   } catch (e) {
     toast('Erro: ' + (e.message || e), 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'Realizar lançamento'; }
