@@ -20,16 +20,8 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const { ClientSecretCredential } = require('@azure/identity');
-    const { Client } = require('@microsoft/microsoft-graph-client');
-    const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
-    const credential = new ClientSecretCredential(
-      process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
-    );
-    const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-      scopes: ['https://graph.microsoft.com/.default']
-    });
-    const client = Client.initWithMiddleware({ authProvider });
+    const { getGraphClient } = require('../shared/graph');
+    const client = getGraphClient();
 
     const host = process.env.SHAREPOINT_CONTRATOS_HOSTNAME || 'pronepadmin.sharepoint.com';
     const sitePath = process.env.SHAREPOINT_CONTRATOS_PATH || '/sites/CONTRATOS-SERVICOS-CONTRATOS';

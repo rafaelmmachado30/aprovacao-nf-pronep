@@ -8,9 +8,7 @@
  * RBAC: anonymous mas com Sites.Manage.All do App Reg. Recomendado rodar apenas 1x.
  */
 require('isomorphic-fetch');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 
 module.exports = async function (context, req) {
   // C5: migracao de schema (cria colunas) — restrito a admin.
@@ -18,13 +16,7 @@ module.exports = async function (context, req) {
   if (!(await requireAdmin(context, req))) return;
   const out = { timestamp: new Date().toISOString(), colunasCriadas: [], colunasJaExistiam: [], erros: [] };
   try {
-    const credential = new ClientSecretCredential(
-      process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
-    );
-    const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-      scopes: ['https://graph.microsoft.com/.default']
-    });
-    const client = Client.initWithMiddleware({ authProvider });
+    const client = getGraphClient();
 
     const siteResp = await client.api('/sites/' + process.env.SHAREPOINT_SITE_HOSTNAME + ':' + process.env.SHAREPOINT_SITE_PATH).get();
     const siteId = siteResp.id;

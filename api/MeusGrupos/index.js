@@ -17,10 +17,7 @@
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { lerMapaTelas, telasLiberadasPara } = require('../shared/acessoTelas');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 
 const GROUP_TO_ROLE = {
   '01d540d1-8596-42d0-9a20-de5c361c7c96': 'submitter',
@@ -136,14 +133,8 @@ module.exports = async function (context, req) {
     const principal = { userDetails: user.email, userId: user.oid, claims: (user.claims ? Object.entries(user.claims).map(function(kv){ return { typ: kv[0], val: String(kv[1]) }; }) : []) };
     diag.userKeyKind = userKeyKind;
 
-    diag.step = 'credential';
-    const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-    const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-      scopes: ['https://graph.microsoft.com/.default']
-    });
-
     diag.step = 'graph_client';
-    const client = Client.initWithMiddleware({ authProvider });
+    const client = getGraphClient();
 
     diag.step = 'graph_call';
     const result = await client
