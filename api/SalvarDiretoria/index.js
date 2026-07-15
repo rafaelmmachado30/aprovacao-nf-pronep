@@ -12,37 +12,9 @@
 
 require('isomorphic-fetch');
 const { resolveAuthz } = require('../shared/authz');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient, resolveSiteAndList } = require('../shared/graph');
 
 const LIST_NAME = 'PRONEP-NF-Diretorias';
-const cache = { siteId: null, listId: null };
-
-function getGraphClient() {
-  const credential = new ClientSecretCredential(
-    process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
-  );
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
-
-async function resolveSiteAndList(client) {
-  if (cache.siteId && cache.listId) return cache;
-  const host = process.env.SHAREPOINT_SITE_HOSTNAME;
-  const path = process.env.SHAREPOINT_SITE_PATH;
-  if (!host || !path) throw new Error('SHAREPOINT_* obrigatorias');
-  const siteResp = await client.api('/sites/' + host + ':' + path).get();
-  cache.siteId = siteResp.id;
-  const listsResp = await client.api('/sites/' + cache.siteId + '/lists')
-    .filter("displayName eq '" + LIST_NAME + "'").get();
-  if (!listsResp.value || !listsResp.value.length) throw new Error("Lista '" + LIST_NAME + "' nao encontrada");
-  cache.listId = listsResp.value[0].id;
-  return cache;
-}
 
 module.exports = async function (context, req) {
   try {
@@ -66,7 +38,7 @@ module.exports = async function (context, req) {
     }
 
     const client = getGraphClient();
-    const { siteId, listId } = await resolveSiteAndList(client);
+    const { siteId, listId } = await resolveSiteAndList(client, LIST_NAME);
 
     // field_3 = Email do aprovador · field_4 = Nome do aprovador
     await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + id + '/fields')

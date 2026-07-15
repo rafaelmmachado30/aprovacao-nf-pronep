@@ -14,47 +14,15 @@
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient, resolveSiteAndList } = require('../shared/graph');
 
 const LIST_NAME = 'PRONEP-NF-Fornecedores';
-const cache = { siteId: null, listId: null };
-
-async function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) throw new Error('AAD_* incompletas');
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
 
 async function getColMap(client, siteId, listId) {
   const resp = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').get();
   const map = {};
   for (const c of (resp.value || [])) { if (c.displayName && c.name) map[c.displayName] = c.name; }
   return map;
-}
-
-async function resolveSiteAndList(client) {
-  if (cache.siteId && cache.listId) return cache;
-  const hostname = process.env.SHAREPOINT_SITE_HOSTNAME;
-  const sitePath = process.env.SHAREPOINT_SITE_PATH;
-  const siteResp = await client.api('/sites/' + hostname + ':' + sitePath).get();
-  cache.siteId = siteResp.id;
-  const listsResp = await client.api('/sites/' + cache.siteId + '/lists')
-    .filter("displayName eq '" + LIST_NAME + "'")
-    .get();
-  if (!listsResp.value || !listsResp.value.length) {
-    throw new Error("Lista '" + LIST_NAME + "' nao encontrada");
-  }
-  cache.listId = listsResp.value[0].id;
-  return cache;
 }
 
 function onlyDigits(s) { return String(s || '').replace(/\D/g, ''); }
@@ -108,7 +76,7 @@ module.exports = async function (context, req) {
     const client = await getGraphClient();
 
     diag.step = 'resolve_site';
-    const { siteId, listId } = await resolveSiteAndList(client);
+    const { siteId, listId } = await resolveSiteAndList(client, LIST_NAME);
     diag.siteId = siteId; diag.listId = listId;
 
     // Verifica se ja existe (mesmo documento) pra evitar duplicata
