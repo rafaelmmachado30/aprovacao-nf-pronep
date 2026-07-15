@@ -84,7 +84,7 @@ async function computar(client, siteId, listNotasId, invColMap, opts) {
   const hojeBRT = new Date(agoraBRT.getUTCFullYear(), agoraBRT.getUTCMonth(), agoraBRT.getUTCDate());
 
   const decisoes = await lerDecisoes(client, siteId, null);
-  if (!decisoes.listId) return { mes: mesKeyAlvo, total: 0, resumo: {}, contas: [] };
+  if (!decisoes.listId) return { mes: mesKeyAlvo, total: 0, resumo: {}, contas: [], diretoriasDisponiveis: [], listaDecisoesExiste: false };
   let conciliacoes = {};
   try { conciliacoes = await lerConciliacoes(client, siteId, null); } catch (e) { conciliacoes = {}; }
 
@@ -110,8 +110,10 @@ async function computar(client, siteId, listNotasId, invColMap, opts) {
   }
 
   const nfsPorChave = {};
+  const diretoriasSet = {};
   for (const item of all) {
     const n = _normalizeItem(item, invColMap);
+    if (n.Diretoria) diretoriasSet[n.Diretoria] = true;
     const d = _dataVenc(n);
     if (!d) continue;
     const mesKey = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
@@ -155,7 +157,12 @@ async function computar(client, siteId, listNotasId, invColMap, opts) {
       chave: d.chave, cnpj: d.cnpj, fornecedor: d.fornecedor || nomeForn(d.cnpj, ''),
       diretoria: d.diretoria, unidade: d.unidade,
       vencEsperado: vencEsperado.toISOString().substring(0, 10),
-      diasUteisAteVenc: diasUteis, valorEstimado: d.valorEstimado || null, status: status
+      diaVencimento: d.diaVencimento || null,
+      diasUteisAteVenc: diasUteis, valorEstimado: d.valorEstimado || null, status: status,
+      nf: nf
+        ? { id: nf.id, numero: nf.numero, status: nf.status, valor: nf.valor, vencimento: nf.vencimento }
+        : (link ? { id: link.notaId, numero: link.numero, status: link.status, valor: link.valor, vencimento: null } : null),
+      conciliada: link ? { numero: link.numero, por: link.por, em: link.em } : null
     };
   });
 
@@ -169,7 +176,8 @@ async function computar(client, siteId, listNotasId, invColMap, opts) {
   const resumo = { atrasada: 0, risco: 0, aguardando: 0, lancada: 0, conciliada: 0, aprovada: 0, integrada: 0 };
   contas.forEach(function (c) { if (resumo[c.status] != null) resumo[c.status]++; });
 
-  return { mes: mesKeyAlvo, total: contas.length, resumo: resumo, contas: contas };
+  const diretoriasDisponiveis = Object.keys(diretoriasSet).sort(function (a, b) { return a.localeCompare(b); });
+  return { mes: mesKeyAlvo, total: contas.length, resumo: resumo, contas: contas, diretoriasDisponiveis: diretoriasDisponiveis, listaDecisoesExiste: true };
 }
 
 module.exports = { computar };
