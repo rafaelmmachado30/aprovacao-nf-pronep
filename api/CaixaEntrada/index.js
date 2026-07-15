@@ -17,34 +17,12 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client, ResponseType } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { ResponseType } = require('@microsoft/microsoft-graph-client');
+const { getGraphClient, resolveSiteId } = require('../shared/graph');
 
 const BASE_FOLDER = 'Notas Fiscais/Caixa de Entrada';
 const MAX_UPLOAD = 8 * 1024 * 1024;      // 8MB por arquivo
 const MAX_COMBINADO = 12 * 1024 * 1024;  // 12MB combinado
-const _cache = { siteId: null };
-
-function getGraphClient() {
-  const credential = new ClientSecretCredential(
-    process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
-  );
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
-
-async function resolveSiteId(client) {
-  if (_cache.siteId) return _cache.siteId;
-  const host = process.env.SHAREPOINT_SITE_HOSTNAME;
-  const path = process.env.SHAREPOINT_SITE_PATH;
-  if (!host || !path) throw new Error('SHAREPOINT_* incompletas');
-  const siteResp = await client.api('/sites/' + host + ':' + path).get();
-  _cache.siteId = siteResp.id;
-  return _cache.siteId;
-}
 
 function slugEmail(email) {
   return String(email || 'anon').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'anon';

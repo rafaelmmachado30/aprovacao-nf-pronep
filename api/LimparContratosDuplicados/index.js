@@ -14,32 +14,10 @@
 
 require('isomorphic-fetch');
 const { requireAdmin } = require('../shared/authz');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient, resolveSiteId } = require('../shared/graph');
 
 const LIST_CONTRATOS = 'PRONEP-NF-Contratos';
 
-function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) throw new Error('AAD_* incompletas');
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
-
-async function resolveSite(client) {
-  const host = process.env.SHAREPOINT_SITE_HOSTNAME;
-  const path = process.env.SHAREPOINT_SITE_PATH;
-  if (!host || !path) throw new Error('SHAREPOINT_* incompletas');
-  const siteResp = await client.api('/sites/' + host + ':' + path).get();
-  return siteResp.id;
-}
 
 module.exports = async function (context, req) {
   try {
@@ -48,7 +26,7 @@ module.exports = async function (context, req) {
 
     const aplicar = String((req.query && req.query.aplicar) || '') === 'true';
     const client = getGraphClient();
-    const siteId = await resolveSite(client);
+    const siteId = await resolveSiteId(client);
 
     const lists = await client.api('/sites/' + siteId + '/lists')
       .filter("displayName eq '" + LIST_CONTRATOS + "'").get();

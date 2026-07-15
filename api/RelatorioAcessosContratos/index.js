@@ -22,33 +22,11 @@ require('isomorphic-fetch');
 const { requireAdmin } = require('../shared/authz');
 const { lerMapaAcessos, folderParaRole } = require('../shared/acessoContratos');
 const { ROLE_LABELS, roleParaGrupoId } = require('../shared/userRoles');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient, resolveSiteId } = require('../shared/graph');
 
 const LIST_CONTRATOS = 'PRONEP-NF-Contratos';
 const LIST_DIR = 'PRONEP-NF-Diretorias';
 
-function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) throw new Error('AAD_* incompletas');
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
-
-async function resolveSite(client) {
-  const host = process.env.SHAREPOINT_SITE_HOSTNAME;
-  const path = process.env.SHAREPOINT_SITE_PATH;
-  if (!host || !path) throw new Error('SHAREPOINT_* incompletas');
-  const siteResp = await client.api('/sites/' + host + ':' + path).get();
-  return siteResp.id;
-}
 
 async function resolveListId(client, siteId, displayName) {
   const lists = await client.api('/sites/' + siteId + '/lists')
@@ -125,7 +103,7 @@ module.exports = async function (context, req) {
     if (!authz) return;
 
     const client = getGraphClient();
-    const siteId = await resolveSite(client);
+    const siteId = await resolveSiteId(client);
     const pastas = await descobrirPastas(client, siteId);
     const mapa = await lerMapaAcessos(client, siteId, null);
     const roleKeys = Object.keys(ROLE_LABELS);

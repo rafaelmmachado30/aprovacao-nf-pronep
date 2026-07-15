@@ -20,34 +20,7 @@ const { getUserRoles, ROLE_LABELS } = require('../shared/userRoles');
 const { isAdminEmail } = require('../shared/authz');
 const { salvarDecisao, _norm } = require('../shared/recorrentes');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
-
-const cache = { siteId: null };
-
-function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) throw new Error('AAD_* incompletas');
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
-
-async function resolveSiteId(client) {
-  if (cache.siteId) return cache.siteId;
-  const host = process.env.SHAREPOINT_SITE_HOSTNAME;
-  const path = process.env.SHAREPOINT_SITE_PATH;
-  if (!host || !path) throw new Error('SHAREPOINT_* incompletas');
-  const siteResp = await client.api('/sites/' + host + ':' + path).get();
-  cache.siteId = siteResp.id;
-  return cache.siteId;
-}
+const { getGraphClient, resolveSiteId } = require('../shared/graph');
 
 function readClientPrincipalRoles(req) {
   const header = req.headers && req.headers['x-ms-client-principal'];
