@@ -77,3 +77,25 @@ e migrar esses resolvers depois.
 `shared/graph.js` já está no `main`/produção. Qualquer endpoint migrado só passa
 a *usar* um módulo já existente — sem risco de "module not found". Mas um endpoint
 migrado NUNCA deve ir a produção sem o `shared/graph.js` estar lá antes.
+
+## Cold start (P2.6) e o aquecedor
+
+**Sintoma:** após um deploy (ou após ~20 min de ociosidade), a primeira carga do
+sistema leva ~40s; recarregando (F5) volta a 2-3s. Diagnosticado em 15/07/2026.
+
+**Causa:** o Static Web Apps desliga o container das Functions quando fica ocioso.
+A 1ª requisição precisa "acordar" a plataforma e carregar o `node_modules`. É da
+plataforma — **não** da consolidação do `shared/graph.js` (a migração, aliás,
+reduziu trabalho: o `siteId` resolve uma vez por processo). Confirmado porque
+nenhum endpoint alterado está no caminho crítico do Dashboard, e o F5 fica rápido.
+
+**Mitigação:** `api/Aquecer` (endpoint mínimo, sem deps pesadas, sem efeito
+colateral, auth por `X-Alerta-Secret`) + cron `.github/workflows/aquecer.yml`
+(10/10min, 7h-20h BRT, seg-sex) que mantém a instância quente em horário comercial.
+Feito deliberadamente mínimo pelo histórico de "tela branca" causada por um warm-up
+antigo. Para desligar: remover o workflow. O impacto só se confirma em produção
+(depende do container real do SWA) — medir abrindo o sistema após ociosidade.
+
+**Refinamento futuro (não feito):** para eliminar o cold start de vez, mover as
+Functions para um plano dedicado com "Always On" (P3.4). Custa mais; o aquecedor
+resolve o caso prático (o "pega-de-manhã") a custo ~zero.
