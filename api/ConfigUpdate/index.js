@@ -10,43 +10,11 @@ require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
 const { resolveAuthz } = require('../shared/authz');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient, resolveSiteAndList } = require('../shared/graph');
 
 const LIST_NAME = 'PRONEP-NF-Config';
 const CONFIG_TITLE = 'global';
 const ADMIN_GROUP_ID = process.env.ADMIN_GROUP_ID || ''; // opcional, se quiser validar por grupo
-const cache = { siteId: null, listId: null };
-
-async function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) throw new Error('AAD_* incompletas');
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
-
-async function resolveSiteAndList(client) {
-  if (cache.siteId && cache.listId) return cache;
-  const host = process.env.SHAREPOINT_SITE_HOSTNAME;
-  const path = process.env.SHAREPOINT_SITE_PATH;
-  const siteResp = await client.api('/sites/' + host + ':' + path).get();
-  cache.siteId = siteResp.id;
-  const lists = await client.api('/sites/' + cache.siteId + '/lists')
-    .filter("displayName eq '" + LIST_NAME + "'")
-    .get();
-  if (!lists.value || !lists.value.length) {
-    throw new Error("Lista '" + LIST_NAME + "' nao encontrada");
-  }
-  cache.listId = lists.value[0].id;
-  return cache;
-}
 
 async function findConfigItem(client, siteId, listId) {
   // SP nao deixa filtrar Title sem indice. Lista todos (lista tem 1 ou 2 items) e filtra local.
@@ -109,7 +77,7 @@ module.exports = async function (context, req) {
     }
 
     const client = await getGraphClient();
-    const { siteId, listId } = await resolveSiteAndList(client);
+    const { siteId, listId } = await resolveSiteAndList(client, LIST_NAME);
     const item = await findConfigItem(client, siteId, listId);
 
     const configJsonStr = JSON.stringify(config);
