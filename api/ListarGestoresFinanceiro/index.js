@@ -10,24 +10,9 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 
 const DEFAULT_GROUP_ID = 'c2a73d16-4659-4b3c-93a1-0c0fbfaaaa96'; // PRONEP-NF-Financeiro-Gestao (autorizados a aprovar vencimento fora do prazo)
-
-async function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) throw new Error('AAD_* incompletas');
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
 
 module.exports = async function (context, req) {
   try {

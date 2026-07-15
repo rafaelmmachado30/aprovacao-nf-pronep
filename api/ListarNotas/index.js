@@ -14,42 +14,15 @@ const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
 const { isAdminEmail } = require('../shared/authz');
 const { lerMapaTelas, telasLiberadasPara } = require('../shared/acessoTelas');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient, resolveSiteAndList } = require('../shared/graph');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
-const cache = { siteId: null, listId: null, colMap: null, invColMap: null };
+// Cache do colMap desta lista (siteId/listId agora vem do shared/graph).
+const cache = { colMap: null, invColMap: null };
 // Cache do indice de fornecedores (CNPJ -> {razao,fantasia}). Dado de referencia que
 // muda raramente — evita recarregar a lista inteira de fornecedores a cada request.
 const _fornCache = { byDoc: null, ts: 0 };
 const _FORN_TTL = 5 * 60 * 1000;
-
-async function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) throw new Error('AAD_* incompletas');
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
-
-async function resolveSiteAndList(client) {
-  if (cache.siteId && cache.listId) return cache;
-  const host = process.env.SHAREPOINT_SITE_HOSTNAME;
-  const path = process.env.SHAREPOINT_SITE_PATH;
-  if (!host || !path) throw new Error('SHAREPOINT_* incompletas');
-  const siteResp = await client.api(`/sites/${host}:${path}`).get();
-  cache.siteId = siteResp.id;
-  const listsResp = await client.api(`/sites/${cache.siteId}/lists`).filter(`displayName eq '${LIST_NOTAS}'`).get();
-  if (!listsResp.value || !listsResp.value.length) throw new Error(`Lista ${LIST_NOTAS} nao encontrada`);
-  cache.listId = listsResp.value[0].id;
-  return cache;
-}
 
 async function getColumnMap(client, siteId, listId) {
   if (cache.colMap) return cache.colMap;
@@ -120,7 +93,7 @@ module.exports = async function (context, req) {
 
     diag.step = 'graph';
     const client = await getGraphClient();
-    const { siteId, listId } = await resolveSiteAndList(client);
+    const { siteId, listId } = await resolveSiteAndList(client, LIST_NOTAS);
 
     diag.step = 'columns';
     await getColumnMap(client, siteId, listId);

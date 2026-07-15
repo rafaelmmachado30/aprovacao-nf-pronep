@@ -20,29 +20,9 @@
 
 require('isomorphic-fetch');
 const { getUser } = require('../shared/auth');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient, resolveSiteAndList } = require('../shared/graph');
 
 const LIST_NAME = 'PRONEP-NF-Fornecedores';
-
-// Cache do site/list id em memoria (Functions reaproveita instancia)
-const cache = { siteId: null, listId: null };
-
-async function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error('App Settings AAD_* incompletas');
-  }
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
 
 // Cache colMap (displayName -> internalName) pra esta lista
 const colMapCache = { map: null, ts: 0 };
@@ -60,33 +40,6 @@ async function getColMap(client, siteId, listId) {
   return map;
 }
 
-async function resolveSiteAndList(client) {
-  if (cache.siteId && cache.listId) return cache;
-
-  const host = process.env.SHAREPOINT_SITE_HOSTNAME;
-  const path = process.env.SHAREPOINT_SITE_PATH;
-  if (!host || !path) {
-    throw new Error('App Settings SHAREPOINT_SITE_HOSTNAME e SHAREPOINT_SITE_PATH obrigatorias');
-  }
-
-  // Resolve site
-  const siteResp = await client
-    .api(`/sites/${host}:${path}`)
-    .get();
-  cache.siteId = siteResp.id;
-
-  // Resolve list por nome (displayName)
-  const listsResp = await client
-    .api(`/sites/${cache.siteId}/lists`)
-    .filter(`displayName eq '${LIST_NAME}'`)
-    .get();
-  if (!listsResp.value || !listsResp.value.length) {
-    throw new Error(`Lista '${LIST_NAME}' nao encontrada no site`);
-  }
-  cache.listId = listsResp.value[0].id;
-  return cache;
-}
-
 module.exports = async function (context, req) {
   const diag = { step: 'start' };
   try {
@@ -98,7 +51,7 @@ module.exports = async function (context, req) {
     const client = await getGraphClient();
 
     diag.step = 'resolve_site';
-    const { siteId, listId } = await resolveSiteAndList(client);
+    const { siteId, listId } = await resolveSiteAndList(client, LIST_NAME);
     diag.siteId = siteId; diag.listId = listId;
 
     diag.step = 'fetch_columns';
