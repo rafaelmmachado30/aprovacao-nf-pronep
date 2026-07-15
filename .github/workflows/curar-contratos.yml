@@ -1,0 +1,62 @@
+name: Curar Contratos (background)
+
+# Curadoria de contratos em BACKGROUND, no runner (sem o teto de ~45s do Static Web Apps).
+# Destrava Sonnet/Opus e elimina a dependencia do navegador aberto (P1.4).
+#
+# Sob demanda (manual). O runner:
+#   1. chama /api/CurarContratos?prep=1  (monta textos)
+#   2. chama /api/CurarContratos?lista=1 (pega textos)
+#   3. cura cada doc AQUI (Anthropic, sem cap de tempo)
+#   4. chama /api/CurarContratos?salvar=1 (upload do curado)
+#
+# Secrets necessarios no repo:
+#   - CURADORIA_SECRET   (mesmo valor da App Setting CURADORIA_SECRET no Azure)
+#   - ANTHROPIC_API_KEY  (chave da Anthropic; a curadoria roda no runner)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: 'Modelo de curadoria'
+        required: true
+        default: 'sonnet'
+        type: choice
+        options: [sonnet, opus, haiku]
+      operadoras:
+        description: 'Filtro por operadora(s), separadas por virgula (vazio = todo o Comercial)'
+        required: false
+        default: ''
+      limit:
+        description: 'Curar apenas os N primeiros (vazio = todos). Util para teste.'
+        required: false
+        default: ''
+
+concurrency:
+  group: curar-contratos
+  cancel-in-progress: false
+
+jobs:
+  curar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330  # jobs do GitHub Actions vao ate 6h; damos folga p/ Sonnet/Opus
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Instala deps da API (reusa o curar() do app)
+        run: cd api && npm ci
+
+      - name: Rodar curadoria
+        env:
+          BASE_URL: https://purple-forest-09588fe10.7.azurestaticapps.net
+          CURADORIA_SECRET: ${{ secrets.CURADORIA_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MODEL: ${{ github.event.inputs.model }}
+          OPERADORAS: ${{ github.event.inputs.operadoras }}
+          LIMIT: ${{ github.event.inputs.limit }}
+        run: node scripts/curar-runner.mjs
