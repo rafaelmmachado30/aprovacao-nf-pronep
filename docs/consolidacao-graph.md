@@ -29,7 +29,8 @@ Chamadas antigas `await getGraphClient()` continuam válidas.
 
 ## Placar
 
-**39 de 52 migrados (75%)** — lotes 1 a 4, já em produção.
+**CONCLUÍDA: 56 endpoints migrados.** Todo endpoint que fala com o Graph usa o
+`shared/graph.js`. Único não migrado: `ContratosDebug` (intencional — ver abaixo).
 
 | Lote | Endpoints | Padrão |
 |---|---|---|
@@ -37,30 +38,28 @@ Chamadas antigas `await getGraphClient()` continuam válidas.
 | 2 | ConfigUpdate, SalvarDiretoria, AdicionarFornecedor, EditarFornecedor, MarcarProcessado (completo); AbrirPdfDaNota, AlertaDiario, RejeitarNota (só getGraphClient) | misto |
 | 3 | AprovacaoViaLink, CriarListaContratos, CriarListaRecorrentes, DiagListaContratos, ListarMembrosGrupo, MigrarColunaAlinhamentoFinanceiro, MigrarColunaNFAuto, PushUnsubscribe, ReatribuirPendentes, AlertaContratosDiario | só getGraphClient |
 | 4 | PushSubscribe, ConciliarRecorrente, GetControleAcessos, GetControleAcessosTelas, LimparContratosDuplicados, RelatorioAcessosContratos, SalvarControleAcessos, SalvarControleAcessosTelas, CaixaEntrada, SalvarRecorrente | completo (resolveSiteId) |
+| 5 | AlertaRecorrentes, ChecklistRecorrentes, IntegrarOmie, ListarRecorrentes, MarcarContratosNotificados, MarcarNFsRejeitadasVistas | só getGraphClient (bundle) |
+| 6 | AbrirContrato, AtualizarStatusContrato, CancelarFornecedor, ListarContratos, SanNotificacoesPendentes, PostNota, AprovarNota (multi-lista/críticos); MeusGrupos, DiagListaNF, MigrarColunasURL, ContratosInspecionarPasta (client inline) | só getGraphClient |
 
-## Restam 13, por dificuldade
+## O que ficou de fora (intencional, opcional)
 
-### Cat.2 — resolver "bundle" (só trocar `getGraphClient`, mantendo resolver local)
-O resolver local retorna mais que `{siteId,listId}` (ex.: `invColMap`, `driveId`),
-então NÃO é drop-in do `resolveSiteAndList`. Migra-se só o `getGraphClient`.
-- `AlertaRecorrentes` → `{siteId, listNotasId, invColMap}`
-- `ChecklistRecorrentes` → `{siteId, listNotasId}`
-- `IntegrarOmie` → `{siteId, driveId, listNotasId}`
-- `ListarRecorrentes` → `{siteId, listNotasId}`
-- `MarcarContratosNotificados` → `{siteId, listId, colMap}`
-- `MarcarNFsRejeitadasVistas` → `{siteId, listId, colMap}`
+### `ContratosDebug` — NÃO migrar
+É um endpoint de diagnóstico que testa `require()` dos módulos do Graph (tem um
+array `tries` e constrói o client pra provar que os módulos carregam). Migrar
+removeria o propósito dele. Deixar como está.
 
-### Multi-lista — precisam de helper novo no shared
-Resolvem 2+ listas de uma vez (`resolveSiteELists`/`resolveSiteEListas`).
-Opção A: adicionar um helper no `shared/graph.js` que resolve várias listas de
-uma vez. Opção B: migrar só o `getGraphClient` e deixar o resolver local.
-- `ListarContratos`, `AbrirContrato`, `AtualizarStatusContrato`,
-  `CancelarFornecedor`, `SanNotificacoesPendentes`
+### 6 módulos `shared/` com `getGraphClient` próprio — deixar por ora
+Infraestrutura central (usada por vários endpoints), blast radius alto e ganho
+marginal. Se um dia, migrar **um a um** com revisão dedicada — não em lote.
+- `sol.js`, `email.js`, `auditLog.js`, `solHistorico.js`, `teamsActivity.js`,
+  `contratos.js`
 
-### Críticos — branch isolada e revisão dedicada
-- `PostNota` — `resolveSiteAndDrive` (upload de PDF para o drive)
-- `AprovarNota` — grava watermark APROVADO e MOVE o PDF de pasta; é o coração do
-  fluxo. Migrar só o `getGraphClient` primeiro; não tocar na lógica de arquivo.
+### Refinamento opcional: helper multi-lista no shared
+5 endpoints (contratos) resolvem 2+ listas de uma vez com resolvers locais
+(`resolveSiteELists`/`EListas`), preservados na migração (só o `getGraphClient`
+foi trocado). Se quiser eliminar essa duplicação de resolução de lista, dá pra
+adicionar um helper `resolveSiteAndLists(client, [nomes])` no `shared/graph.js`
+e migrar esses resolvers depois.
 
 ## Processo de migração (receita validada)
 
