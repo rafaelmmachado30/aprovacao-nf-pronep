@@ -15,24 +15,11 @@
 
 require('isomorphic-fetch');
 const { resolveAuthz } = require('../shared/authz');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 const PENDENTES = ['Lancada', 'EmAprovacao', 'Pendente'];
 const cache = { siteId: null, listId: null, disp2int: null, int2disp: null };
-
-function getGraphClient() {
-  const credential = new ClientSecretCredential(
-    process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
-  );
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
 
 async function resolve(client) {
   if (cache.siteId && cache.listId && cache.disp2int) return cache;

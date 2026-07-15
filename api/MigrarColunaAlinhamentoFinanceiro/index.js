@@ -12,26 +12,13 @@
  */
 
 require('isomorphic-fetch');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 
 const LIST_NAME = 'PRONEP-NF-NotasFiscais';
 const COLS = [
   { name: 'AlinhouFinanceiro',        def: { boolean: {} } },
   { name: 'GestorFinanceiroAlinhado', def: { text: {} } }
 ];
-
-async function getGraphClient() {
-  const credential = new ClientSecretCredential(
-    process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
-  );
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
 
 function readClientPrincipal(req) {
   const h = req.headers && req.headers['x-ms-client-principal'];

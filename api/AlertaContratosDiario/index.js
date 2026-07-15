@@ -29,9 +29,7 @@
  */
 
 require('isomorphic-fetch');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 
 const LIST_CONTRATOS = 'PRONEP-NF-Contratos';
 const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
@@ -48,13 +46,6 @@ const GRUPO_JURIDICO_OID = '5aa9fc6b-900d-40eb-861d-8bbf72499da1';
 // Em mais 30 (30 restantes) → alerta_30.
 const JANELAS = [30, 60, 90];
 
-function getGraphClient() {
-  const credential = new ClientSecretCredential(
-    process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
-  );
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, { scopes: ['https://graph.microsoft.com/.default'] });
-  return Client.initWithMiddleware({ authProvider });
-}
 
 function diasParaVencer(dataFim) {
   if (!dataFim) return null;
