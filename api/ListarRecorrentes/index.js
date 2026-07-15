@@ -22,10 +22,7 @@ const { getUser } = require('../shared/auth');
 const { getUserRoles, ROLE_LABELS } = require('../shared/userRoles');
 const { isAdminEmail } = require('../shared/authz');
 const { lerDecisoes, chaveRecorrente, _norm } = require('../shared/recorrentes');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 const LIST_FORN = 'PRONEP-NF-Fornecedores';
@@ -36,17 +33,6 @@ const _FORN_TTL = 5 * 60 * 1000;
 const JANELA_MESES_DEFAULT = 6;
 const MIN_MESES = 3; // aparece em >= 3 dos ultimos N meses => recorrente
 
-function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) throw new Error('AAD_* incompletas');
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
 
 async function resolveSite(client) {
   if (cache.siteId && cache.listNotasId) return cache;

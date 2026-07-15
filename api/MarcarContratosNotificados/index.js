@@ -16,22 +16,12 @@
  */
 
 require('isomorphic-fetch');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 const { getUser } = require('../shared/auth');
 
 const LIST_CONTRATOS = 'PRONEP-NF-Contratos';
 
 const _cache = { siteId: null, listId: null, colMap: null, invColMap: null };
-
-function getGraphClient() {
-  const credential = new ClientSecretCredential(
-    process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
-  );
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, { scopes: ['https://graph.microsoft.com/.default'] });
-  return Client.initWithMiddleware({ authProvider });
-}
 
 async function resolveSite(client) {
   if (_cache.siteId && _cache.listId) return _cache;

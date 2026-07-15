@@ -20,9 +20,7 @@
  */
 
 require('isomorphic-fetch');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } = require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 const { lerDecisoes, chaveRecorrente } = require('../shared/recorrentes');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
@@ -30,16 +28,6 @@ const DEFAULT_FROM = 'datanalytics@pronep.com.br';
 const SISTEMA_URL = 'https://purple-forest-09588fe10.7.azurestaticapps.net/';
 const D5_DIAS_UTEIS = 5;
 const _cache = { siteId: null, listNotasId: null, invColMap: null };
-
-function getGraphClient() {
-  const credential = new ClientSecretCredential(
-    process.env.AAD_TENANT_ID, process.env.AAD_CLIENT_ID, process.env.AAD_CLIENT_SECRET
-  );
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
-}
 
 async function resolveSite(client) {
   if (_cache.siteId && _cache.listNotasId && _cache.invColMap) return _cache;
