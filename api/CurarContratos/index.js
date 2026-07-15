@@ -57,8 +57,14 @@ function _montarTextos(chunks, filtro) {
 module.exports = async function (context, req) {
   const diag = { step: 'start', modelo: MODEL };
   try {
-    const authz = await requireAdmin(context, req);
-    if (!authz) return;
+    // Auth: secret compartilhado (runner do GitHub Actions, server-side) OU admin (navegador).
+    const secret = process.env.CURADORIA_SECRET;
+    const hdrSecret = (req.headers && (req.headers['x-curadoria-secret'] || req.headers['X-Curadoria-Secret'])) || '';
+    const viaSecret = !!(secret && hdrSecret && hdrSecret === secret);
+    if (!viaSecret) {
+      const authz = await requireAdmin(context, req);
+      if (!authz) return;
+    }
 
     const offset = Math.max(0, parseInt((req.query && req.query.offset) || '0', 10) || 0);
     const limit = Math.min(8, Math.max(1, parseInt((req.query && req.query.limit) || '1', 10) || 1));
@@ -83,6 +89,53 @@ module.exports = async function (context, req) {
       await salvarShard(client, driveId, TEXTOS_PILOTO, { total: files.length, files: files, criadoEm: new Date().toISOString() });
       context.res = { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
         body: { ok: true, prepared: true, total: files.length, next: 0, fonte: 'indice_rag' } };
+      return;
+    }
+
+    // ===== MODO LISTA (runner background): devolve os textos preparados (meta + texto)
+    // para o runner do GitHub Actions curar FORA do teto de 45s (Sonnet/Opus).
+    if (req.query && (req.query.lista === '1' || req.query.lista === 'true')) {
+      diag.step = 'lista';
+      let bundle = await lerJson(client, driveId, TEXTOS_PILOTO);
+      if (!bundle || !Array.isArray(bundle.files)) {
+        const chunks = await rag.carregarIndice(client, driveId, false);
+        bundle = { total: 0, files: _montarTextos(chunks, filtro) };
+        bundle.total = bundle.files.length;
+        await salvarShard(client, driveId, TEXTOS_PILOTO, bundle);
+      }
+      context.res = { status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+        body: { ok: true, total: bundle.files.length, files: bundle.files } };
+      return;
+    }
+
+    // ===== MODO SALVAR (runner background): recebe o canonico JA curado (a IA rodou no
+    // runner, sem teto de tempo) e faz o pos-processo do app: skip glosa/outro, deriva UF
+    // pela pasta, monta markdown, nomeia e faz upload. Rapido (<45s) — so Graph, sem IA.
+    if (req.query && (req.query.salvar === '1' || req.query.salvar === 'true')) {
+      diag.step = 'salvar';
+      const body = req.body || {};
+      const f = body.file || {};
+      const canonico = body.canonico || null;
+      if (!canonico) {
+        context.res = { status: 400, headers: { 'Content-Type': 'application/json' }, body: { ok: false, motivo: 'sem_canonico' } };
+        return;
+      }
+      if (canonico.doc_tipo && ['glosa', 'outro'].indexOf(canonico.doc_tipo) >= 0) {
+        context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: { ok: true, skipped: true, motivo: 'doc_tipo_' + canonico.doc_tipo } };
+        return;
+      }
+      if (!canonico.estado_uf) {
+        const ufPasta = _estadoDaPasta(String(f.subpasta || '') + ' ' + String(f.webUrl || '') + ' ' + String(f.nome || ''));
+        if (ufPasta) {
+          canonico.estado_uf = ufPasta;
+          canonico.proveniencia = canonico.proveniencia || {};
+          canonico.proveniencia.estado_origem = 'pasta';
+        }
+      }
+      const md = montarMarkdown(canonico, { arquivoOrigem: f.nome, webUrl: f.webUrl });
+      const nome = nomeCurado(canonico, f.fornecedor || f.nome, f.contratoId);
+      await salvarCurado(client, driveId, nome, md);
+      context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: { ok: true, curado: nome } };
       return;
     }
 

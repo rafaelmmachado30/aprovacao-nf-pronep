@@ -54,6 +54,11 @@
       "allowedRoles": ["anonymous", "authenticated"]
     },
     {
+      "comment": "Curadoria em background: runner do GitHub Actions chama com X-Curadoria-Secret. O endpoint ainda exige admin quando chamado sem o secret (navegador).",
+      "route": "/api/CurarContratos",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
       "comment": "Demais endpoints exigem sessao Entra ID. Fecha spoofing de x-ms-client-principal (C2).",
       "route": "/api/*",
       "allowedRoles": ["authenticated"]
