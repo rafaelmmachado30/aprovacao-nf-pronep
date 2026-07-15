@@ -1,0 +1,46 @@
+name: Aquecer (anti cold start)
+
+# Pinga /api/Aquecer em horario comercial pra manter o container do Static Web Apps
+# "quente" — evita os ~40s de primeira carga (cold start) de manha.
+#
+# GitHub cron usa UTC. BRT = UTC-3.  10-23 UTC = 7h-20h BRT.
+# GitHub cron pode atrasar 5-15min; por isso o intervalo de 10min (margem vs. os
+# ~20min de ociosidade que derrubam o container).
+#
+# Pre-requisito: Repository Secret ALERTA_DIARIO_SECRET (o mesmo dos alertas).
+
+on:
+  schedule:
+    - cron: '*/10 10-23 * * 1-5'
+  workflow_dispatch:
+
+# Evita acumular execucoes se uma demorar/atrasar.
+concurrency:
+  group: aquecer
+  cancel-in-progress: true
+
+jobs:
+  aquecer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/Aquecer
+        env:
+          SECRET: ${{ secrets.ALERTA_DIARIO_SECRET }}
+        run: |
+          if [ -z "$SECRET" ]; then
+            echo "::error::Secret ALERTA_DIARIO_SECRET nao configurado no repo"
+            exit 1
+          fi
+          URL="https://purple-forest-09588fe10.7.azurestaticapps.net/api/Aquecer"
+          HTTP_CODE=$(curl -s -o /tmp/aquecer.json -w "%{http_code}" \
+            -H "X-Alerta-Secret: $SECRET" \
+            -H "Accept: application/json" \
+            --max-time 120 \
+            "$URL")
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/aquecer.json | head -c 500
+          echo ""
+          # Nao falha o workflow por erro transitorio — warm-up e best-effort.
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::warning::Aquecer retornou HTTP $HTTP_CODE"
+          fi

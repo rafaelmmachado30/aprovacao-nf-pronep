@@ -44,6 +44,11 @@
       "allowedRoles": ["anonymous", "authenticated"]
     },
     {
+      "comment": "Warm-up contra cold start: cron pinga com X-Alerta-Secret. Endpoint minimo, sem efeito colateral.",
+      "route": "/api/Aquecer",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
       "comment": "Link de aprovacao por e-mail: autenticado por JWT no token da query.",
       "route": "/api/AprovacaoViaLink",
       "allowedRoles": ["anonymous", "authenticated"]
