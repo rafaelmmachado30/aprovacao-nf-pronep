@@ -45,11 +45,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: api/package-lock.json
 
       - name: Instala deps da API (reusa o curar() do app)
-        run: cd api && npm ci
+        # npm install (nao ci) porque o api/package-lock.json esta defasado em relacao
+        # ao package.json (ex.: pg). O Azure faz build tolerante; aqui replicamos isso.
+        run: cd api && npm install --no-audit --no-fund
 
       - name: Rodar curadoria
         env:
