@@ -1,0 +1,30 @@
+name: Smoke Test (sintaxe)
+
+# Rede de seguranca minima: valida a SINTAXE do backend e do <script> do front
+# a cada push e cada Pull Request. NAO faz deploy, NAO executa codigo, NAO acessa
+# a rede — so evita que um erro de sintaxe (a causa da "tela branca") chegue em producao.
+#
+# Hoje este job roda em PARALELO ao deploy e NAO o bloqueia (risco zero).
+# Para torna-lo um gate obrigatorio depois: em Settings > Branches > regra de
+# protecao do `main`, marque "Require status checks to pass" e selecione
+# "Smoke Test (sintaxe) / smoke".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: node --check em api/ + <script> do index.html
+        run: node scripts/smoke-test.mjs
