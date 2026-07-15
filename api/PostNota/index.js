@@ -32,10 +32,7 @@ const { notificar } = require('../shared/notificar');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { getUser } = require('../shared/auth');
 const crypto = require('crypto');
-const { ClientSecretCredential } = require('@azure/identity');
-const { Client } = require('@microsoft/microsoft-graph-client');
-const { TokenCredentialAuthenticationProvider } =
-  require('@microsoft/microsoft-graph-client/authProviders/azureTokenCredentials');
+const { getGraphClient } = require('../shared/graph');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 const LIST_DIRETORIAS = 'PRONEP-NF-Diretorias';
@@ -217,18 +214,6 @@ function formatByType(internalName, value) {
     default:
       return String(value);
   }
-}
-
-async function getGraphClient() {
-  const tenantId = process.env.AAD_TENANT_ID;
-  const clientId = process.env.AAD_CLIENT_ID;
-  const clientSecret = process.env.AAD_CLIENT_SECRET;
-  if (!tenantId || !clientId || !clientSecret) throw new Error('AAD_* incompletas');
-  const credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
-  const authProvider = new TokenCredentialAuthenticationProvider(credential, {
-    scopes: ['https://graph.microsoft.com/.default']
-  });
-  return Client.initWithMiddleware({ authProvider });
 }
 
 async function resolveSiteAndDrive(client) {
