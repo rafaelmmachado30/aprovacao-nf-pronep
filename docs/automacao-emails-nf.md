@@ -53,7 +53,20 @@ Logado como **admin**, no navegador:
 Sem `Mail.ReadWrite` (não alteramos a caixa): os `messageId` processados ficam num ledger
 JSON no drive (`_automacao/emails_ledger.json`) + janela de dias. Reexecuções não repetem.
 
-## Classificação (ajustável)
-- **Assunto**: regex `nota fiscal | NF | NFS-e | fatura | boleto | DANFE | cobrança`.
-- **Remetente**: e-mail/domínio ∈ Fornecedores (campo email). Best-effort (se a leitura
-  falhar, cai só no assunto). Anexo **PDF** é obrigatório para baixar.
+## Classificação (calibrada com dry-run real de 16/07)
+Anexo **PDF** é obrigatório. A decisão usa assunto + **nome do PDF** + remetente, e
+devolve um nível de **confiança** pra o gestor priorizar:
+- **FORTE** (`confianca: alta`): "nota fiscal" / NF / NFe / NFS-e / DANFE no assunto
+  **ou** no nome do arquivo (ex.: `NF 10832 - PRONEP.pdf`). Vira candidato sozinho.
+- **FRACO** (`fatura` / `boleto`): só entra se **corroborado** —
+  - `media`: remetente ∈ Fornecedores conhecidos;
+  - `baixa`: e-mail **encaminhado** (ENC:/FW:) — padrão real (colega repassa a NF).
+- **NEGATIVO**: aviso de cobrança/débito (`não identificado`, `débito`, `em aberto`,
+  `inadimplência`…) → **excluído**, salvo se houver sinal FORTE. Mata o falso positivo
+  típico de "fatura não identificada / débitos abertos".
+- **Domínio interno** (`pronep.com.br`, configurável por `EMAIL_DOMINIO_INTERNO`) é
+  **excluído** do allowlist de remetente — senão todo colega vira "fornecedor".
+
+> Aprendizado do dry-run: NFs chegam muito por **encaminhamento interno** (o "De" é um
+> colega, não o fornecedor). Por isso a Fase 2 vai casar pelo **nome do fornecedor
+> recorrente** (do Fechamento) no assunto/arquivo, não só pelo remetente.

@@ -28,8 +28,19 @@ const LIST_FORN = 'PRONEP-NF-Fornecedores';
 const LIST_DIR = 'PRONEP-NF-Diretorias';
 const PASTA_RAIZ = 'Novas NFs - Automacao';
 const LEDGER_PATH = '_automacao/emails_ledger.json';
-// Palavras no assunto que indicam NF/fatura (sinal principal de classificacao).
-const ASSUNTO_NF = /nota\s*fiscal|\bnfs?e?\b|\bnf\b|fatura|boleto|danfe|cobran[cç]a/i;
+// Dominio interno da empresa — NUNCA conta como "remetente fornecedor" (senao todo
+// colega que encaminha vira falso match). Configuravel por env.
+const DOMINIO_INTERNO = (process.env.EMAIL_DOMINIO_INTERNO || 'pronep.com.br').toLowerCase();
+// Classificacao calibrada com dados reais (dry-run 16/07):
+//  FORTE   = "nota fiscal"/NF/NFe/NFS-e/DANFE no assunto OU nome do PDF -> candidato sozinho.
+//  FRACO   = fatura/boleto -> so entra se corroborado (remetente conhecido ou encaminhado).
+//  NEGATIVO= aviso de cobranca/debito (nao e NF a lancar) -> exclui, salvo sinal FORTE.
+const RE_FORTE   = /nota\s*fiscal|\bnfe?\b|\bnfs-?e\b|danfe/i;
+const RE_FRACO   = /fatura|boleto/i;
+const RE_NEG     = /n[ãa]o\s*identificad|d[ée]bito|em\s*aberto|inadimpl|pend[êe]ncia\s*de\s*pagamento|cobran[çc]a\s*autom/i;
+const RE_FORTE_ARQ = /\b(nf|nfe|nfse|danfe)\b|nota[\s_-]*fiscal/i;
+const RE_FRACO_ARQ = /fatura|boleto/i;
+const RE_ENCAMINHADO = /^\s*(enc|fw|fwd|res|encaminhad)/i;
 
 let _driveId = null;
 async function resolveDriveId(client, siteId) {
@@ -57,7 +68,10 @@ async function fornecedorSignals(client, siteId) {
         const cand = [f.Email, f.email, f.field_9].filter(Boolean);
         for (const e of cand) {
           const em = String(e).trim().toLowerCase();
-          if (em.indexOf('@') > 0) { emails.add(em); dominios.add(em.split('@')[1]); }
+          if (em.indexOf('@') <= 0) continue;
+          const dom = em.split('@')[1];
+          if (dom === DOMINIO_INTERNO) continue; // ignora fornecedor cadastrado c/ e-mail interno
+          emails.add(em); dominios.add(dom);
         }
       }
       pages++;
@@ -101,13 +115,31 @@ async function salvarLedger(client, siteId, ledger) {
     .put(Buffer.from(JSON.stringify(ledger), 'utf-8'));
 }
 
-function classificar(msg, fornSig) {
+// Classifica um e-mail (assunto + nome dos PDFs + remetente). Retorna nivel de
+// confianca pra o gestor priorizar: alta (sinal forte de NF), media (fraco +
+// remetente conhecido), baixa (fraco + encaminhado). null = nao e NF.
+function classificar(msg, pdfs, fornSig) {
   const assunto = String(msg.subject || '');
   const from = String((msg.from && msg.from.emailAddress && msg.from.emailAddress.address) || '').toLowerCase();
   const dominio = from.indexOf('@') > 0 ? from.split('@')[1] : '';
-  const porAssunto = ASSUNTO_NF.test(assunto);
+  const nomes = (pdfs || []).map(function (p) { return String(p.name || ''); }).join(' ');
+
+  const forte = RE_FORTE.test(assunto) || RE_FORTE_ARQ.test(nomes);
+  const fraco = RE_FRACO.test(assunto) || RE_FRACO_ARQ.test(nomes);
+  const negativo = RE_NEG.test(assunto);
+  const encaminhado = RE_ENCAMINHADO.test(assunto);
+  // Remetente conhecido: dominio interno ja foi excluido do fornSig.
   const porRemetente = (from && fornSig.emails.has(from)) || (dominio && fornSig.dominios.has(dominio));
-  return { ehNF: porAssunto || porRemetente, porAssunto, porRemetente, from, assunto };
+
+  let confianca = null, motivo = '';
+  if (forte) { confianca = 'alta'; motivo = 'sinal_forte_nf'; }
+  else if (negativo) { confianca = null; motivo = 'aviso_cobranca_debito'; }
+  else if (fraco && porRemetente) { confianca = 'media'; motivo = 'fraco+remetente_conhecido'; }
+  else if (fraco && encaminhado) { confianca = 'baixa'; motivo = 'fraco+encaminhado'; }
+  else { confianca = null; motivo = 'nao_parece_nf'; }
+
+  return { ehNF: !!confianca, confianca: confianca, motivo: motivo, from: from, assunto: assunto,
+           sinais: { forte: forte, fraco: fraco, negativo: negativo, encaminhado: encaminhado, porRemetente: !!porRemetente } };
 }
 
 async function anexosPdf(client, gestor, msgId) {
@@ -176,13 +208,16 @@ module.exports = async function (context, req) {
     for (const m of msgs) {
       if (!m.hasAttachments) { ignorados.push({ assunto: m.subject, motivo: 'sem_anexo' }); continue; }
       if (ledger.processados[m.id]) { ignorados.push({ assunto: m.subject, motivo: 'ja_processado' }); continue; }
-      const cls = classificar(m, fornSig);
-      if (!cls.ehNF) { ignorados.push({ assunto: m.subject, motivo: 'nao_parece_nf' }); continue; }
 
+      // Busca os PDFs ANTES de classificar — o nome do arquivo (NF.../DANFE...) e sinal forte.
       const pdfs = await anexosPdf(client, gestor, m.id);
       if (!pdfs.length) { ignorados.push({ assunto: m.subject, motivo: 'sem_pdf' }); continue; }
 
-      candidatos.push({ assunto: m.subject, de: cls.from, quando: m.receivedDateTime, pdfs: pdfs.map(p => p.name), porAssunto: cls.porAssunto, porRemetente: cls.porRemetente });
+      const cls = classificar(m, pdfs, fornSig);
+      if (!cls.ehNF) { ignorados.push({ assunto: m.subject, motivo: cls.motivo }); continue; }
+
+      candidatos.push({ assunto: m.subject, de: cls.from, quando: m.receivedDateTime,
+        pdfs: pdfs.map(p => p.name), confianca: cls.confianca, motivo: cls.motivo, sinais: cls.sinais });
       if (dryRun) continue;
 
       for (const p of pdfs) {
