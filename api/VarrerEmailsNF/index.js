@@ -31,6 +31,8 @@ const LIST_FORN = 'PRONEP-NF-Fornecedores';
 const LIST_DIR = 'PRONEP-NF-Diretorias';
 const PASTA_RAIZ = 'Novas NFs - Automacao';
 const LEDGER_PATH = '_automacao/emails_ledger.json';
+// Webhook do n8n pra disparar o WhatsApp (Fase 2d). Se vazio, a notificacao e pulada.
+const N8N_WEBHOOK = process.env.N8N_WEBHOOK_NF || '';
 // Dominio interno da empresa — NUNCA conta como "remetente fornecedor" (senao todo
 // colega que encaminha vira falso match). Configuravel por env.
 const DOMINIO_INTERNO = (process.env.EMAIL_DOMINIO_INTERNO || 'pronep.com.br').toLowerCase();
@@ -101,6 +103,29 @@ async function derivarUnidadeDiretoria(client, siteId, gestorEmail) {
     }
   } catch (e) { /* ignore */ }
   return null;
+}
+
+// Telefone (E.164) que RECEBE o WhatsApp, da coluna TelefoneNotificacao na lista
+// Diretorias, casando pela Unidade+Diretoria (ou so Diretoria). Best-effort.
+async function telefoneDaDiretoria(client, siteId, unidade, diretoria) {
+  try {
+    const dl = await client.api('/sites/' + siteId + '/lists').filter("displayName eq '" + LIST_DIR + "'").get();
+    if (!dl.value || !dl.value.length) return '';
+    const dlId = dl.value[0].id;
+    const items = await client.api('/sites/' + siteId + '/lists/' + dlId + '/items?expand=fields&$top=500').get();
+    const un = String(unidade || '').toLowerCase(), dir = String(diretoria || '').toLowerCase();
+    let fallback = '';
+    for (const it of (items.value || [])) {
+      const f = it.fields || {};
+      const tel = String(f.TelefoneNotificacao || f.Telefone || f.telefone || '').trim();
+      if (!tel) continue;
+      const fu = String(f.Unidade || f.unidade || '').toLowerCase();
+      const fd = String(f.Diretoria || f.diretoria || f.Title || '').toLowerCase();
+      if (fd === dir && fu === un) return tel;      // match exato Unidade+Diretoria
+      if (fd === dir && !fallback) fallback = tel;   // fallback: mesma diretoria
+    }
+    return fallback;
+  } catch (e) { return ''; }
 }
 
 async function lerLedger(client, siteId) {
@@ -299,13 +324,39 @@ module.exports = async function (context, req) {
 
     if (!dryRun && baixados.length) await salvarLedger(client, siteId, ledger);
 
+    // ===== Notificacao (Fase 2d): POST no n8n -> WhatsApp. So no modo real, com
+    // candidatos, e se o webhook estiver configurado. Best-effort: nao derruba a varredura.
+    let notificado = { enviado: false };
+    if (!dryRun && candidatos.length && N8N_WEBHOOK) {
+      diag.step = 'notificar';
+      try {
+        const telefone = await telefoneDaDiretoria(client, siteId, unidade, diretoria);
+        const payload = {
+          gestor: gestor, diretoria: diretoria, unidade: unidade, telefone: telefone,
+          pasta: pasta, total: candidatos.length,
+          candidatos: candidatos.map(function (c) {
+            return { fornecedor: c.esperado || null, assunto: c.assunto,
+                     confianca: c.confianca, esperado: c.esperado || null, arquivos: c.pdfs };
+          })
+        };
+        const resp = await fetch(N8N_WEBHOOK, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        notificado = { enviado: resp.ok, status: resp.status, telefone: telefone || null, semTelefone: !telefone };
+      } catch (e) {
+        notificado = { enviado: false, erro: (e && e.message) || String(e) };
+      }
+    } else if (!dryRun && candidatos.length && !N8N_WEBHOOK) {
+      notificado = { enviado: false, motivo: 'N8N_WEBHOOK_NF nao configurado' };
+    }
+
     diag.step = 'done';
     context.res = {
       status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       body: {
         ok: true, dryRun: !!dryRun, gestor: gestor, unidade: unidade, diretoria: diretoria,
         pastaDestino: pasta, janelaDias: dias, avaliados: msgs.length,
-        candidatos: candidatos, baixados: baixados,
+        candidatos: candidatos, baixados: baixados, notificado: notificado,
         ignoradosResumo: ignorados.reduce((a, x) => { a[x.motivo] = (a[x.motivo] || 0) + 1; return a; }, {}),
         fornecedoresConhecidos: fornSig.emails.size,
         esperadosFechamento: esperados.map(function (e) { return e.nome; })
