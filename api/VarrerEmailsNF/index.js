@@ -23,7 +23,10 @@
 require('isomorphic-fetch');
 const { requireAdmin } = require('../shared/authz');
 const { getGraphClient, resolveSiteId } = require('../shared/graph');
+const { computar } = require('../shared/checklistRecorrentes');
+const { _norm } = require('../shared/recorrentes');
 
+const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 const LIST_FORN = 'PRONEP-NF-Fornecedores';
 const LIST_DIR = 'PRONEP-NF-Diretorias';
 const PASTA_RAIZ = 'Novas NFs - Automacao';
@@ -151,6 +154,55 @@ async function anexosPdf(client, gestor, msgId) {
   });
 }
 
+// --- Corroboracao pelo Fechamento do Mes (ideia do Rafa) -------------------
+// Normaliza pra comparar nomes de fornecedor com assunto/nome de arquivo.
+function _slug(s) {
+  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+// Resolve a lista NotasFiscais + invColMap (necessarios pro computar()).
+async function resolveNotasList(client, siteId) {
+  const lr = await client.api('/sites/' + siteId + '/lists').filter("displayName eq '" + LIST_NOTAS + "'").get();
+  if (!lr.value || !lr.value.length) throw new Error('Lista ' + LIST_NOTAS + ' nao encontrada');
+  const listNotasId = lr.value[0].id;
+  const cols = await client.api('/sites/' + siteId + '/lists/' + listNotasId + '/columns').get();
+  const invColMap = {};
+  for (const c of (cols.value || [])) { if (c.displayName && c.name) invColMap[c.name] = c.displayName; }
+  return { listNotasId: listNotasId, invColMap: invColMap };
+}
+
+// Fornecedores RECORRENTES ainda PENDENTES no mes (atrasada/risco/aguardando), da
+// diretoria — sao os que "deviam ter mandado NF e ainda nao mandaram". Best-effort.
+async function esperadosDoFechamento(client, siteId, diretoria) {
+  try {
+    const { listNotasId, invColMap } = await resolveNotasList(client, siteId);
+    const agoraBRT = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    const r = await computar(client, siteId, listNotasId, invColMap, {
+      scopeNorm: diretoria ? [_norm(diretoria)] : null,
+      ano: agoraBRT.getUTCFullYear(), mes: agoraBRT.getUTCMonth()
+    });
+    const pendentes = (r.contas || []).filter(function (c) {
+      return ['atrasada', 'risco', 'aguardando'].indexOf(c.status) >= 0;
+    });
+    return pendentes.map(function (c) {
+      const slug = _slug(c.fornecedor);
+      return { nome: c.fornecedor, slug: slug, tokens: slug.split(' ').filter(function (t) { return t.length >= 5; }) };
+    }).filter(function (e) { return e.slug; });
+  } catch (e) { return []; } // se o Fechamento falhar, seguimos sem corroboracao
+}
+
+// Um candidato "casa" com um fornecedor esperado se o nome (ou um token distintivo
+// dele) aparece no assunto ou no nome de algum PDF.
+function corrobora(esperados, assunto, pdfNames) {
+  const hay = _slug(assunto + ' ' + (pdfNames || []).join(' '));
+  for (const e of (esperados || [])) {
+    if (e.slug && hay.indexOf(e.slug) >= 0) return e.nome;
+    for (const t of e.tokens) { if (hay.indexOf(t) >= 0) return e.nome; }
+  }
+  return null;
+}
+
 module.exports = async function (context, req) {
   const diag = { step: 'start' };
   try {
@@ -192,6 +244,12 @@ module.exports = async function (context, req) {
     const ledger = await lerLedger(client, siteId);
     ledger.processados = ledger.processados || {};
 
+    // Corroboracao (ideia do Rafa): fornecedores recorrentes ainda PENDENTES no mes,
+    // pela diretoria. Se um deles aparece no e-mail, sobe a confianca (ou resgata um fraco).
+    diag.step = 'esperados';
+    const esperados = await esperadosDoFechamento(client, siteId, diretoria);
+    diag.esperados = esperados.length;
+
     diag.step = 'listar_mail';
     const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString();
     const listaUrl = '/users/' + encodeURIComponent(gestor) + '/mailFolders/inbox/messages'
@@ -214,10 +272,20 @@ module.exports = async function (context, req) {
       if (!pdfs.length) { ignorados.push({ assunto: m.subject, motivo: 'sem_pdf' }); continue; }
 
       const cls = classificar(m, pdfs, fornSig);
-      if (!cls.ehNF) { ignorados.push({ assunto: m.subject, motivo: cls.motivo }); continue; }
+      const pdfNames = pdfs.map(p => p.name);
+      const fornEsperado = corrobora(esperados, m.subject, pdfNames);
+
+      // Corroboracao pelo Fechamento: reforca candidato existente (-> alta) e resgata
+      // um sinal FRACO nao-negativo (ex.: boleto de um recorrente que ainda nao chegou).
+      let ehNF = cls.ehNF, confianca = cls.confianca, motivo = cls.motivo;
+      if (fornEsperado) {
+        if (ehNF) { confianca = 'alta'; motivo = cls.motivo + '+esperado_fechamento'; }
+        else if (cls.sinais.fraco && !cls.sinais.negativo) { ehNF = true; confianca = 'alta'; motivo = 'fraco+esperado_fechamento'; }
+      }
+      if (!ehNF) { ignorados.push({ assunto: m.subject, motivo: cls.motivo }); continue; }
 
       candidatos.push({ assunto: m.subject, de: cls.from, quando: m.receivedDateTime,
-        pdfs: pdfs.map(p => p.name), confianca: cls.confianca, motivo: cls.motivo, sinais: cls.sinais });
+        pdfs: pdfNames, confianca: confianca, motivo: motivo, esperado: fornEsperado || null, sinais: cls.sinais });
       if (dryRun) continue;
 
       for (const p of pdfs) {
@@ -239,7 +307,8 @@ module.exports = async function (context, req) {
         pastaDestino: pasta, janelaDias: dias, avaliados: msgs.length,
         candidatos: candidatos, baixados: baixados,
         ignoradosResumo: ignorados.reduce((a, x) => { a[x.motivo] = (a[x.motivo] || 0) + 1; return a; }, {}),
-        fornecedoresConhecidos: fornSig.emails.size
+        fornecedoresConhecidos: fornSig.emails.size,
+        esperadosFechamento: esperados.map(function (e) { return e.nome; })
       }
     };
   } catch (err) {
