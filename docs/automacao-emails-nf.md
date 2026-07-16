@@ -68,5 +68,19 @@ devolve um nível de **confiança** pra o gestor priorizar:
   **excluído** do allowlist de remetente — senão todo colega vira "fornecedor".
 
 > Aprendizado do dry-run: NFs chegam muito por **encaminhamento interno** (o "De" é um
-> colega, não o fornecedor). Por isso a Fase 2 vai casar pelo **nome do fornecedor
-> recorrente** (do Fechamento) no assunto/arquivo, não só pelo remetente.
+> colega, não o fornecedor). Por isso casamos pelo **nome do fornecedor recorrente**
+> (do Fechamento) no assunto/arquivo, não só pelo remetente.
+
+## Corroboração pelo Fechamento (Fase 2b — feita)
+Reusa o `computar()` do Fechamento do Mês: pega os fornecedores **recorrentes ainda
+pendentes** no mês (status atrasada/risco/aguardando) da diretoria, e cruza o **nome**
+deles com o assunto/nome do PDF do e-mail. Funciona mesmo em encaminhamentos (casa pelo
+conteúdo, não pelo remetente). Efeito:
+- Candidato que casa com um recorrente esperado → sobe pra `confianca: alta`
+  (`motivo` ganha `+esperado_fechamento`).
+- Sinal **FRACO** não-negativo (ex.: boleto de um recorrente) que sozinho seria
+  descartado → **resgatado** como candidato `alta` (`fraco+esperado_fechamento`).
+- Aviso de cobrança/débito (NEGATIVO) **não** é resgatado, mesmo citando um esperado.
+
+Cada candidato traz `esperado: "<nome do fornecedor>"` (ou `null`), e a resposta lista
+`esperadosFechamento` (o que o Fechamento esperava naquele mês/diretoria).
