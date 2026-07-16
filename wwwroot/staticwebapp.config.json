@@ -59,6 +59,11 @@
       "allowedRoles": ["anonymous", "authenticated"]
     },
     {
+      "comment": "Automacao de NF por e-mail: cron/workflow chama com X-Automacao-Secret. O endpoint ainda exige admin quando chamado sem o secret (navegador).",
+      "route": "/api/VarrerEmailsNF",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
       "comment": "Demais endpoints exigem sessao Entra ID. Fecha spoofing de x-ms-client-principal (C2).",
       "route": "/api/*",
       "allowedRoles": ["authenticated"]

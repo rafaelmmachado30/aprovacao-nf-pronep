@@ -1,0 +1,68 @@
+name: Varrer E-mails NF (dry-run/real)
+
+# Roda a varredura de NF por e-mail via "Run workflow" (1 clique), sem precisar
+# abrir link/logar no navegador. Chama /api/VarrerEmailsNF com X-Automacao-Secret.
+#
+# Secrets necessarios no repo:
+#   - AUTOMACAO_EMAILS_SECRET  (mesmo valor da App Setting AUTOMACAO_EMAILS_SECRET no Azure)
+
+on:
+  workflow_dispatch:
+    inputs:
+      gestor:
+        description: 'E-mail da caixa a varrer (ex.: fulano@pronep.com.br)'
+        required: true
+      dias:
+        description: 'Janela de dias (recebidos)'
+        required: false
+        default: '7'
+      dryRun:
+        description: 'dry-run (so classifica, nao baixa)'
+        required: true
+        default: 'sim'
+        type: choice
+        options: [sim, nao]
+      unidade:
+        description: 'Unidade (opcional; senao deriva da lista Diretorias)'
+        required: false
+        default: ''
+      diretoria:
+        description: 'Diretoria (opcional; senao deriva da lista Diretorias)'
+        required: false
+        default: ''
+
+concurrency:
+  group: varrer-emails-nf
+  cancel-in-progress: false
+
+jobs:
+  varrer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar /api/VarrerEmailsNF
+        env:
+          SECRET: ${{ secrets.AUTOMACAO_EMAILS_SECRET }}
+          GESTOR: ${{ github.event.inputs.gestor }}
+          DIAS: ${{ github.event.inputs.dias }}
+          DRYRUN: ${{ github.event.inputs.dryRun }}
+          UNIDADE: ${{ github.event.inputs.unidade }}
+          DIRETORIA: ${{ github.event.inputs.diretoria }}
+        run: |
+          if [ -z "$SECRET" ]; then
+            echo "::error::Secret AUTOMACAO_EMAILS_SECRET nao configurado no repo"; exit 1
+          fi
+          BASE="https://purple-forest-09588fe10.7.azurestaticapps.net/api/VarrerEmailsNF"
+          DRY=1; [ "$DRYRUN" = "nao" ] && DRY=0
+          # monta a query com URL-encoding simples do gestor
+          URL="${BASE}?gestor=$(printf %s "$GESTOR" | sed 's/@/%40/')&dias=${DIAS}&dryRun=${DRY}"
+          [ -n "$UNIDADE" ]   && URL="${URL}&unidade=$(printf %s "$UNIDADE" | sed 's/ /%20/g')"
+          [ -n "$DIRETORIA" ] && URL="${URL}&diretoria=$(printf %s "$DIRETORIA" | sed 's/ /%20/g')"
+          echo "Chamando: $URL"
+          HTTP_CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+            -H "X-Automacao-Secret: $SECRET" -H "Accept: application/json" \
+            --max-time 290 "$URL")
+          echo "HTTP $HTTP_CODE"
+          echo "----- resposta -----"
+          cat /tmp/resp.json | head -c 8000
+          echo ""
+          if [ "$HTTP_CODE" != "200" ]; then echo "::error::HTTP $HTTP_CODE"; exit 1; fi
