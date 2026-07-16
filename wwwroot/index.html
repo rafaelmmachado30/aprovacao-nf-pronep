@@ -5504,6 +5504,10 @@ function abrirModalFornecedor(idx) {
         <label>Nome Fantasia</label>
         <input id="frn-fantasia" value="${escAttr(x.nomeFantasia||'')}" placeholder="Opcional">
       </div>
+      <div class="form-row" style="grid-column:1/-1">
+        <label>E-mail do fornecedor</label>
+        <input id="frn-email" type="email" value="${escAttr(x.email||'')}" placeholder="Opcional — usado pela automação de NF por e-mail">
+      </div>
       <div class="form-row">
         <label>Categoria *</label>
         <select id="frn-categoria" onchange="onCategoriaFornecedorChange()">
@@ -5697,6 +5701,7 @@ async function buscarCNPJ() {
 async function salvarFornecedor(idx) {
   const razao = document.getElementById('frn-razao').value.trim();
   const fantasia = document.getElementById('frn-fantasia').value.trim();
+  const email = (document.getElementById('frn-email') || {}).value ? document.getElementById('frn-email').value.trim().toLowerCase() : '';
   const cnpj = document.getElementById('frn-cnpj').value.trim();
   const categoria = document.getElementById('frn-categoria').value;
   const unidade = document.getElementById('frn-unidade').value;
@@ -5741,7 +5746,7 @@ async function salvarFornecedor(idx) {
         document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
         return;
       }
-      const payloadAdd = { razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, atendeMultiDiretoria, categoria, descricaoOutros };
+      const payloadAdd = { razao, nomeFantasia: fantasia, email, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, atendeMultiDiretoria, categoria, descricaoOutros };
       console.log('[salvarFornecedor] ADD payload:', payloadAdd);
       const r = await fetch('/api/AdicionarFornecedor', {
         method: 'POST',
@@ -5761,7 +5766,7 @@ async function salvarFornecedor(idx) {
         return;
       }
       // Sucesso: adiciona localmente E recarrega da fonte (pra ter id real)
-      fornecedores.push({ id: data.id, spId: data.id, cnpj: digits, documento: cnpj, razao, nomeFantasia: fantasia, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, atendeTodas, atendeMultiDiretoria, tipoDocumento });
+      fornecedores.push({ id: data.id, spId: data.id, cnpj: digits, documento: cnpj, razao, nomeFantasia: fantasia, email, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, atendeTodas, atendeMultiDiretoria, tipoDocumento });
       toast('Fornecedor "' + razao + '" cadastrado (id ' + data.id + ').', 'success');
     } else {
       // UPDATE
@@ -5772,7 +5777,7 @@ async function salvarFornecedor(idx) {
         document.querySelectorAll('.modal .btn').forEach(b => b.disabled = false);
         return;
       }
-      const payload = { id: spId, razao, nomeFantasia: fantasia, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, atendeMultiDiretoria, categoria, descricaoOutros };
+      const payload = { id: spId, razao, nomeFantasia: fantasia, email, documento: cnpj, tipoDocumento, unidade, diretoria, uf: unidade, ativo, atendeTodas, atendeMultiDiretoria, categoria, descricaoOutros };
       console.log('[salvarFornecedor] EDIT payload:', payload);
       const r = await fetch('/api/EditarFornecedor', {
         method: 'PATCH',
@@ -5788,7 +5793,7 @@ async function salvarFornecedor(idx) {
         return;
       }
       // Sucesso: atualiza localmente
-      Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, cnpj: digits, documento: cnpj, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, tipoDocumento, atendeTodas, atendeMultiDiretoria });
+      Object.assign(fornecedores[idx], { razao, nomeFantasia: fantasia, email, cnpj: digits, documento: cnpj, unidade, diretoria, uf: unidade, categoria, descricaoOutros, ativo, tipoDocumento, atendeTodas, atendeMultiDiretoria });
       toast('Fornecedor "' + razao + '" atualizado.', 'success');
     }
     closeModal();
