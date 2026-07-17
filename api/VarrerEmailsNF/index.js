@@ -96,9 +96,10 @@ async function derivarUnidadeDiretoria(client, siteId, gestorEmail) {
     const alvo = gestorEmail.toLowerCase();
     for (const it of (items.value || [])) {
       const f = it.fields || {};
-      const email = String(f.Aprovador || f.aprovador || f.Email || f.field_1 || '').trim().toLowerCase();
+      // Lista renomeada: field_1=Unidade, field_2=Diretoria, field_3=Email do aprovador.
+      const email = String(f.field_3 || f.Email || f.Aprovador || f.aprovador || '').trim().toLowerCase();
       if (email && email === alvo) {
-        return { unidade: f.Unidade || f.unidade || '', diretoria: f.Diretoria || f.diretoria || f.Title || '' };
+        return { unidade: f.field_1 || f.Unidade || f.unidade || '', diretoria: f.field_2 || f.Diretoria || f.diretoria || '' };
       }
     }
   } catch (e) { /* ignore */ }
@@ -119,8 +120,8 @@ async function telefoneDaDiretoria(client, siteId, unidade, diretoria) {
       const f = it.fields || {};
       const tel = String(f.TelefoneNotificacao || f.Telefone || f.telefone || '').trim();
       if (!tel) continue;
-      const fu = String(f.Unidade || f.unidade || '').toLowerCase();
-      const fd = String(f.Diretoria || f.diretoria || f.Title || '').toLowerCase();
+      const fu = String(f.field_1 || f.Unidade || f.unidade || '').toLowerCase();
+      const fd = String(f.field_2 || f.Diretoria || f.diretoria || '').toLowerCase();
       if (fd === dir && fu === un) return tel;      // match exato Unidade+Diretoria
       if (fd === dir && !fallback) fallback = tel;   // fallback: mesma diretoria
     }
