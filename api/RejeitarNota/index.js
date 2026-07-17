@@ -81,6 +81,20 @@ function normalizeFields(fields, invColMap) {
   return out;
 }
 
+// Extrai a URL de um campo hyperlink (pode vir string ou { Url, Description }).
+function urlDeCampo(v) {
+  if (!v) return '';
+  if (typeof v === 'string' && v.indexOf('http') === 0) return v;
+  if (typeof v === 'object' && v.Url && String(v.Url).indexOf('http') === 0) return v.Url;
+  return '';
+}
+// Nome exato do arquivo a partir da URL armazenada na nota (unico: inclui o valor).
+function nomeArquivoDeUrl(url) {
+  if (!url) return '';
+  try { return decodeURIComponent(String(url).split('?')[0].split('/').pop() || ''); }
+  catch (e) { return String(url).split('?')[0].split('/').pop() || ''; }
+}
+
 // Aplica watermark REJEITADA (vermelho, 4 linhas: REJEITADA + data + por + motivo)
 async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
   // LAZY require — so carrega pdf-lib quando essa funcao for chamada
@@ -261,13 +275,34 @@ module.exports = async function (context, req) {
     try {
       const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folderOrigem}:/children`).get();
       const files = (folderListResp.value || []).filter(x => x.file);
-      const numero = String(f.NumeroNF || '');
-      // Match: starts with numero+_ (padrao novo) ou contem numero (padrao legado em Aprovadas)
-      pdfTarget = files.find(x => x.name && (x.name.startsWith(numero + '_') || x.name.includes('_' + numero + '_')));
-      // A2: removido o fallback "mais recente" do fluxo normal. Antes, sem match pelo
-      // numero, pegava o PDF mais recente da pasta compartilhada (podia ser de outra NF).
-      // Agora, sem match, a NF e rejeitada mas o PDF nao e movido (fica em Pendentes pra
-      // revisao manual) — em vez de carimbar/mover/deletar o arquivo errado.
+
+      // (1) FONTE DA VERDADE: nome EXATO do arquivo da propria nota, extraido da URL
+      // armazenada (UrlPDFAprovado no estorno; UrlPDF no fluxo normal). O nome inclui o
+      // valor -> unico. Imune a NumeroNF duplicado/colidindo com o sequencial do arquivo.
+      const urlNota = ehEstorno
+        ? (urlDeCampo(f.UrlPDFAprovadoStr) || urlDeCampo(f.UrlPDFAprovado) || urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF))
+        : (urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF));
+      const nomeExato = nomeArquivoDeUrl(urlNota);
+      if (nomeExato) pdfTarget = files.find(x => x.name === nomeExato);
+      diag.matchPor = pdfTarget ? 'nome_exato' : null;
+
+      // (2) FALLBACK ESTRITO (so se a nota nao tem URL/nome): exige numero E valor no
+      // nome, e so aceita se for UNICO. NUNCA aceita match frouxo unico por numero
+      // (era o bug: NumeroNF=3 casava com o sequencial _3_ de outro arquivo).
+      if (!pdfTarget) {
+        const numero = String(f.NumeroNF || '').trim();
+        const valorNum = (typeof f.Valor === 'number' ? f.Valor : Number(f.Valor)) || 0;
+        const valorStr = valorNum > 0 ? valorNum.toFixed(2).replace('.', ',') : '';
+        if (numero && valorStr) {
+          const cand = files.filter(x => x.name
+            && (x.name.startsWith(numero + '_') || x.name.includes('_' + numero + '_'))
+            && x.name.includes('_' + valorStr + '_'));
+          if (cand.length === 1) { pdfTarget = cand[0]; diag.matchPor = 'numero+valor'; }
+          else diag.matchAmbiguo = { numero, valorStr, encontrados: cand.length };
+        }
+      }
+      // Sem identificacao CONFIAVEL, nao move/carimba/deleta nada (evita mexer no arquivo
+      // errado). A NF e rejeitada; o PDF fica pra reconciliacao manual.
     } catch (e) {
       diag.findPdfWarning = e.message;
     }
@@ -305,6 +340,19 @@ module.exports = async function (context, req) {
       AprovadoEm: new Date().toISOString()
     }, colMap, colTypes);
     await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(patchPayload);
+
+    // Grava a URL do PDF rejeitado na nota -> o "Ver" (AbrirPdfDaNota) redireciona
+    // DIRETO pra ela, sem varrer a pasta por numero. Patch SEPARADO e best-effort:
+    // colunas hyperlink antigas as vezes falham no Graph, e isso nao pode quebrar a rejeicao.
+    if (urlPDFRejeitado) {
+      try {
+        const urlBuilt = buildPatchPayload({ UrlPDFStr: urlPDFRejeitado, UrlPDF: urlPDFRejeitado }, colMap, colTypes);
+        if (Object.keys(urlBuilt).length) {
+          await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(urlBuilt);
+          diag.urlPDFGravada = true;
+        }
+      } catch (e) { diag.urlPDFGravadaErro = e.message; }
+    }
 
     // Dispara notificacao pro submitter (quem lancou).
     // Se for ESTORNO, notifica tambem o gestor que aprovou originalmente (AprovadorAtual da NF).

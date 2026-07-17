@@ -237,12 +237,17 @@ module.exports = async function (context, req) {
 
       for (const n of candidates) {
         const candidatos = matches(n);
-        if (candidatos.length === 1) { target = candidatos[0]; break; }
-        if (candidatos.length > 1 && valorStr) {
-          // Desempata pelo VALOR (cada NF tem valor unico no nome do arquivo)
+        if (!candidatos.length) continue;
+        if (valorStr) {
+          // BLINDAGEM: com valor conhecido, EXIGE o valor no nome (unico por NF). Isso
+          // impede casar com o SEQUENCIAL _N_ de outro arquivo quando NumeroNF colide
+          // (bug: NumeroNF=3 abria o _3_ de outra NF). So aceita se o valor bater unico.
           const filtrado = candidatos.filter(a => a.name.indexOf('_' + valorStr + '_') >= 0);
           if (filtrado.length === 1) { target = filtrado[0]; break; }
+          continue; // valor conhecido mas sem match unico -> nao arrisca abrir PDF errado
         }
+        // Sem valor conhecido (raro): so aceita se houver exatamente 1 match por numero.
+        if (candidatos.length === 1) { target = candidatos[0]; break; }
       }
     }
     if (!target) {
