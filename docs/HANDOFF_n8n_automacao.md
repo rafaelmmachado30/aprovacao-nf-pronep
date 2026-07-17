@@ -74,8 +74,8 @@ api/VarrerEmailsNF  ── classifica NF x ruído ── baixa PDFs ── salva
 1. [ ] **Rodar 1× `GET /api/MigrarColunaTelefoneNotificacao`** (logado admin) → depois
        preencher os telefones **E.164** (`+5511999998888`) na lista `PRONEP-NF-Diretorias`,
        por Unidade+Diretoria. (Endpoint já no ar.)
-2. [ ] **n8n**: importar o `PronepNF_Notificacao.json` limpo e **validar o envio Chatwoot** ponta a ponta (seção 5).
-3. [ ] Copiar a **Production URL** do Webhook n8n → setar `N8N_WEBHOOK_NF` nas App Settings (seção 6).
+2. [x] **n8n**: workflow montado e **envio Chatwoot validado ponta a ponta** ✅ (config na seção 4).
+3. [ ] **Ativar/Publish** o workflow no n8n → copiar a **Production URL** do Webhook (`/webhook/pronep-nf`, não a `/webhook-test/`) → setar `N8N_WEBHOOK_NF` nas App Settings (seção 6).
 4. [ ] Fase 3: cron chamando `VarrerEmailsNF` p/ todas as diretorias + `AUTOMACAO_EMAILS_SECRET`.
 
 > ⚠️ **O arquivo `PronepNF_Notificacao.json` não está no Mac** (`~/Downloads/30_n8n_Hostinger/`
@@ -83,37 +83,50 @@ api/VarrerEmailsNF  ── classifica NF x ruído ── baixa PDFs ── salva
 
 ---
 
-## 4. n8n — workflow (montado na sessão 2)
+## 4. n8n — workflow VALIDADO ✅ (envio ponta a ponta funcionando — sessão 3)
 
-- **Fluxo**: `Webhook NF → Montar mensagem → Config → Responder 200 → Tem telefone? (IF numero not empty) → Criar contato → Criar conversa + msg`
+- **Fluxo**: `Webhook NF → Montar mensagem1 → Config → Responder 200 → Tem telefone?1 (IF numero not empty) → Criar contato → Buscar contato → Criar conversa + msg`
 - **Envio: Chatwoot proativo** (NÃO Evolution direto). O node reativo do Byoterapia não serve (depende de conversa existente).
-- **Montagem da mensagem: OK** (texto formatado + `numero` só dígitos, sem `+`). **Falta validar o envio Chatwoot.**
+- **Idempotente**: `Criar contato` tolera 422 e `Buscar contato` recupera o id — mesmo número repetido funciona.
 
 **Chatwoot desta instância:**
 - URL: `http://82.25.79.134:3000` · `account_id = 1` · `inbox_id = 1` (inbox WhatsApp)
-- Credencial n8n: **"ChatWoot account"** (id `XotA5fFCZQjC9Iki`)
+- Credencial n8n: **"ChatWoot account"** (id `XotA5fFCZQjC9Iki`). **Todo node HTTP do Chatwoot precisa dela** (Authentication → Predefined Credential Type → ChatWoot API → ChatWoot account). Sem isso → 401.
 
-**Bodies dos nodes Chatwoot** (backup):
+**Config dos nodes (o que funcionou de fato):**
 
-- **Criar contato** — `POST {{url}}/api/v1/accounts/{{account_id}}/contacts`
+- **Criar contato** — `POST {{url}}/api/v1/accounts/{{account_id}}/contacts`, body:
   ```
   ={{ { "inbox_id": $json.inbox_id, "name": "Diretoria " + $json.diretoria, "phone_number": "+" + $json.numero } }}
   ```
-- **Criar conversa + msg** — `POST {{url}}/api/v1/accounts/{{account_id}}/conversations`
+  ⚙️ **Settings → On Error → Continue** (pra não travar no 422 "já existe").
+
+- **Buscar contato** (novo) — `GET {{url}}/api/v1/accounts/{{account_id}}/contacts/search?q={numero}`:
   ```
-  ={{ {
-    "source_id": $('Criar contato').item.json.payload.contact_inboxes[0].source_id,
-    "inbox_id": $('Config').item.json.inbox_id,
-    "contact_id": $('Criar contato').item.json.payload.contact.id,
-    "message": { "content": $('Montar mensagem').item.json.texto }
-  } }}
+  {{ $('Config').first().json.url_chatwoot }}/api/v1/accounts/{{ $('Config').first().json.account_id }}/contacts/search?q={{ $('Montar mensagem1').first().json.numero }}
   ```
-  (`message.content` no `POST /conversations` cria a conversa **e** manda a 1ª msg.)
+  Retorna `payload[0].id` (o contact_id), tanto se acabou de criar quanto se já existia.
+
+- **Criar conversa + msg** — `POST {{url}}/api/v1/accounts/{{account_id}}/conversations`, body (**Specify Body: Using JSON**):
+  ```json
+  {
+    "source_id": "{{ $('Montar mensagem1').first().json.numero }}",
+    "inbox_id": {{ $('Config').first().json.inbox_id }},
+    "contact_id": {{ $('Buscar contato').first().json.payload[0].id }},
+    "message": { "content": {{ JSON.stringify($('Montar mensagem1').first().json.texto) }} }
+  }
+  ```
+
+**Aprendizados (por que essas escolhas):**
+- Não devolver **objeto** de uma expressão (`{{ ({...}) }}`) no body — dava `[undefined]`. Use **JSON literal com `{{ }}` embutidos**.
+- `message.content` usa **`{{ JSON.stringify(...) }}` sem aspas em volta** — escapa os `\n`/emojis do texto (senão o JSON quebra).
+- Use **`.first()`** e não `.item` (o pareamento de item quebra ao passar por nodes HTTP).
+- **source_id do WhatsApp = o número** (dígitos, sem `+`) → veio de `numero`, não precisa extrair do contato.
+- Caminhos que variam por versão do Chatwoot: criar contato → `payload.contact.contact_inboxes[0].source_id` e `payload.contact.id`; **buscar** contato → `payload[0].id`.
 
 **Gotchas:**
-- **Contato repetido** → 2ª notificação pro mesmo número: "Criar contato" retorna **422 (já existe)**.
-  Fallback a fazer: `GET /api/v1/accounts/1/contacts/search?q=+{numero}` e reusar.
-- Confirmar que o inbox aceita **mensagem livre proativa** (gateway não-oficial não tem janela 24h/template).
+- **Contato repetido** → resolvido pelo `Buscar contato` (não trava mais).
+- Confirmar que o inbox aceita **mensagem livre proativa** (gateway não-oficial não tem janela 24h/template) — validado no teste.
 
 ---
 
