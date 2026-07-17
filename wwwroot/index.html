@@ -1872,6 +1872,8 @@ async function carregarNotasReais() {
         lancadoEm: fmtDateTimeBRT(n.LancadoEm || ''),
         aprovadoPor: n.AprovadorAtual || '',
         aprovadoEm: n.AprovadoEm ? fmtDateTimeBRT(n.AprovadoEm) : null,
+        rejeitadoPor: n.RejeitadoPor || '',
+        rejeitadoEm: n.RejeitadoEm ? fmtDateTimeBRT(n.RejeitadoEm) : null,
         motivo: n.MotivoRejeicao || '',
         hash: (n.HashSHA256 || '').substring(0,16),
         urlPDF: extrairUrlHyperlink(n.UrlPDFStr) || extrairUrlHyperlink(n.UrlPDF),
@@ -3610,9 +3612,33 @@ const views = {
   },
 
   rejeitadas: () => {
-    const rj = notas.filter(n => n.status === 'rejeitada' || n.status === 'duplicada');
+    if (!window._filtroRejeitadas) window._filtroRejeitadas = { unidade: 'TODAS', diretoria: 'TODAS', motivo: '' };
+    const fr = window._filtroRejeitadas;
+    const todas = notas.filter(n => n.status === 'rejeitada' || n.status === 'duplicada');
+    // Diretorias disponiveis (distintas) pro dropdown
+    const diretoriasDisp = Array.from(new Set(todas.map(n => n.diretoria).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+    const rj = todas.filter(n =>
+      (fr.unidade === 'TODAS' || n.unidade === fr.unidade) &&
+      (fr.diretoria === 'TODAS' || n.diretoria === fr.diretoria) &&
+      (!fr.motivo || String(n.motivo||'').toLowerCase().indexOf(fr.motivo.toLowerCase()) >= 0)
+    );
+    const optSel = (v, cur) => `<option value="${escAttr(v)}"${v===cur?' selected':''}>`;
     return `<h2>Notas Rejeitadas</h2>
       <div class="view-sub">NFs rejeitadas por gestor ou automaticamente pelo sistema. Quem lançou recebeu e-mail + Teams.</div>
+      <div class="card" style="margin-bottom:14px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+        <div><label class="small muted" style="display:block;margin-bottom:4px">Unidade</label>
+          <select onchange="filtrarRejeitadas('unidade', this.value)">
+            ${['TODAS','SP','RJ','ES'].map(u => optSel(u, fr.unidade)+(u==='TODAS'?'Todas':u)+'</option>').join('')}
+          </select></div>
+        <div><label class="small muted" style="display:block;margin-bottom:4px">Diretoria</label>
+          <select onchange="filtrarRejeitadas('diretoria', this.value)">
+            ${optSel('TODAS', fr.diretoria)}Todas</option>${diretoriasDisp.map(d => optSel(d, fr.diretoria)+escHtml(d)+'</option>').join('')}
+          </select></div>
+        <div style="flex:1;min-width:200px"><label class="small muted" style="display:block;margin-bottom:4px">Motivo (contém)</label>
+          <input type="search" value="${escAttr(fr.motivo)}" placeholder="ex.: estorno, vencimento, divergente"
+                 onchange="filtrarRejeitadas('motivo', this.value)" style="width:100%"></div>
+        <div class="small muted">${rj.length} de ${todas.length}</div>
+      </div>
       <!-- Versao desktop: tabela -->
       <div class="card data-table-desktop">
         <table class="data">
@@ -3628,7 +3654,7 @@ const views = {
                 <td>${statusPill(n.status, n)}</td>
                 <td>${escHtml(n.motivo || '—')}</td>
                 <td>${n.lancadoPor}<br><span class="small muted">${n.lancadoEm}</span></td>
-                <td>${n.aprovadoPor||'—'}<br><span class="small muted">${n.aprovadoEm||'—'}</span></td>
+                <td>${n.rejeitadoPor||'—'}<br><span class="small muted">${n.rejeitadoEm||'—'}</span></td>
                 <td class="center" style="white-space:nowrap">
                   <button class="icon-btn" onclick="abrirPdfRejeitado('${n.spId || n.id}')" title="Ver PDF rejeitado">📄 Ver</button>
                 </td>
@@ -3660,7 +3686,7 @@ const views = {
           <td>${escHtml(fornecedorOf(n).razao)}</td>
           <td class="num">${fmtBRL(n.valor)}</td>
           <td>${escHtml(n.motivo||'—')}</td>
-          <td>${n.aprovadoPor||'—'}<br><span class="small muted">${n.aprovadoEm||'—'}</span></td>
+          <td>${n.rejeitadoPor||'—'}<br><span class="small muted">${n.rejeitadoEm||'—'}</span></td>
           <td class="center" style="white-space:nowrap">
             <button class="icon-btn" onclick="abrirPdfRejeitado('${n.spId || n.id}')" title="Ver PDF rejeitado">📄 Ver</button>
           </td>
@@ -6664,6 +6690,12 @@ function limpaFiltroAprovadas() {
 function filtrarDashboard(unidade) {
   window._filtroDashboard = { unidade: unidade };
   showView('dashboard');
+}
+
+function filtrarRejeitadas(campo, valor) {
+  if (!window._filtroRejeitadas) window._filtroRejeitadas = { unidade: 'TODAS', diretoria: 'TODAS', motivo: '' };
+  window._filtroRejeitadas[campo] = valor;
+  showView('rejeitadas');
 }
 
 function pieByUnit(aprovadas) {

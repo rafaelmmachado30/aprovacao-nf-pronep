@@ -337,7 +337,11 @@ module.exports = async function (context, req) {
     const patchPayload = buildPatchPayload({
       Status: 'Rejeitada',
       MotivoRejeicao: motivoCompletoStr,
-      AprovadoEm: new Date().toISOString()
+      AprovadoEm: new Date().toISOString(),
+      // Registra QUEM rejeitou/estornou (antes o front mostrava o aprovador por engano).
+      // buildPatchPayload ignora se a coluna nao existir (rode MigrarColunaRejeitadoPor).
+      RejeitadoPor: aprovadorEmail,
+      RejeitadoEm: new Date().toISOString()
     }, colMap, colTypes);
     await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(patchPayload);
 
