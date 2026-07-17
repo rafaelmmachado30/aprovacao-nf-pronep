@@ -1,78 +1,53 @@
-# Handoff — Continuação da automação (n8n / WhatsApp)
+# Handoff — Automação NF / n8n / WhatsApp (estado consolidado)
 
-> Documento de retomada. Foco: **o que falta**. Para arquitetura e detalhes já
-> implementados, ver [`automacao-emails-nf.md`](automacao-emails-nf.md).
-> Última atualização: 2026-07-17.
+> **Fonte única da verdade, versionada no repo.** Substitui os handoffs soltos
+> (sessão 1 e o `..._sessao2_...` que ficou no Downloads). Sempre atualize ESTE
+> arquivo — assim os dois notebooks veem o mesmo estado via git.
+> Arquitetura detalhada: [`automacao-emails-nf.md`](automacao-emails-nf.md).
+> Última atualização: 2026-07-17 (sessão 3, no Mac).
 
 ---
 
-## 1. Onde paramos (resumo de 30s)
+## 0. Reconciliação de estado (importante — corrige o handoff da sessão 2)
 
-A automação de **ingestão de NF por e-mail** está pronta **do lado do sistema**
-(Azure Functions). O que falta é **o lado do n8n** (montar o fluxo que recebe o
-webhook e dispara o WhatsApp) + algumas **configurações** no Azure/SharePoint.
+O handoff da sessão 2 afirmava que `api/VarrerEmailsNF/` **não existia** e que as
+Fases 1/2a/2b/2d **não tinham sido construídas**. **Isso estava incorreto** — quase
+certo por ter olhado um clone desatualizado. Verificado no `main` (repo
+`rafaelmmachado30/aprovacao-nf-pronep`, m duplo):
 
-**Fluxo pretendido, ponta a ponta:**
+- ✅ `api/VarrerEmailsNF/` **existe no `main`** com histórico real (Fases 2b/2d + calibração).
+- ✅ **Não há nada a reconstruir** — a "seção 4: construir VarrerEmailsNF" do doc antigo é desnecessária.
+- ✅ A coluna `TelefoneNotificacao` foi além do doc: **PR #28 mergeado** e **deploy concluído** (a migração já está no ar).
+- ✅ Todos os PRs #23–#28 mergeados.
+
+---
+
+## 1. Fluxo ponta a ponta
 
 ```
 Caixa de e-mail da diretoria
-      │  (Graph Mail.Read)
+      │  (Graph Mail.Read — permissão já liberada)
       ▼
 api/VarrerEmailsNF  ── classifica NF x ruído ── baixa PDFs ── salva no SharePoint
-      │                                                         "Novas NFs - Automacao/{Unidade}/Diretoria {Diretoria}/"
-      │  POST (webhook, Fase 2d)
+      │                          "Novas NFs - Automacao/{Unidade}/Diretoria {Diretoria}/"
+      │  POST no N8N_WEBHOOK_NF (Fase 2d, best-effort)
       ▼
-   n8n  ◄── FALTA MONTAR ──►  gateway WhatsApp (não-oficial) ──► gestor da diretoria
+   n8n (Webhook → Montar msg → Chatwoot) ──► WhatsApp do gestor da diretoria
 ```
 
 ---
 
-## 2. Pronto (lado do sistema) — já em produção
+## 2. Pronto (lado do sistema) — em produção no `main`
 
-- **Fase 1** — `api/VarrerEmailsNF` lê e-mails, classifica (NF vs cobrança/boleto/
-  interno), baixa os PDFs e grava no SharePoint. Classificador calibrado com dry-run real.
+- **Fase 1** — `api/VarrerEmailsNF` lê e-mails, classifica (NF vs cobrança/boleto/interno),
+  baixa os PDFs e grava no SharePoint. Classificador calibrado com dry-run real.
 - **Fase 2a** — campo **e-mail** no cadastro de fornecedor (front).
-- **Fase 2b** — corroboração pelo **Fechamento do Mês** (reforça a classificação).
-- **Fase 2d (lado sistema)** — `VarrerEmailsNF` faz **POST no webhook do n8n** quando
-  há candidatos (best-effort; se o webhook não estiver setado, apenas pula e reporta).
+- **Fase 2b** — corroboração pelo **Fechamento do Mês**.
+- **Fase 2d (lado sistema)** — POST no webhook do n8n quando há candidatos (se webhook vazio, pula e reporta).
+- **Coluna `TelefoneNotificacao`** — endpoint `api/MigrarColunaTelefoneNotificacao`
+  (admin, idempotente) **no ar**. Cria coluna Texto na lista `PRONEP-NF-Diretorias`.
 
----
-
-## 3. O que FALTA
-
-### 3.1 Config no Azure (App Settings) — **pré-requisito do WhatsApp**
-
-Static Web App → Configuration → Application settings:
-
-| App Setting | Para quê | Status |
-|---|---|---|
-| `N8N_WEBHOOK_NF` | URL do webhook do n8n que recebe o POST da Fase 2d | ⬜ definir |
-| `AUTOMACAO_EMAILS_SECRET` | Segredo do header `X-Automacao-Secret` p/ o cron chamar sem sessão (Fase 3) | ⬜ definir |
-| `EMAIL_DOMINIO_INTERNO` | Domínio interno a ignorar (default `pronep.com.br`) | opcional |
-
-> Enquanto `N8N_WEBHOOK_NF` estiver vazio, a varredura funciona normal e só
-> reporta `notificado: { enviado:false, motivo:'N8N_WEBHOOK_NF nao configurado' }`.
-
-### 3.2 Coluna no SharePoint (lista **PRONEP-NF-Diretorias**)
-
-| Coluna | Tipo | Para quê |
-|---|---|---|
-| `TelefoneNotificacao` | Texto | Telefone **E.164** (ex.: `+5511999998888`) que RECEBE o WhatsApp. Casado por Unidade+Diretoria (fallback: só Diretoria). | ⬜ criar + preencher |
-
-### 3.3 n8n — **o fluxo a montar (sua parte principal)**
-
-Montar um workflow **novo, dedicado à Pronep** (decisão já tomada: novo Chatwoot
-dedicado, gateway **não-oficial** tipo Evolution/Z-API). Ponto de partida: seu
-`Byoterapia.json` (mesmo modelo, duplicado e adaptado).
-
-**O n8n precisa:**
-1. **Webhook node** (trigger) — a URL dele vira o `N8N_WEBHOOK_NF`.
-2. Ler o **payload** (formato abaixo).
-3. Montar a mensagem de WhatsApp (template curto: gestor, diretoria, nº de NFs, nomes de arquivo).
-4. Enviar via **gateway** para o número `payload.telefone`.
-5. (Opcional) Responder 200 rápido — o sistema trata como best-effort.
-
-**Payload EXATO que o sistema envia** (de `api/VarrerEmailsNF/index.js`):
+**Payload EXATO enviado ao n8n** (de `api/VarrerEmailsNF/index.js`; contrato travado):
 
 ```json
 {
@@ -83,88 +58,135 @@ dedicado, gateway **não-oficial** tipo Evolution/Z-API). Ponto de partida: seu
   "pasta": "Novas NFs - Automacao/SP/Diretoria Comercial",
   "total": 2,
   "candidatos": [
-    {
-      "fornecedor": "ACME LTDA",
-      "assunto": "NF 12345 - ACME",
-      "confianca": "alta",
-      "esperado": "ACME LTDA",
-      "arquivos": ["nf-12345.pdf"]
-    }
+    { "fornecedor": "ACME LTDA", "assunto": "NF 12345 - ACME", "confianca": "alta", "esperado": "ACME LTDA", "arquivos": ["nf-12345.pdf"] }
   ]
 }
 ```
 
-Campos úteis pra mensagem: `diretoria`, `unidade`, `total`, e por candidato
-`assunto` / `fornecedor` / `arquivos`. O `telefone` é o destino.
-
-> Se `telefone` vier vazio (diretoria sem `TelefoneNotificacao`), o sistema ainda
-> faz o POST mas marca `semTelefone:true` — o n8n deve tratar (ex.: não enviar, ou
-> mandar pra um número de fallback).
-
-### 3.4 Fase 3 — automação agendada (depois do WhatsApp funcionando)
-
-- **Cron** (GitHub Actions ou Azure) chamando `VarrerEmailsNF` para **todas as
-  diretorias**, autenticado pelo header `X-Automacao-Secret: <AUTOMACAO_EMAILS_SECRET>`.
-- Hoje o endpoint já aceita esse header (`viaSecret`) OU sessão admin.
-- Decidir janela (`?dias=`) e frequência.
-
-### 3.5 Fase 2c (opcional / adiada)
-
-Notificação via SAN (assistente interno) além do WhatsApp. Não bloqueia nada.
+- `telefone` vem em **E.164** (com `+`). O n8n deriva `numero` (só dígitos) disso.
+- **Não** há `numero` nem `semTelefone` no corpo — se a diretoria não tiver telefone,
+  vem `telefone: ""` e o n8n barra pelo IF `numero is not empty`.
 
 ---
 
-## 4. Como testar (referência rápida)
+## 3. O que FALTA (checklist real)
 
-Logado como **admin** no app (ou via `X-Automacao-Secret`):
+1. [ ] **Rodar 1× `GET /api/MigrarColunaTelefoneNotificacao`** (logado admin) → depois
+       preencher os telefones **E.164** (`+5511999998888`) na lista `PRONEP-NF-Diretorias`,
+       por Unidade+Diretoria. (Endpoint já no ar.)
+2. [ ] **n8n**: importar o `PronepNF_Notificacao.json` limpo e **validar o envio Chatwoot** ponta a ponta (seção 5).
+3. [ ] Copiar a **Production URL** do Webhook n8n → setar `N8N_WEBHOOK_NF` nas App Settings (seção 6).
+4. [ ] Fase 3: cron chamando `VarrerEmailsNF` p/ todas as diretorias + `AUTOMACAO_EMAILS_SECRET`.
+
+> ⚠️ **O arquivo `PronepNF_Notificacao.json` não está no Mac** (`~/Downloads/30_n8n_Hostinger/`
+> não existe aqui). Trazer do Windows **ou** re-exportar da instância n8n.
+
+---
+
+## 4. n8n — workflow (montado na sessão 2)
+
+- **Fluxo**: `Webhook NF → Montar mensagem → Config → Responder 200 → Tem telefone? (IF numero not empty) → Criar contato → Criar conversa + msg`
+- **Envio: Chatwoot proativo** (NÃO Evolution direto). O node reativo do Byoterapia não serve (depende de conversa existente).
+- **Montagem da mensagem: OK** (texto formatado + `numero` só dígitos, sem `+`). **Falta validar o envio Chatwoot.**
+
+**Chatwoot desta instância:**
+- URL: `http://82.25.79.134:3000` · `account_id = 1` · `inbox_id = 1` (inbox WhatsApp)
+- Credencial n8n: **"ChatWoot account"** (id `XotA5fFCZQjC9Iki`)
+
+**Bodies dos nodes Chatwoot** (backup):
+
+- **Criar contato** — `POST {{url}}/api/v1/accounts/{{account_id}}/contacts`
+  ```
+  ={{ { "inbox_id": $json.inbox_id, "name": "Diretoria " + $json.diretoria, "phone_number": "+" + $json.numero } }}
+  ```
+- **Criar conversa + msg** — `POST {{url}}/api/v1/accounts/{{account_id}}/conversations`
+  ```
+  ={{ {
+    "source_id": $('Criar contato').item.json.payload.contact_inboxes[0].source_id,
+    "inbox_id": $('Config').item.json.inbox_id,
+    "contact_id": $('Criar contato').item.json.payload.contact.id,
+    "message": { "content": $('Montar mensagem').item.json.texto }
+  } }}
+  ```
+  (`message.content` no `POST /conversations` cria a conversa **e** manda a 1ª msg.)
+
+**Gotchas:**
+- **Contato repetido** → 2ª notificação pro mesmo número: "Criar contato" retorna **422 (já existe)**.
+  Fallback a fazer: `GET /api/v1/accounts/1/contacts/search?q=+{numero}` e reusar.
+- Confirmar que o inbox aceita **mensagem livre proativa** (gateway não-oficial não tem janela 24h/template).
+
+---
+
+## 5. Validar o envio Chatwoot (passo a passo)
+
+**Webhook** — node Webhook NF → "Listen for test event". Test URL:
+`https://n8n-wrxo.srv1526230.hstgr.cloud/webhook-test/pronep-nf`
+
+Disparar (trocar `telefone` pelo seu número):
+
+```bash
+curl -X POST "https://n8n-wrxo.srv1526230.hstgr.cloud/webhook-test/pronep-nf" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "gestor": "rafael.machado@pronep.com.br",
+    "diretoria": "Comercial",
+    "unidade": "SP",
+    "telefone": "+5511999998888",
+    "pasta": "Novas NFs - Automacao/SP/Diretoria Comercial",
+    "total": 2,
+    "candidatos": [
+      {"fornecedor":"ACME LTDA","assunto":"NF 12345 - ACME","confianca":"alta","esperado":"ACME LTDA","arquivos":["nf-12345.pdf"]},
+      {"fornecedor":"BETA SA","assunto":"NF 67890 - BETA","confianca":"media","esperado":"BETA SA","arquivos":["nf-67890.pdf"]}
+    ]
+  }'
+```
+
+**Ordem de validação:**
+1. Rode **só o node "Criar contato"** e olhe o OUTPUT. Confirme os caminhos
+   `payload.contact_inboxes[0].source_id` e `payload.contact.id` (o wrapper **varia por versão do Chatwoot**).
+2. Se o contato criar OK, o "Criar conversa + msg" dispara e a mensagem cai no WhatsApp.
+
+---
+
+## 6. App Settings pendentes (Azure SWA → Configuration)
+
+| App Setting | Para quê | Status |
+|---|---|---|
+| `N8N_WEBHOOK_NF` | Production URL do Webhook n8n (destino do POST da Fase 2d) | ⬜ setar após validar envio |
+| `AUTOMACAO_EMAILS_SECRET` | Segredo do header `X-Automacao-Secret` (cron/Fase 3) | ⬜ definir |
+| `EMAIL_DOMINIO_INTERNO` | Domínio interno a ignorar (default `pronep.com.br`) | opcional |
+
+---
+
+## 7. Como testar o VarrerEmailsNF (referência)
+
+Logado admin (ou header `X-Automacao-Secret`):
 
 ```
-# DRY-RUN — só classifica e reporta, não baixa nada:
+# DRY-RUN — só classifica e reporta, não baixa:
 /api/VarrerEmailsNF?gestor=<email-da-caixa>&dias=3&dryRun=1
-
-# Real — baixa PDFs pra pasta e (se N8N_WEBHOOK_NF setado) dispara o webhook:
+# Real — baixa PDFs e (se N8N_WEBHOOK_NF setado) dispara o webhook:
 /api/VarrerEmailsNF?gestor=<email-da-caixa>&dias=3
 ```
 
-Query params: `gestor` (obrigatório p/ resolver Unidade/Diretoria), `dias` (1–30,
-default 3), `limite` (1–100, default 50), `dryRun` (`1`/`true`), `unidade`,
-`diretoria` (override). Resposta traz `candidatos`, `baixados`, `notificado`,
-`ignoradosResumo`.
+Params: `gestor` (obrigatório), `dias` (1–30, def 3), `limite` (1–100, def 50),
+`dryRun` (`1`/`true`), `unidade`, `diretoria`. Idempotência via **ledger** no SharePoint.
 
-Idempotência: um **ledger** no SharePoint evita reprocessar o mesmo e-mail.
+Schema `PRONEP-NF-Diretorias`: chaveada por `Title = "Unidade|Diretoria"` (ex.: `SP|Suprimentos`);
+colunas internas renomeadas `field_1..field_5` (Unidade, Diretoria, Email, Nome, GrupoEntraId).
+A `TelefoneNotificacao` (criada via Graph) mantém nome interno próprio (não vira `field_6`).
 
 ---
 
-## 5. Decisões já tomadas (não reabrir)
+## 8. Decisões já tomadas (não reabrir)
 
-- **Estrutura de pastas** (geral do sistema): **mantida** — Aprovadas por data;
-  Pendentes/Rejeitadas por `{Unidade}/Diretoria {Diretoria}`. Limpeza do legado
-  **adiada** (não é prioridade). "Garantir daqui pra frente" = feito (ver PR #26).
+- **Estrutura de pastas** mantida (Aprovadas por data; Pendentes/Rejeitadas por `{Unidade}/Diretoria {Diretoria}`). Limpeza do legado **adiada**. "Garantir daqui pra frente" = feito (#26: aprovação/rejeição por identidade exata do PDF).
 - Pasta da automação: `Novas NFs - Automacao/{Unidade}/Diretoria {Diretoria}/`.
-- WhatsApp: gateway **não-oficial**; Chatwoot **novo, dedicado à Pronep**.
-- Permissão `Mail.Read` (Graph) já liberada e escopada.
+- WhatsApp via **Chatwoot proativo** em instância dedicada; gateway **não-oficial**.
+- `Mail.Read` (Graph) liberada e escopada.
 
 ---
-
-## 6. Estado dos PRs abertos (verificar no GitHub ao retomar)
-
-| PR | O quê | Ação ao retomar |
-|---|---|---|
-| #25 | Filtro de Motivo (dropdown) na tela de Rejeitadas | mergear se ainda aberto |
-| #26 | `AprovarNota` resolve PDF por identidade exata (blindagem NumeroNF duplicado) + `shared/pdfNota.js` | mergear (correção crítica) |
-
-Após mergear #23 (já feito): rodar 1× `/api/MigrarColunaRejeitadoPor` (admin) — **já executado** (colunas `RejeitadoPor`/`RejeitadoEm` criadas).
-
----
-
-## 7. Primeiros passos na próxima sessão (checklist)
-
-1. [ ] Conferir/mergear PRs #25 e #26; acompanhar deploy.
-2. [ ] Criar coluna `TelefoneNotificacao` na lista Diretorias e preencher os números.
-3. [ ] Montar o workflow n8n (webhook → mensagem → gateway) a partir do `Byoterapia.json`.
-4. [ ] Setar `N8N_WEBHOOK_NF` (URL do webhook) nas App Settings.
-5. [ ] Teste real de 1 diretoria: `/api/VarrerEmailsNF?gestor=...&dias=3` e conferir o WhatsApp.
-6. [ ] Ajustar template da mensagem conforme o resultado.
-7. [ ] Fase 3: cron + `AUTOMACAO_EMAILS_SECRET` + todas as diretorias.
 
 **Produção:** `https://purple-forest-09588fe10.7.azurestaticapps.net`
+**Repo:** `github.com/rafaelmmachado30/aprovacao-nf-pronep`
+**n8n:** `https://n8n-wrxo.srv1526230.hstgr.cloud`
