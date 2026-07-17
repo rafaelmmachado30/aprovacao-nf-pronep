@@ -23,6 +23,7 @@ const { getMergedRoles, isAdminEmail } = require('../shared/authz');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { notificar } = require('../shared/notificar');
 const { getGraphClient } = require('../shared/graph');
+const { urlDeCampo, acharPdfAlvo } = require('../shared/pdfNota');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 const LIST_CONFIG = 'PRONEP-NF-Config';
@@ -364,35 +365,23 @@ module.exports = async function (context, req) {
     diag.step = 'find_pdf';
     // Encontra o PDF em /Pendentes/{Unidade}/Diretoria {Diretoria}/
     const folder = `Notas Fiscais/Pendentes/${f.Unidade}/Diretoria ${f.Diretoria}`;
-    // Lista arquivos da pasta e acha o que bate com o NumeroNF (ou usa UrlPDF do item)
+    // Resolve o PDF por IDENTIDADE EXATA (nome do arquivo guardado na URL da nota);
+    // fallback ESTRITO numero+valor so se UNICO. Imune a NumeroNF duplicado colidindo
+    // com o SEQUENCIAL do nome do arquivo — era o bug que, na aprovacao, carimbava/movia/
+    // deletava o PDF de OUTRA NF de mesmo numero (mesmo padrao ja corrigido no RejeitarNota).
     const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folder}:/children`).get();
     const files = (folderListResp.value || []).filter(x => x.file);
-    // Tenta achar pelo numero. Suporta:
-    //   - Padrao antigo: {numero}_{razao}_{ts}_*.pdf (numero no inicio, sem padding)
-    //   - Padrao intermediario: {data}_{012345}_..._.pdf (numero zero-padded - 1a versao)
-    //   - Padrao atual: {data}_{12345}_..._.pdf (numero sem zeros a esquerda)
     const numero = String(f.NumeroNF || '');
-    const numClean = numero.replace(/[^A-Za-z0-9]/g, '');
-    const numUnpadded = /^\d+$/.test(numClean) ? (numClean.replace(/^0+/, '') || '0') : numClean;
-    const numPadded = /^\d+$/.test(numClean) ? numClean.padStart(6, '0') : numClean;
-    const candidates = Array.from(new Set([numero, numClean, numUnpadded, numPadded].filter(Boolean)));
-    let target = null;
-    for (const n of candidates) {
-      target = files.find(x => x.name && x.name.startsWith(n + '_'));
-      if (target) break;
-    }
-    if (!target) {
-      for (const n of candidates) {
-        target = files.find(x => x.name && x.name.indexOf('_' + n + '_') >= 0);
-        if (target) break;
-      }
-    }
-    // A2: SEM fallback "mais recente". Antes, se nenhum arquivo batesse pelo numero,
-    // pegava o PDF modificado mais recentemente da pasta COMPARTILHADA e o carimbava/
-    // movia/deletava — podendo agir sobre a NF de OUTRO fornecedor. Agora falha com 404.
+    const urlNota = urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF);
+    const achado = acharPdfAlvo(files, { url: urlNota, numero: f.NumeroNF, valor: f.Valor });
+    const target = achado.target;
+    diag.matchPor = achado.matchPor;
+    if (achado.ambiguo) diag.matchAmbiguo = achado.ambiguo;
+    // A2: SEM fallback "mais recente" e SEM match frouxo so por numero. Sem identificacao
+    // CONFIAVEL, NAO carimba/move/deleta nada (evita agir no PDF errado). Falha com 404.
     if (!target) {
       const nomes = files.map(x => x.name).slice(0, 15);
-      context.res = { status: 404, body: { error: 'PDF da NF ' + numero + ' nao encontrado em Pendentes pelo numero. Verifique o arquivo no SharePoint (pode ter sido renomeado).', folder, arquivosDisponiveis: nomes } };
+      context.res = { status: 404, body: { error: 'PDF da NF ' + numero + ' nao identificado com seguranca em Pendentes (por URL/nome exato ou numero+valor unico). Verifique o arquivo no SharePoint.', folder, arquivosDisponiveis: nomes, ambiguo: achado.ambiguo || undefined } };
       return;
     }
     diag.pdfFound = { name: target.name, id: target.id };
