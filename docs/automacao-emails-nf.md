@@ -32,8 +32,29 @@ automação nunca escreve no disco da máquina.
 - **Fase 1 (feita): ler + classificar + baixar.** Endpoint `VarrerEmailsNF` varre 1 caixa,
   identifica NF (assunto: nota fiscal/NF/fatura/boleto/DANFE; ou remetente ∈ Fornecedores),
   baixa o PDF e grava no ledger. Sem notificação.
-- **Fase 2:** notificação SAN + `POST` no webhook n8n (WhatsApp), com telefone da lista.
+- **Fase 2:** corroboração pelo Fechamento (feita) + campo e-mail no fornecedor (feito)
+  + notificação WhatsApp via n8n (lado do sistema feito; lado n8n pendente).
 - **Fase 3:** cron (GitHub Actions) varrendo todas as diretorias + rota anonymous p/ o secret.
+
+## Notificação WhatsApp (Fase 2d)
+No modo real, achando candidatos, o sistema faz `POST` no `N8N_WEBHOOK_NF` (App Setting).
+Se a env não estiver setada, a notificação é **pulada** (não quebra). Best-effort.
+
+Payload enviado:
+```json
+{
+  "gestor": "...", "diretoria": "...", "unidade": "...",
+  "telefone": "+55...",   // coluna TelefoneNotificacao da lista Diretorias (E.164)
+  "pasta": "Novas NFs - Automacao/SP/Diretoria Tecnologia",
+  "total": 2,
+  "candidatos": [ { "fornecedor": "VMISAUDE", "assunto": "...", "confianca": "alta",
+                    "esperado": "VMISAUDE", "arquivos": ["NF 10832.pdf"] } ]
+}
+```
+**Lado n8n (a construir):** workflow novo e mínimo na instância Chatwoot da Pronep —
+`Webhook (recebe o payload) → Chatwoot: achar/criar contato pelo telefone → achar/criar
+conversa → POST .../conversations/{id}/messages` com a mensagem montada. Gateway
+não-oficial (texto livre, sem template). A URL do Webhook vira o `N8N_WEBHOOK_NF`.
 
 ## Como testar a Fase 1 (após o `Mail.Read` estar ativo)
 Logado como **admin**, no navegador:
