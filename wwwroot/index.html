@@ -3617,10 +3617,12 @@ const views = {
     const todas = notas.filter(n => n.status === 'rejeitada' || n.status === 'duplicada');
     // Diretorias disponiveis (distintas) pro dropdown
     const diretoriasDisp = Array.from(new Set(todas.map(n => n.diretoria).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
+    // Motivos disponiveis (categoria, sem observacao/prefixo de estorno) pro dropdown
+    const motivosDisp = Array.from(new Set(todas.map(n => motivoBase(n.motivo)).filter(Boolean))).sort((a,b)=>a.localeCompare(b));
     const rj = todas.filter(n =>
       (fr.unidade === 'TODAS' || n.unidade === fr.unidade) &&
       (fr.diretoria === 'TODAS' || n.diretoria === fr.diretoria) &&
-      (!fr.motivo || String(n.motivo||'').toLowerCase().indexOf(fr.motivo.toLowerCase()) >= 0)
+      (!fr.motivo || motivoBase(n.motivo) === fr.motivo)
     );
     const optSel = (v, cur) => `<option value="${escAttr(v)}"${v===cur?' selected':''}>`;
     return `<h2>Notas Rejeitadas</h2>
@@ -3634,9 +3636,10 @@ const views = {
           <select onchange="filtrarRejeitadas('diretoria', this.value)">
             ${optSel('TODAS', fr.diretoria)}Todas</option>${diretoriasDisp.map(d => optSel(d, fr.diretoria)+escHtml(d)+'</option>').join('')}
           </select></div>
-        <div style="flex:1;min-width:200px"><label class="small muted" style="display:block;margin-bottom:4px">Motivo (contém)</label>
-          <input type="search" value="${escAttr(fr.motivo)}" placeholder="ex.: estorno, vencimento, divergente"
-                 onchange="filtrarRejeitadas('motivo', this.value)" style="width:100%"></div>
+        <div style="flex:1;min-width:200px"><label class="small muted" style="display:block;margin-bottom:4px">Motivo</label>
+          <select onchange="filtrarRejeitadas('motivo', this.value)" style="width:100%">
+            ${optSel('', fr.motivo)}Todos</option>${motivosDisp.map(m => optSel(m, fr.motivo)+escHtml(m)+'</option>').join('')}
+          </select></div>
         <div class="small muted">${rj.length} de ${todas.length}</div>
       </div>
       <!-- Versao desktop: tabela -->
@@ -6696,6 +6699,17 @@ function filtrarRejeitadas(campo, valor) {
   if (!window._filtroRejeitadas) window._filtroRejeitadas = { unidade: 'TODAS', diretoria: 'TODAS', motivo: '' };
   window._filtroRejeitadas[campo] = valor;
   showView('rejeitadas');
+}
+
+// Extrai a CATEGORIA do motivo de rejeicao (sem observacao livre nem prefixo de estorno).
+// Gravado como: "[ESTORNO PELO FINANCEIRO] {categoria} — {observacao}".
+function motivoBase(m) {
+  let s = String(m || '').trim();
+  if (!s) return '';
+  s = s.replace(/^\[ESTORNO PELO FINANCEIRO\]\s*/i, '');
+  const i = s.indexOf(' — ');
+  if (i >= 0) s = s.slice(0, i);
+  return s.trim();
 }
 
 function pieByUnit(aprovadas) {
