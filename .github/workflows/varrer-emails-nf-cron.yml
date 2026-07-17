@@ -12,11 +12,12 @@ name: Varrer E-mails NF (cron automatico)
 #       Settings -> Secrets and variables -> Actions -> Variables -> New variable
 #       Ex.: rafael.machado@pronep.com.br, financeiro@pronep.com.br
 #
-# GitHub cron usa UTC. BRT = UTC-3. Roda 08h e 14h BRT em dias uteis (pode atrasar 5-15min).
+# GitHub cron usa UTC. BRT = UTC-3. Roda DE HORA EM HORA, 06h-19h BRT (=09h-22h UTC),
+# em dias uteis (14 execucoes/dia). GitHub pode atrasar 5-15min — ok pra intervalo horario.
 
 on:
   schedule:
-    - cron: '0 11,17 * * 1-5'
+    - cron: '0 9-22 * * 1-5'
   workflow_dispatch:
     inputs:
       dias:
