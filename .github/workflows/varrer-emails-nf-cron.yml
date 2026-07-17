@@ -35,14 +35,15 @@ jobs:
       - name: Varrer todas as caixas configuradas
         env:
           SECRET: ${{ secrets.AUTOMACAO_EMAILS_SECRET }}
-          GESTORES: ${{ vars.VARRER_GESTORES }}
+          # aceita VARRER_GESTORES como Variable (recomendado) OU como Secret (fallback)
+          GESTORES: ${{ vars.VARRER_GESTORES || secrets.VARRER_GESTORES }}
           DIAS: ${{ github.event.inputs.dias || '2' }}
         run: |
           if [ -z "$SECRET" ]; then
             echo "::error::Secret AUTOMACAO_EMAILS_SECRET nao configurado no repo"; exit 1
           fi
           if [ -z "$GESTORES" ]; then
-            echo "::error::Variable VARRER_GESTORES nao configurada (Settings -> Variables). Liste as caixas a varrer."; exit 1
+            echo "::error::VARRER_GESTORES vazio. Configure como Variable (recomendado) ou Secret em Settings -> Secrets and variables -> Actions. Liste as caixas a varrer."; exit 1
           fi
           BASE="https://purple-forest-09588fe10.7.azurestaticapps.net/api/VarrerEmailsNF"
           # normaliza separadores (virgula/quebra de linha -> espaco) e itera
