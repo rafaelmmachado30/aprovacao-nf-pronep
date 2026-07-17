@@ -19,6 +19,7 @@ const { isAdminEmail } = require('../shared/authz');
 const { notificar } = require('../shared/notificar');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { getGraphClient } = require('../shared/graph');
+const { urlDeCampo, nomeArquivoDeUrl } = require('../shared/pdfNota');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 // Resolver local: alem de siteId/listId, resolve driveId + colMap desta lista.
@@ -81,19 +82,7 @@ function normalizeFields(fields, invColMap) {
   return out;
 }
 
-// Extrai a URL de um campo hyperlink (pode vir string ou { Url, Description }).
-function urlDeCampo(v) {
-  if (!v) return '';
-  if (typeof v === 'string' && v.indexOf('http') === 0) return v;
-  if (typeof v === 'object' && v.Url && String(v.Url).indexOf('http') === 0) return v.Url;
-  return '';
-}
-// Nome exato do arquivo a partir da URL armazenada na nota (unico: inclui o valor).
-function nomeArquivoDeUrl(url) {
-  if (!url) return '';
-  try { return decodeURIComponent(String(url).split('?')[0].split('/').pop() || ''); }
-  catch (e) { return String(url).split('?')[0].split('/').pop() || ''; }
-}
+// urlDeCampo / nomeArquivoDeUrl agora vem de shared/pdfNota (usados tambem no AprovarNota).
 
 // Aplica watermark REJEITADA (vermelho, 4 linhas: REJEITADA + data + por + motivo)
 async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
