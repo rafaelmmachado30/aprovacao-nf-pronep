@@ -1,0 +1,74 @@
+name: Varrer E-mails NF (cron automatico)
+
+# Fase 3: roda a varredura de NF por e-mail AUTOMATICAMENTE, em horario comercial,
+# para TODAS as caixas configuradas. Chama /api/VarrerEmailsNF (modo real) com o
+# header X-Automacao-Secret. A idempotencia (ledger no SharePoint) evita reprocessar
+# o mesmo e-mail entre execucoes.
+#
+# Pre-requisitos:
+#   - Repository SECRET  AUTOMACAO_EMAILS_SECRET  = mesmo valor da App Setting homonima no Azure.
+#   - Repository VARIABLE VARRER_GESTORES         = caixas a varrer (e-mails), separadas por
+#                                                    virgula, espaco ou quebra de linha.
+#       Settings -> Secrets and variables -> Actions -> Variables -> New variable
+#       Ex.: rafael.machado@pronep.com.br, financeiro@pronep.com.br
+#
+# GitHub cron usa UTC. BRT = UTC-3. Roda 08h e 14h BRT em dias uteis (pode atrasar 5-15min).
+
+on:
+  schedule:
+    - cron: '0 11,17 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dias:
+        description: 'Janela de dias (recebidos)'
+        required: false
+        default: '2'
+
+concurrency:
+  group: varrer-emails-nf-cron
+  cancel-in-progress: false
+
+jobs:
+  varrer-todas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Varrer todas as caixas configuradas
+        env:
+          SECRET: ${{ secrets.AUTOMACAO_EMAILS_SECRET }}
+          GESTORES: ${{ vars.VARRER_GESTORES }}
+          DIAS: ${{ github.event.inputs.dias || '2' }}
+        run: |
+          if [ -z "$SECRET" ]; then
+            echo "::error::Secret AUTOMACAO_EMAILS_SECRET nao configurado no repo"; exit 1
+          fi
+          if [ -z "$GESTORES" ]; then
+            echo "::error::Variable VARRER_GESTORES nao configurada (Settings -> Variables). Liste as caixas a varrer."; exit 1
+          fi
+          BASE="https://purple-forest-09588fe10.7.azurestaticapps.net/api/VarrerEmailsNF"
+          # normaliza separadores (virgula/quebra de linha -> espaco) e itera
+          LISTA=$(printf '%s' "$GESTORES" | tr ',\n\r' '   ')
+          TOTAL=0; FALHAS=0
+          for G in $LISTA; do
+            [ -z "$G" ] && continue
+            TOTAL=$((TOTAL+1))
+            ENC=$(printf %s "$G" | sed 's/@/%40/')
+            URL="${BASE}?gestor=${ENC}&dias=${DIAS}&dryRun=0"
+            echo "======================================================"
+            echo "Varrendo: $G  (dias=${DIAS})"
+            HTTP_CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+              -H "X-Automacao-Secret: $SECRET" -H "Accept: application/json" \
+              --max-time 290 "$URL")
+            echo "HTTP $HTTP_CODE"
+            head -c 4000 /tmp/resp.json; echo ""
+            # nao derruba o job se UMA caixa falhar — segue pras demais (best-effort)
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "::warning::Caixa $G retornou HTTP $HTTP_CODE"
+              FALHAS=$((FALHAS+1))
+            fi
+          done
+          echo "======================================================"
+          echo "Resumo: $TOTAL caixa(s), $FALHAS com falha."
+          # So marca o job como falho se TODAS falharem (config/secret errado).
+          if [ "$TOTAL" -gt 0 ] && [ "$FALHAS" -eq "$TOTAL" ]; then
+            echo "::error::Todas as caixas falharam — verifique SECRET/App Setting e permissao Mail.Read."; exit 1
+          fi
