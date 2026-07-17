@@ -2649,6 +2649,7 @@ function renderConfigAprovadores() {
         '<td style="white-space:nowrap">' + escHtml(d.diretoria || '—') + '</td>' +
         '<td><input type="text" id="apv-nome-' + i + '" value="' + escAttr(d.aprovadorNome || '') + '" placeholder="Nome" style="width:100%;min-width:150px"></td>' +
         '<td><input type="email" id="apv-email-' + i + '" value="' + escAttr(d.aprovadorEmail || '') + '" placeholder="nome@pronep.com.br" style="width:100%;min-width:220px"></td>' +
+        '<td><input type="tel" id="apv-tel-' + i + '" value="' + escAttr(d.telefone || '') + '" placeholder="+5521999998888" style="width:100%;min-width:160px"></td>' +
         '<td class="center"><button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="salvarAprovador(' + i + ', this)">Salvar</button></td>' +
       '</tr>';
     }).join('');
@@ -2658,13 +2659,13 @@ function renderConfigAprovadores() {
       '</div>' +
       '<div style="overflow-x:auto">' +
       '<table class="data" id="apv-tabela" style="font-size:13px;width:100%">' +
-        '<thead><tr><th>Unidade</th><th>Diretoria</th><th>Nome do aprovador</th><th>E-mail</th><th class="center">Ação</th></tr></thead>' +
+        '<thead><tr><th>Unidade</th><th>Diretoria</th><th>Nome do aprovador</th><th>E-mail</th><th>Telefone (WhatsApp)</th><th class="center">Ação</th></tr></thead>' +
         '<tbody>' + linhas + '</tbody>' +
       '</table></div>';
   }
   return `
     <h2>Configuração Aprovadores</h2>
-    <div class="view-sub">Quem aprova cada <b>Unidade × Diretoria</b>. A alteração grava na base e vale para <b>novas NFs</b>. NFs já pendentes continuam com o aprovador atual (troca manual, se necessário).</div>
+    <div class="view-sub">Quem aprova cada <b>Unidade × Diretoria</b>. A alteração grava na base e vale para <b>novas NFs</b>. NFs já pendentes continuam com o aprovador atual (troca manual, se necessário). O <b>Telefone (WhatsApp)</b> — em formato E.164, ex.: <code>+5521999998888</code> — recebe as notificações automáticas de NFs chegando por e-mail (deixe em branco para não notificar).</div>
     <div class="card" style="max-width:1000px">
       ${corpo}
     </div>
@@ -2704,19 +2705,21 @@ async function salvarAprovador(i, btn) {
   if (!d) return;
   var nome = (document.getElementById('apv-nome-' + i) || {}).value || '';
   var email = ((document.getElementById('apv-email-' + i) || {}).value || '').trim().toLowerCase();
+  var telefone = ((document.getElementById('apv-tel-' + i) || {}).value || '').trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('E-mail inválido.', 'error'); return; }
   if (!/@pronep\.com\.br$/i.test(email)) { toast('O e-mail deve ser @pronep.com.br.', 'error'); return; }
+  if (telefone && !/^\+\d{10,15}$/.test(telefone)) { toast('Telefone deve estar em E.164, ex.: +5521999998888', 'error'); return; }
   var emailAntigo = (d.aprovadorEmail || '').trim().toLowerCase();
   if (btn) { btn.disabled = true; btn.textContent = 'Salvando...'; }
   try {
     var r = await fetch('/api/SalvarDiretoria', {
       method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: d.id, email: email, nome: nome })
+      body: JSON.stringify({ id: d.id, email: email, nome: nome, telefone: telefone })
     });
     var res = await r.json().catch(function () { return {}; });
     if (!r.ok || !res.ok) { toast('Falha ao salvar: ' + ((res && res.error) || ('HTTP ' + r.status)), 'error'); return; }
-    d.aprovadorEmail = email; d.aprovadorNome = nome; // atualiza cache local
+    d.aprovadorEmail = email; d.aprovadorNome = nome; d.telefone = telefone; // atualiza cache local
     toast('Aprovador de ' + (d.unidade || '') + ' · ' + (d.diretoria || '') + ' atualizado (novas NFs).', 'success');
     // Se o e-mail mudou, oferece reatribuir as NFs pendentes do aprovador anterior.
     if (emailAntigo && emailAntigo !== email) {
