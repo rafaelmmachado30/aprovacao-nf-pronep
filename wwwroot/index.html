@@ -88,6 +88,7 @@
     </div>
     <div class="spacer"></div>
     <div class="user-area">
+      <div id="view-as-wrap" style="display:none;margin-right:16px;text-align:right"></div>
       <div class="user-email" id="user-email">rafael.machado@pronep.com.br</div>
       <div class="user-roles" id="user-roles">Admin</div>
       <button class="logout-link" onclick="logout()">Sair da plataforma</button>
@@ -218,6 +219,8 @@ let notas = [
 
 let currentPersona = null;
 let currentView = null;
+let notasFull = [];             // dados completos; `notas` pode ser um recorte (lente de visualizacao)
+window._viewAsDiretoria = null; // admin: null = tudo; 'Tecnologia' = so NFs dessa diretoria
 
 // ============== ÍCONES SVG (estilo Pronep Analytics) ==============
 const ICONS = {
@@ -1436,6 +1439,8 @@ function loginAs(userData, emailLogin) {
   document.getElementById('login-step-loading').style.display = 'none';
   document.getElementById('login-email').value = '';
   document.getElementById('login-msg').innerHTML = '';
+  window._viewAsDiretoria = null;   // toda sessao comeca como Admin (tudo)
+  try { renderSeletorVisao(); } catch (e) {}
   renderNav();
   showView(currentPersona.canSee[0]);
 }
@@ -1885,9 +1890,11 @@ async function carregarNotasReais() {
         gestorFinanceiroAlinhado: n.GestorFinanceiroAlinhado || ''
       };
     });
+    notasFull = notas;                 // guarda o conjunto completo
+    notas = aplicarViewAs(notasFull);  // aplica a lente de visualizacao (admin) se ativa
     window._dadosCarregados.notas = true;
-    console.log('[ListarNotas] ' + notas.length + ' notas carregadas');
-    window.notas = notas;  // expoe pra tentarAbrirNFDoTeams() encontrar
+    console.log('[ListarNotas] ' + notasFull.length + ' notas carregadas');
+    window.notas = notasFull;  // expoe o COMPLETO pra tentarAbrirNFDoTeams() encontrar qualquer NF
     // Se viemos do Teams via deep link com nf-{id}, abre o modal daquela NF
     try { if (typeof tentarAbrirNFDoTeams === 'function') tentarAbrirNFDoTeams(); } catch (e) {}
     return true;
@@ -1912,6 +1919,7 @@ async function carregarDiretoriasReais() {
       window._aprovadoresReaisAtuais = data.mapa;
       window._dadosCarregados.diretorias = true;
       console.log('[ListarDiretorias] ' + Object.keys(data.mapa).length + ' combinacoes carregadas');
+      try { renderSeletorVisao(); } catch (e) {}  // agora ha escopo p/ popular o seletor "Visualizando como"
       return true;
     }
   } catch (e) {
@@ -5146,6 +5154,52 @@ async function caSalvar() {
 // se a matriz real divergisse do codigo o gestor via/aprovava o escopo errado.
 function mapaAprovadoresAtivo() {
   return window._aprovadoresReaisAtuais || aprovadoresReaisDinamico || aprovadoresReais;
+}
+
+// ===== Lente de visualização (admin "vê como" uma diretoria) =====
+// Admin recebe TODOS os dados; a lente é só um recorte client-side seguro (não muda permissão).
+// notasFull = tudo; notas = recorte. Gestores reais não são afetados (a lente só age p/ Admin).
+function aplicarViewAs(list) {
+  var d = window._viewAsDiretoria;
+  if (currentPersona && currentPersona.shortRole === 'Admin' && d) {
+    return (list || []).filter(function (n) { return n.diretoria === d; });
+  }
+  return list || [];
+}
+
+// Renderiza o seletor "Visualizando como" no cabeçalho. Só p/ Admin que também é aprovador
+// de alguma diretoria (senão não há o que alternar). Opções: Admin + cada diretoria do escopo.
+function renderSeletorVisao() {
+  var wrap = document.getElementById('view-as-wrap');
+  if (!wrap) return;
+  if (!currentPersona || currentPersona.shortRole !== 'Admin') { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  var escopo = [];
+  try { escopo = escopoDoGestor(currentPersona.email) || []; } catch (e) { escopo = []; }
+  var diretorias = Array.from(new Set(escopo.map(function (e) { return e.diretoria; }).filter(Boolean))).sort(function (a, b) { return a.localeCompare(b); });
+  if (!diretorias.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  var atual = window._viewAsDiretoria || '__admin__';
+  var opts = '<option value="__admin__"' + (atual === '__admin__' ? ' selected' : '') + '>Admin do sistema (tudo)</option>';
+  diretorias.forEach(function (d) {
+    opts += '<option value="' + escAttr(d) + '"' + (atual === d ? ' selected' : '') + '>Diretoria de ' + escHtml(d) + '</option>';
+  });
+  var destaque = window._viewAsDiretoria ? 'border-color:#F9A825;background:#FFF8E1;font-weight:600' : 'border:1px solid #cfd8e3';
+  wrap.style.display = '';
+  wrap.innerHTML =
+    '<label class="small muted" style="display:block;line-height:1;margin-bottom:3px">Visualizando como</label>' +
+    '<select onchange="trocarVisao(this.value)" style="font-size:12px;padding:4px 8px;border-radius:6px;' + destaque + '">' + opts + '</select>';
+}
+
+// Alterna a lente e re-renderiza (dados + badges + tela atual).
+function trocarVisao(valor) {
+  window._viewAsDiretoria = (!valor || valor === '__admin__') ? null : valor;
+  notas = aplicarViewAs(notasFull);
+  renderSeletorVisao();
+  try { renderNav(); } catch (e) {}
+  if (typeof currentView === 'string' && currentView) showView(currentView);
+  var d = window._viewAsDiretoria;
+  if (typeof toast === 'function') {
+    toast(d ? ('Visualizando como Diretoria de ' + d + ' — apenas NFs dessa diretoria.') : 'Visualizando como Admin do sistema — todas as NFs.', 'success');
+  }
 }
 
 // Dado um e-mail de gestor, retorna a lista de combinações Unidade × Diretoria que ele aprova
