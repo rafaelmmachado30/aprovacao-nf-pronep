@@ -40,6 +40,7 @@ module.exports = async function (context, req) {
     diag.step = 'transform';
     // SharePoint renomeou colunas como field_1..field_5
     // Title=Chave, field_1=Unidade, field_2=Diretoria, field_3=Email, field_4=Nome, field_5=GrupoEntraId
+    // TelefoneNotificacao (criada via Graph) mantem nome interno proprio (WhatsApp da automacao).
     const diretorias = all.map(item => {
       const f = item.fields || {};
       return {
@@ -49,7 +50,8 @@ module.exports = async function (context, req) {
         diretoria:      f.field_2 || '',
         aprovadorEmail: f.field_3 || '',
         aprovadorNome:  f.field_4 || '',
-        grupoEntraId:   f.field_5 || ''
+        grupoEntraId:   f.field_5 || '',
+        telefone:       f.TelefoneNotificacao || ''
       };
     });
 
