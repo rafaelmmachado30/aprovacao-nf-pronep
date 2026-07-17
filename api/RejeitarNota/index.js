@@ -296,7 +296,7 @@ module.exports = async function (context, req) {
         if (numero && valorStr) {
           const cand = files.filter(x => x.name
             && (x.name.startsWith(numero + '_') || x.name.includes('_' + numero + '_'))
-            && x.name.includes('_' + valorStr + '_'));
+            && (x.name.includes('_' + valorStr + '_') || x.name.includes('_' + valorStr + '.')));
           if (cand.length === 1) { pdfTarget = cand[0]; diag.matchPor = 'numero+valor'; }
           else diag.matchAmbiguo = { numero, valorStr, encontrados: cand.length };
         }

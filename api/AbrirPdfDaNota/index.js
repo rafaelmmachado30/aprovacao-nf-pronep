@@ -242,7 +242,9 @@ module.exports = async function (context, req) {
           // BLINDAGEM: com valor conhecido, EXIGE o valor no nome (unico por NF). Isso
           // impede casar com o SEQUENCIAL _N_ de outro arquivo quando NumeroNF colide
           // (bug: NumeroNF=3 abria o _3_ de outra NF). So aceita se o valor bater unico.
-          const filtrado = candidatos.filter(a => a.name.indexOf('_' + valorStr + '_') >= 0);
+          // O valor pode vir seguido de "_" (..._valor_APROVADA_) OU "." (..._valor.pdf).
+          const filtrado = candidatos.filter(a =>
+            a.name.indexOf('_' + valorStr + '_') >= 0 || a.name.indexOf('_' + valorStr + '.') >= 0);
           if (filtrado.length === 1) { target = filtrado[0]; break; }
           continue; // valor conhecido mas sem match unico -> nao arrisca abrir PDF errado
         }
