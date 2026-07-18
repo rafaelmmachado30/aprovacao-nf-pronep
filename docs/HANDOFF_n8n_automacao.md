@@ -4,7 +4,37 @@
 > (sessão 1 e o `..._sessao2_...` que ficou no Downloads). Sempre atualize ESTE
 > arquivo — assim os dois notebooks veem o mesmo estado via git.
 > Arquitetura detalhada: [`automacao-emails-nf.md`](automacao-emails-nf.md).
-> Última atualização: 2026-07-17 (sessão 3, no Mac).
+> Última atualização: 2026-07-18 (sessão 4, no Mac).
+
+---
+
+## 🔖 Sessão 4 (2026-07-18) — resumo e PRÓXIMO PASSO
+
+**Feito e em produção hoje:**
+- **WhatsApp no lançamento de NF** (`PostNota` → n8n → Chatwoot): quando o submetedor lança
+  uma NF, o gestor recebe WhatsApp com os dados. Decisão final: **notificação + "acesse o
+  sistema"** (link direto/botão no WhatsApp foi abandonado — o parser do WhatsApp quebra a URL
+  no `.`, depois no `=`; nem token no caminho resolveu de forma confiável).
+  - Fica dormente no código, prontos p/ uso: `AprovacaoPagina` (página com botões Aprovar/
+    Rejeitar) + `gerarLinks().ver` + links assinados. Úteis se migrar p/ WhatsApp **oficial**
+    (botões nativos) ou no **e-mail** (onde o link com token funciona — e-mail mantém os botões).
+  - n8n: workflow **"Pronep NF Lançada"** publicado; App Setting `N8N_WEBHOOK_NF_LANCADA` setado.
+- **Polimento do classificador** (`VarrerEmailsNF`): (1) fornecedor nunca mais vem "Fornecedor"
+  solto — usa Fechamento → nome do remetente → e-mail; (2) boleto ambíguo (NF só no assunto +
+  boleto, arquivo sem cara de NF) vira **"media"** em vez de alta; (3) regex de nome de arquivo
+  aceita `_ - .` (NF_123, DANFE_123). Validado em dry-run real.
+- **Debug**: `?reprocessar=1` (só no dry-run) re-classifica ignorando o ledger (calibração).
+
+**PRÓXIMO PASSO — Fase 1 da auto-criação da NF (a começar):**
+Objetivo geral: a automação **criar a NF pendente na Fila de Aprovação** (não só coletar PDF +
+avisar). Decisões travadas: extração por **IA (Claude lê o PDF nativo)** como método principal;
+XML só validação futura; NF criada marcada **"gerada pela automação — revisar"**; **aprovação do
+gestor = conferência final**; confiança baixa → só notifica (como hoje), não cria.
+- **Fase 1 (risco zero, começar por aqui):** Claude lê o PDF baixado e devolve
+  `{ cnpj, razao, numero, serie, valor, vencimento, confianca }` no **dry-run** — sem criar nada.
+  Valida a precisão em e-mails reais antes de deixar criar registro. Reusa `ANTHROPIC_API_KEY`.
+- Fase 2: criar a NF pendente (dados extraídos + PDF em Pendentes + marca "revisar" + dedup).
+- Fase 3: badge "revisar dados extraídos" na Fila de Aprovação.
 
 ---
 
