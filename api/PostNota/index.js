@@ -680,10 +680,11 @@ module.exports = async function (context, req) {
       const telefone = (aprovador && aprovador.telefone) || '';
       if (N8N_LANCADA && telefone) {
         const { gerarLinks } = require('../shared/email');
-        // Passa o resumo da NF -> vai embutido no link 'ver' (pagina de botoes).
+        // Resumo curto no token 'ver' (SEM urlPDF — URL longa estourava o token e o
+        // WhatsApp truncava o link). A pagina le a urlPDF do SharePoint pelo itemId.
         const links = gerarLinks(itemResp.id, aprovador.email, {
           numero: numeroFinal, fornecedor: fornecedorRazao, valor: valor, vencimento: vencimento,
-          unidade: unidade, diretoria: diretoria, urlPDF: uploadResp.webUrl || ''
+          unidade: unidade, diretoria: diretoria
         }) || {};
         const payloadWa = {
           tipo: 'nf_lancada',
