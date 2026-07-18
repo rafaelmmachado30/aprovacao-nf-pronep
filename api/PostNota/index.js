@@ -254,7 +254,7 @@ async function resolveAprovador(client, siteId, listDirId, unidade, diretoria) {
   const found = (resp.value || []).find(item => (item.fields || {}).Title === chave);
   if (!found) return null;
   const f = found.fields || {};
-  return { email: f.field_3 || '', nome: f.field_4 || '' };
+  return { email: f.field_3 || '', nome: f.field_4 || '', telefone: f.TelefoneNotificacao || '' };
 }
 
 // Gera proximo numero auto-sequencial (00001, 00002, ...) consultando max(NumeroNF)
@@ -670,6 +670,36 @@ module.exports = async function (context, req) {
     });
     diag.notificado = true;
     diag.notifResult = notifResult;  // <-- expoe detalhe (email, teamsAtividade, teamsWebhook) pra debug
+
+    // Notificacao WhatsApp (best-effort): avisa o gestor com links de aprovar/rejeitar/ver a NF.
+    // NUNCA derruba o lancamento — try/catch isolado. Precisa: App Setting N8N_WEBHOOK_NF_LANCADA
+    // + telefone na diretoria (TelefoneNotificacao) + LINK_APROVACAO_SECRET (mesmo do e-mail).
+    diag.step = 'notify_whatsapp';
+    try {
+      const N8N_LANCADA = process.env.N8N_WEBHOOK_NF_LANCADA || '';
+      const telefone = (aprovador && aprovador.telefone) || '';
+      if (N8N_LANCADA && telefone) {
+        const { gerarLinks } = require('../shared/email');
+        const links = gerarLinks(itemResp.id, aprovador.email) || {};
+        const payloadWa = {
+          tipo: 'nf_lancada',
+          gestor: (aprovador && aprovador.nome) || '', telefone: telefone,
+          unidade: unidade, diretoria: diretoria,
+          numero: numeroFinal, fornecedor: fornecedorRazao, valor: valor, vencimento: vencimento,
+          submitter: submitterEmail,
+          linkAprovar: links.aprovar || '', linkRejeitar: links.rejeitar || '',
+          linkVerNF: uploadResp.webUrl || ''
+        };
+        const waResp = await fetch(N8N_LANCADA, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payloadWa)
+        });
+        diag.whatsapp = { enviado: waResp.ok, status: waResp.status };
+      } else {
+        diag.whatsapp = { enviado: false, motivo: !N8N_LANCADA ? 'N8N_WEBHOOK_NF_LANCADA nao configurado' : 'diretoria sem telefone' };
+      }
+    } catch (eWa) {
+      diag.whatsapp = { enviado: false, erro: (eWa && eWa.message) || String(eWa) };
+    }
 
     auditRegistrar(user, 'lancamento',
       { tipo: 'nf', id: itemResp.id, numero: numeroFinal, autogerado: foiAutogerado },
