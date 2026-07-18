@@ -107,11 +107,18 @@ function paginaBotoes(nf, links, aprovador) {
 module.exports = async function (context, req) {
   const H = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };
   try {
-    const token = req.query && req.query.token;
-    if (!token) { context.res = { status: 400, headers: H, body: paginaSimples('Link invalido', 'Esse link nao contem o token necessario.', '#C62828') }; return; }
+    const rawToken = req.query && req.query.token;
+    if (!rawToken) { context.res = { status: 400, headers: H, body: paginaSimples('Link invalido', 'Esse link nao contem o token necessario.', '#C62828') }; return; }
 
     const secret = process.env.LINK_APROVACAO_SECRET;
     if (!secret) { context.res = { status: 500, headers: H, body: paginaSimples('Sistema mal configurado', 'LINK_APROVACAO_SECRET nao definido nas App Settings.', '#C62828') }; return; }
+
+    // O token vem base64url-encoded (sem pontos, pra o WhatsApp nao quebrar a URL).
+    // Decodifica pro JWT (3 segmentos). Fallback: se ja veio um JWT cru, usa direto.
+    let token = String(rawToken);
+    if (token.split('.').length !== 3) {
+      try { const dec = Buffer.from(token, 'base64url').toString('utf8'); if (dec.split('.').length === 3) token = dec; } catch (e) { /* mantem */ }
+    }
 
     let payload;
     try { payload = jwt.verify(token, secret, { algorithms: ['HS256'] }); }
