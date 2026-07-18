@@ -43,7 +43,9 @@ const DOMINIO_INTERNO = (process.env.EMAIL_DOMINIO_INTERNO || 'pronep.com.br').t
 const RE_FORTE   = /nota\s*fiscal|\bnfe?\b|\bnfs-?e\b|danfe/i;
 const RE_FRACO   = /fatura|boleto/i;
 const RE_NEG     = /n[ãa]o\s*identificad|d[ée]bito|em\s*aberto|inadimpl|pend[êe]ncia\s*de\s*pagamento|cobran[çc]a\s*autom/i;
-const RE_FORTE_ARQ = /\b(nf|nfe|nfse|danfe)\b|nota[\s_-]*fiscal/i;
+// Nome de arquivo: aceita separadores comuns (_ - . espaco) e digito colado (NF_123,
+// DANFE-00123, NFe123.pdf). \b nao serve porque "_" conta como caractere de palavra.
+const RE_FORTE_ARQ = /(?:^|[\s_.\-])(nfe?|nfs-?e|danfe)(?:[\s_.\-]|\d|$)|nota[\s_-]*fiscal/i;
 const RE_FRACO_ARQ = /fatura|boleto/i;
 const RE_ENCAMINHADO = /^\s*(enc|fw|fwd|res|encaminhad)/i;
 
@@ -150,10 +152,13 @@ async function salvarLedger(client, siteId, ledger) {
 function classificar(msg, pdfs, fornSig) {
   const assunto = String(msg.subject || '');
   const from = String((msg.from && msg.from.emailAddress && msg.from.emailAddress.address) || '').toLowerCase();
+  const fromName = String((msg.from && msg.from.emailAddress && msg.from.emailAddress.name) || '').trim();
   const dominio = from.indexOf('@') > 0 ? from.split('@')[1] : '';
   const nomes = (pdfs || []).map(function (p) { return String(p.name || ''); }).join(' ');
 
-  const forte = RE_FORTE.test(assunto) || RE_FORTE_ARQ.test(nomes);
+  const forteArquivo = RE_FORTE_ARQ.test(nomes);   // NF/DANFE no NOME do arquivo = sinal confiavel
+  const forteAssunto = RE_FORTE.test(assunto);     // "nota fiscal"/NF so no assunto = menos confiavel
+  const forte = forteArquivo || forteAssunto;
   const fraco = RE_FRACO.test(assunto) || RE_FRACO_ARQ.test(nomes);
   const negativo = RE_NEG.test(assunto);
   const encaminhado = RE_ENCAMINHADO.test(assunto);
@@ -161,14 +166,20 @@ function classificar(msg, pdfs, fornSig) {
   const porRemetente = (from && fornSig.emails.has(from)) || (dominio && fornSig.dominios.has(dominio));
 
   let confianca = null, motivo = '';
-  if (forte) { confianca = 'alta'; motivo = 'sinal_forte_nf'; }
+  if (forte) {
+    // Ambiguo: forte SO no assunto + boleto/fatura junto e arquivo SEM cara de NF real
+    // -> rebaixa pra media (gestor confere). Arquivo com nome de NF/DANFE mantem alta.
+    // (Se o fornecedor for esperado no Fechamento, a corroboracao adiante sobe pra alta.)
+    if (!forteArquivo && fraco) { confianca = 'media'; motivo = 'nf_no_assunto+boleto_ambiguo'; }
+    else { confianca = 'alta'; motivo = 'sinal_forte_nf'; }
+  }
   else if (negativo) { confianca = null; motivo = 'aviso_cobranca_debito'; }
   else if (fraco && porRemetente) { confianca = 'media'; motivo = 'fraco+remetente_conhecido'; }
   else if (fraco && encaminhado) { confianca = 'baixa'; motivo = 'fraco+encaminhado'; }
   else { confianca = null; motivo = 'nao_parece_nf'; }
 
-  return { ehNF: !!confianca, confianca: confianca, motivo: motivo, from: from, assunto: assunto,
-           sinais: { forte: forte, fraco: fraco, negativo: negativo, encaminhado: encaminhado, porRemetente: !!porRemetente } };
+  return { ehNF: !!confianca, confianca: confianca, motivo: motivo, from: from, fromName: fromName, assunto: assunto,
+           sinais: { forte: forte, forteArquivo: forteArquivo, forteAssunto: forteAssunto, fraco: fraco, negativo: negativo, encaminhado: encaminhado, porRemetente: !!porRemetente } };
 }
 
 async function anexosPdf(client, gestor, msgId) {
@@ -310,7 +321,7 @@ module.exports = async function (context, req) {
       }
       if (!ehNF) { ignorados.push({ assunto: m.subject, motivo: cls.motivo }); continue; }
 
-      candidatos.push({ assunto: m.subject, de: cls.from, quando: m.receivedDateTime,
+      candidatos.push({ assunto: m.subject, de: cls.from, deNome: cls.fromName, quando: m.receivedDateTime,
         pdfs: pdfNames, confianca: confianca, motivo: motivo, esperado: fornEsperado || null, sinais: cls.sinais });
       if (dryRun) continue;
 
@@ -336,7 +347,10 @@ module.exports = async function (context, req) {
           gestor: gestor, diretoria: diretoria, unidade: unidade, telefone: telefone,
           pasta: pasta, total: candidatos.length,
           candidatos: candidatos.map(function (c) {
-            return { fornecedor: c.esperado || null, assunto: c.assunto,
+            // Fornecedor: 1o o nome do Fechamento (esperado); senao o nome de exibicao do
+            // remetente; senao o e-mail; por fim um rotulo neutro (nunca "Fornecedor" solto).
+            return { fornecedor: c.esperado || c.deNome || c.de || 'Remetente nao identificado',
+                     assunto: c.assunto, de: c.de,
                      confianca: c.confianca, esperado: c.esperado || null, arquivos: c.pdfs };
           })
         };
