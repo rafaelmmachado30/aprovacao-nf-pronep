@@ -27,8 +27,9 @@ async function getGraphClient() {
   return Client.initWithMiddleware({ authProvider });
 }
 
-// Gera links assinados pra aprovar/rejeitar via email
-function gerarLinks(itemId, aprovadorEmail) {
+// Gera links assinados pra aprovar/rejeitar via email/WhatsApp.
+// 'nf' (opcional) = resumo pra pagina de botoes exibir sem reler o SharePoint.
+function gerarLinks(itemId, aprovadorEmail, nf) {
   const secret = process.env.LINK_APROVACAO_SECRET;
   if (!secret) return null;
   const base = 'https://purple-forest-09588fe10.7.azurestaticapps.net';
@@ -38,9 +39,11 @@ function gerarLinks(itemId, aprovadorEmail) {
   const opts = { expiresIn: '48h', algorithm: 'HS256' };
   const tokenAprovar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'aprovar', jti: crypto.randomUUID() }, secret, opts);
   const tokenRejeitar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'rejeitar', jti: crypto.randomUUID() }, secret, opts);
+  const tokenVer = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'ver', nf: nf || undefined, jti: crypto.randomUUID() }, secret, opts);
   return {
     aprovar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenAprovar)}`,
-    rejeitar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenRejeitar)}`
+    rejeitar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenRejeitar)}`,
+    ver: `${base}/api/AprovacaoPagina?token=${encodeURIComponent(tokenVer)}`
   };
 }
 

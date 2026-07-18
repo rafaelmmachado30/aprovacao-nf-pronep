@@ -680,13 +680,18 @@ module.exports = async function (context, req) {
       const telefone = (aprovador && aprovador.telefone) || '';
       if (N8N_LANCADA && telefone) {
         const { gerarLinks } = require('../shared/email');
-        const links = gerarLinks(itemResp.id, aprovador.email) || {};
+        // Passa o resumo da NF -> vai embutido no link 'ver' (pagina de botoes).
+        const links = gerarLinks(itemResp.id, aprovador.email, {
+          numero: numeroFinal, fornecedor: fornecedorRazao, valor: valor, vencimento: vencimento,
+          unidade: unidade, diretoria: diretoria, urlPDF: uploadResp.webUrl || ''
+        }) || {};
         const payloadWa = {
           tipo: 'nf_lancada',
           gestor: (aprovador && aprovador.nome) || '', telefone: telefone,
           unidade: unidade, diretoria: diretoria,
           numero: numeroFinal, fornecedor: fornecedorRazao, valor: valor, vencimento: vencimento,
           submitter: submitterEmail,
+          linkAprovacao: links.ver || '',   // pagina com botoes Aprovar/Rejeitar/Ver PDF (opcao b)
           linkAprovar: links.aprovar || '', linkRejeitar: links.rejeitar || '',
           linkVerNF: uploadResp.webUrl || ''
         };
