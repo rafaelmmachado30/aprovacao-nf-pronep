@@ -54,6 +54,11 @@
       "allowedRoles": ["anonymous", "authenticated"]
     },
     {
+      "comment": "Pagina de botoes (link do WhatsApp): autenticada por JWT no token 'ver' da query.",
+      "route": "/api/AprovacaoPagina",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
       "comment": "Curadoria em background: runner do GitHub Actions chama com X-Curadoria-Secret. O endpoint ainda exige admin quando chamado sem o secret (navegador).",
       "route": "/api/CurarContratos",
       "allowedRoles": ["anonymous", "authenticated"]
