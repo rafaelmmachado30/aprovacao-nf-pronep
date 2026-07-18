@@ -257,6 +257,9 @@ module.exports = async function (context, req) {
     const dias = Math.min(30, Math.max(1, parseInt((req.query && req.query.dias) || '3', 10) || 3));
     const limite = Math.min(100, Math.max(1, parseInt((req.query && req.query.limite) || '50', 10) || 50));
     const dryRun = req.query && (req.query.dryRun === '1' || req.query.dryRun === 'true');
+    // Debug/calibracao: SO no dry-run, re-classifica e-mails ja processados (ignora o
+    // ledger). Nunca baixa nem envia (dryRun garante). Serve pra ver a classificacao nova.
+    const reprocessar = !!dryRun && req.query && (req.query.reprocessar === '1' || req.query.reprocessar === 'true');
 
     const client = getGraphClient();
     diag.step = 'resolve';
@@ -302,7 +305,7 @@ module.exports = async function (context, req) {
 
     for (const m of msgs) {
       if (!m.hasAttachments) { ignorados.push({ assunto: m.subject, motivo: 'sem_anexo' }); continue; }
-      if (ledger.processados[m.id]) { ignorados.push({ assunto: m.subject, motivo: 'ja_processado' }); continue; }
+      if (!reprocessar && ledger.processados[m.id]) { ignorados.push({ assunto: m.subject, motivo: 'ja_processado' }); continue; }
 
       // Busca os PDFs ANTES de classificar — o nome do arquivo (NF.../DANFE...) e sinal forte.
       const pdfs = await anexosPdf(client, gestor, m.id);
