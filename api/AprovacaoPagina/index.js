@@ -132,9 +132,15 @@ module.exports = async function (context, req) {
     if (statusAtual === 'Rejeitada') { context.res = { status: 200, headers: H, body: paginaSimples('NF ja foi rejeitada', 'Esta nota fiscal ja foi rejeitada anteriormente.', '#647883', 'Status: <b>Rejeitada</b>') }; return; }
     if (aprovadorAtual && aprovadorAtual !== String(aprovador).toLowerCase()) { context.res = { status: 403, headers: H, body: paginaSimples('Voce nao eh o aprovador atual', `Esta NF foi reatribuida. Aprovador atual: ${esc(aprovadorAtual)}`, '#C62828') }; return; }
 
+    // urlPDF nao vem no token (mantido curto p/ nao truncar no WhatsApp) — le do item.
+    const urlPdf = fields.UrlPDFStr
+      || (fields.UrlPDF && (fields.UrlPDF.Url || (typeof fields.UrlPDF === 'string' ? fields.UrlPDF : '')))
+      || '';
+    const nfFull = Object.assign({}, nf || {}, { urlPDF: urlPdf });
+
     // Gera os links de acao (aprovar/rejeitar) que apontam pro AprovacaoViaLink executor.
     const links = gerarLinks(itemId, aprovador) || {};
-    context.res = { status: 200, headers: H, body: paginaBotoes(nf, links, aprovador) };
+    context.res = { status: 200, headers: H, body: paginaBotoes(nfFull, links, aprovador) };
   } catch (err) {
     context.log && context.log.error && context.log.error('AprovacaoPagina error:', err);
     context.res = { status: 500, headers: H, body: paginaSimples('Erro interno', esc((err && err.message) || String(err)), '#C62828') };
