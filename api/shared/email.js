@@ -40,10 +40,13 @@ function gerarLinks(itemId, aprovadorEmail, nf) {
   const tokenAprovar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'aprovar', jti: crypto.randomUUID() }, secret, opts);
   const tokenRejeitar = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'rejeitar', jti: crypto.randomUUID() }, secret, opts);
   const tokenVer = jwt.sign({ itemId, aprovador: aprovadorEmail, action: 'ver', nf: nf || undefined, jti: crypto.randomUUID() }, secret, opts);
+  // O link 'ver' vai pro WhatsApp, que QUEBRA a URL no 1o ponto. JWT tem pontos ->
+  // codifica o token inteiro em base64url (sem pontos) pra a URL linkar completa.
+  const tokenVerB64 = Buffer.from(tokenVer, 'utf8').toString('base64url');
   return {
     aprovar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenAprovar)}`,
     rejeitar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenRejeitar)}`,
-    ver: `${base}/api/AprovacaoPagina?token=${encodeURIComponent(tokenVer)}`
+    ver: `${base}/api/AprovacaoPagina?token=${tokenVerB64}`
   };
 }
 
