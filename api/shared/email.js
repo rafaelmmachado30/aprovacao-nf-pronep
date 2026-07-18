@@ -46,7 +46,8 @@ function gerarLinks(itemId, aprovadorEmail, nf) {
   return {
     aprovar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenAprovar)}`,
     rejeitar: `${base}/api/AprovacaoViaLink?token=${encodeURIComponent(tokenRejeitar)}`,
-    ver: `${base}/api/AprovacaoPagina?token=${tokenVerB64}`
+    // token no CAMINHO (nao na query) — WhatsApp quebrava a URL no '?'/'='/'.'.
+    ver: `${base}/api/AprovacaoPagina/${tokenVerB64}`
   };
 }
 

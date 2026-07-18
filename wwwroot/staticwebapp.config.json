@@ -54,8 +54,12 @@
       "allowedRoles": ["anonymous", "authenticated"]
     },
     {
-      "comment": "Pagina de botoes (link do WhatsApp): autenticada por JWT no token 'ver' da query.",
+      "comment": "Pagina de botoes (link do WhatsApp): autenticada por JWT no token 'ver'. Token vai no caminho (/api/AprovacaoPagina/<token>) pra o WhatsApp nao quebrar a URL.",
       "route": "/api/AprovacaoPagina",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
+      "route": "/api/AprovacaoPagina/*",
       "allowedRoles": ["anonymous", "authenticated"]
     },
     {

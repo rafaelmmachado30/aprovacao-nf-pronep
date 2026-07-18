@@ -107,7 +107,11 @@ function paginaBotoes(nf, links, aprovador) {
 module.exports = async function (context, req) {
   const H = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };
   try {
-    const rawToken = req.query && req.query.token;
+    // Token vem no CAMINHO (/api/AprovacaoPagina/<token>) pra o WhatsApp nao quebrar a URL
+    // no '?'/'='/'.'. Fallback pra query (?token=) mantem links antigos funcionando.
+    const rawToken = (context.bindingData && context.bindingData.token)
+      || (req.params && req.params.token)
+      || (req.query && req.query.token);
     if (!rawToken) { context.res = { status: 400, headers: H, body: paginaSimples('Link invalido', 'Esse link nao contem o token necessario.', '#C62828') }; return; }
 
     const secret = process.env.LINK_APROVACAO_SECRET;
