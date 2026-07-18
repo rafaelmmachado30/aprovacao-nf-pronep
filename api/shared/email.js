@@ -375,4 +375,4 @@ async function enviarPushParaDestinatarios(evento, destinatarios, dados) {
   return { ok: true, porEmail: resultados };
 }
 
-module.exports = { notificar, enviarEmail, enviarTeams, buildEmail };
+module.exports = { notificar, enviarEmail, enviarTeams, buildEmail, gerarLinks };
