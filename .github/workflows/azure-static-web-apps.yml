@@ -11,7 +11,10 @@ on:
 
 jobs:
   build_and_deploy_job:
-    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    # So deploya no push pra main. NAO builda em PR: os previews de PR criam
+    # "staging environments" que estouram o limite do plano (BadRequest: maximum
+    # number of staging environments). Testamos direto na producao apos o merge.
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     name: Build and Deploy
     steps:
