@@ -54,7 +54,9 @@ jobs:
             [ -z "$G" ] && continue
             TOTAL=$((TOTAL+1))
             ENC=$(printf %s "$G" | sed 's/@/%40/')
-            URL="${BASE}?gestor=${ENC}&dias=${DIAS}&dryRun=0"
+            # limite=20: janela menor por rodada evita timeout (500) da Function. Como o
+            # cron roda de hora em hora + ledger idempotente, a cobertura continua boa.
+            URL="${BASE}?gestor=${ENC}&dias=${DIAS}&limite=20&dryRun=0"
             echo "======================================================"
             echo "Varrendo: $G  (dias=${DIAS})"
             HTTP_CODE=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
