@@ -56,7 +56,7 @@ da Pronep. É a identidade da aplicação — dona do login, do client secret e 
 permissões de Graph.
 - Emite o claim de **grupos de segurança** (Token configuration → Group ID) para o backend enxergar os papéis.
 - Guarda o **client secret** (validade 2 anos) — só no App Settings do SWA e no `.env` local (nunca no git).
-- Recebe as permissões de aplicativo do Graph (`Sites.Selected`, `Mail.Send`) com consentimento de admin.
+- Recebe as permissões de aplicativo do Graph (`Sites.Selected`, `Mail.Send`, **`User.Read.All`**, **`GroupMember.Read.All`**) com consentimento de admin.
 
 ### Bloco 2 · Papéis — Grupos de segurança do Entra ID
 Cada papel do sistema é um **grupo de segurança atribuído**. O grupo é a fonte de
@@ -192,7 +192,7 @@ conhecido antes de conceder `Sites.Selected`.
 - [ ] **Provisionar o Static Web App** (plano **Standard**, East US 2, origem "Outro"). Pegar o deployment token e guardar só no `.env` local. Marcar **"Tokens de ID"** na App Registration (Autenticação → Concessão implícita).
 - [ ] **Configurar o redirect URI** na App Registration, agora que a URL do SWA existe: `https://<url>/.auth/login/aad/callback`.
 - [ ] **Preencher os App Settings** do SWA: `AAD_CLIENT_ID`, `AAD_CLIENT_SECRET`, `AAD_TENANT_ID`, `SHAREPOINT_*`. Nunca versionar esses valores.
-- [ ] **Conceder as permissões de Graph**: `Sites.Selected` + `Mail.Send`, com consentimento de admin. Depois, autorizar o site específico via Graph Explorer ou `Grant-PnPAzureADAppSitePermission`.
+- [ ] **Conceder as permissões de Graph**: `Sites.Selected` + `Mail.Send` + `User.Read.All` + `GroupMember.Read.All` (as duas últimas são o que permite resolver grupos→papéis; sem elas TODO usuário cai em "sem grupo de acesso" com `Insufficient privileges` no log), com consentimento de admin. Depois, autorizar o site específico via Graph Explorer ou `Grant-PnPAzureADAppSitePermission`.
 - [ ] **Colar os GUIDs** no `GROUP_TO_ROLE` e ajustar as flags de papel. Manter o mapa sincronizado entre `userRoles.js` e `MeusGrupos`.
 - [ ] **Fazer o primeiro deploy** via SWA CLI e testar o fluxo de login ponta a ponta.
 - [ ] **(Opcional) Ligar o Teams SSO**: Expose an API, scope `access_as_user`, 3 clientes Teams, manifest da app.
@@ -211,6 +211,7 @@ O que custou tempo para descobrir no sistema de NF — registrado aqui para não
 - **[CORRIGIDO na implantação do Sobreaviso, 07/2026] Plano Free NÃO serve para este padrão.** A autenticação customizada (bloco `auth` com App Registration própria — claim de grupos, tenant único, secret) **só existe no Standard**; o deploy no Free falha com *"The 'auth' configuration ... is only supported on the Standard SKU"*. Free só oferece provedores genéricos, sem grupos e aceitando conta de qualquer tenant. Junto com o Standard, marcar **"Tokens de ID"** na App Registration (Autenticação) — sem isso o callback devolve `401`.
 - **O hostname SharePoint do tenant é `pronepadmin.sharepoint.com`** (não `pronep.sharepoint.com`). Usar outro valor gera `Invalid hostname for this tenancy` no Graph. Vale para `SHAREPOINT_SITE_HOSTNAME` de todos os sistemas.
 - **`Sites.Selected` com papel `write` não cria listas.** Se a API do sistema cria as próprias listas (padrão Sobreaviso: `/api/Setup`), conceda o site com papel **`manage`**. Dica: se o `PATCH` da permissão devolver 404, faça um novo `POST` com o papel desejado — o Graph atualiza a concessão existente do mesmo app.
+- **A resolução de papéis exige `User.Read.All` + `GroupMember.Read.All` (aplicação).** O `transitiveMemberOf` do Graph falha com *Insufficient privileges* sem elas — e o sintoma engana: quem está em `ADMIN_EMAILS` entra normalmente (não depende de grupos), enquanto todos os demais caem em "sem grupo de acesso". Descoberto no Sobreaviso quando só o admin conseguia logar.
 - **SWA CLI não roda em Mac Apple Silicon** (binário de deploy é x64 → erro `spawn -86`). Alternativa adotada: deploy via GitHub Actions (`Azure/static-web-apps-deploy@v1` com o deployment token em secret), que também dá deploy repetível por push.
 
 ---
