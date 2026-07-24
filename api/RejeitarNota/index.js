@@ -84,6 +84,25 @@ function normalizeFields(fields, invColMap) {
 
 // urlDeCampo / nomeArquivoDeUrl agora vem de shared/pdfNota (usados tambem no AprovarNota).
 
+// Coleta arquivos de uma pasta + 1 nivel de subpastas. Usado no ESTORNO: as aprovadas
+// ficam em "Notas Aprovadas/{Unidade}/{AAAA-MM-DD}/", entao varremos as subpastas de data.
+async function coletarArquivosComSubpastas(client, siteId, baseFolder) {
+  const out = [];
+  let resp;
+  try { resp = await client.api(`/sites/${siteId}/drive/root:/${baseFolder}:/children`).get(); }
+  catch (e) { return out; }
+  for (const x of (resp.value || [])) {
+    if (x.file) out.push(x);
+    else if (x.folder) {
+      try {
+        const sub = await client.api(`/sites/${siteId}/drive/items/${x.id}/children`).get();
+        for (const y of (sub.value || [])) if (y.file) out.push(y);
+      } catch (e) { /* subpasta inacessivel — ignora */ }
+    }
+  }
+  return out;
+}
+
 // Aplica watermark REJEITADA (vermelho, 4 linhas: REJEITADA + data + por + motivo)
 async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
   // LAZY require — so carrega pdf-lib quando essa funcao for chamada
@@ -251,34 +270,37 @@ module.exports = async function (context, req) {
     diag.ehEstorno = ehEstorno;
 
     diag.step = 'find_pdf';
-    // Se estorno (status era Aprovada): busca em "Notas Aprovadas" (sem subpastas, pasta plana legacy).
-    // Se rejeicao normal: busca em "Notas Fiscais/Pendentes/{Unidade}/Diretoria {Diretoria}".
     const folderPendente = `Notas Fiscais/Pendentes/${f.Unidade}/Diretoria ${f.Diretoria}`;
-    const folderAprovada = `Notas Aprovadas`;
-    // CORRECAO: estrutura de subpastas por Unidade+Diretoria igual Pendentes (antes salvava plano).
-    // O AbrirPdfDaNota tem fallback pra pasta raiz pra NFs rejeitadas antes desta correcao.
     const folderRejeitada = `Notas Fiscais/Rejeitadas/${f.Unidade}/Diretoria ${f.Diretoria}`;
-    const folderOrigem = ehEstorno ? folderAprovada : folderPendente;
-    diag.folderOrigem = folderOrigem;
+    // Origem do PDF:
+    //  - rejeicao normal: Pendentes/{Unidade}/Diretoria {Diretoria}
+    //  - ESTORNO (NF ja Aprovada): Notas Aprovadas/{Unidade}/{AAAA-MM-DD}/ (subpasta por data);
+    //    varre as subpastas de data + fallback pra pasta plana legada "Notas Aprovadas".
+    const baseAprov = `Notas Fiscais/Notas Aprovadas/${f.Unidade}`;
+    diag.folderOrigem = ehEstorno ? baseAprov : folderPendente;
     let pdfTarget = null;
     try {
-      const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folderOrigem}:/children`).get();
-      const files = (folderListResp.value || []).filter(x => x.file);
+      let files;
+      if (ehEstorno) {
+        files = await coletarArquivosComSubpastas(client, siteId, baseAprov);
+        if (!files.length) files = await coletarArquivosComSubpastas(client, siteId, 'Notas Aprovadas'); // legado plano
+      } else {
+        const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folderPendente}:/children`).get();
+        files = (folderListResp.value || []).filter(x => x.file);
+      }
+      diag.arquivosOrigem = files.length;
 
-      // (1) FONTE DA VERDADE: nome EXATO do arquivo da propria nota, extraido da URL
-      // armazenada (UrlPDFAprovado no estorno; UrlPDF no fluxo normal). O nome inclui o
-      // valor -> unico. Imune a NumeroNF duplicado/colidindo com o sequencial do arquivo.
+      // Nome EXATO da URL da nota (UrlPDFAprovado no estorno; UrlPDF no fluxo normal) ->
+      // fallback estrito numero+valor (com variantes de zeros). Mesmo criterio do AprovarNota.
       const urlNota = ehEstorno
         ? (urlDeCampo(f.UrlPDFAprovadoStr) || urlDeCampo(f.UrlPDFAprovado) || urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF))
         : (urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF));
-      // Resolve por identidade exata (nome da URL) -> fallback estrito numero+valor (com
-      // variantes de zeros a esquerda). Mesmo criterio do AprovarNota (shared/pdfNota).
       const achado = acharPdfAlvo(files, { url: urlNota, numero: f.NumeroNF, valor: f.Valor });
       pdfTarget = achado.target;
       diag.matchPor = achado.matchPor;
       if (achado.ambiguo) diag.matchAmbiguo = achado.ambiguo;
-      // Sem identificacao CONFIAVEL, nao move/carimba/deleta nada (evita mexer no arquivo
-      // errado). A NF e rejeitada; o PDF fica pra reconciliacao manual.
+      // Sem identificacao CONFIAVEL, nao move/deleta nada — a NF e rejeitada e o PDF fica
+      // pra reconciliacao manual (evita mexer no arquivo errado).
     } catch (e) {
       diag.findPdfWarning = e.message;
     }
@@ -297,7 +319,9 @@ module.exports = async function (context, req) {
       const stampedPdf = await aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivoCompletoStr);
       diag.stampedSize = stampedPdf.length;
 
-      const uploadPath = `/sites/${siteId}/drive/root:/${encodeURIComponent(folderRejeitada)}/${encodeURIComponent(pdfTarget.name)}:/content`;
+      // No estorno, o arquivo carrega o sufixo "_APROVADA_{data}" — remove ao arquivar em Rejeitadas.
+      const nomeRejeitado = String(pdfTarget.name).replace(/_APROVADA_\d{4}-\d{2}-\d{2}(?=\.[^.]+$)/i, '');
+      const uploadPath = `/sites/${siteId}/drive/root:/${encodeURIComponent(folderRejeitada)}/${encodeURIComponent(nomeRejeitado)}:/content`;
       const uploadResp = await client.api(uploadPath).header('Content-Type', 'application/pdf').put(stampedPdf);
       urlPDFRejeitado = uploadResp.webUrl;
       diag.movedTo = urlPDFRejeitado;
