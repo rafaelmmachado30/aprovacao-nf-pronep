@@ -97,6 +97,11 @@ function buildEmail(evento, dados, links) {
     acao = `<p>Sua NF foi rejeitada por <b>${escapeHtml(aprovador)}</b>.</p>
             <p><b>Motivo:</b> ${escapeHtml(motivo)}</p>
             <p>Faça as correções e reenvie a NF pelo sistema.</p>`;
+  } else if (evento === 'alinhamento_pendente') {
+    assunto = `[Aprovação NF] Confirme o alinhamento — NF ${numero ? 'NF '+numero : ''} aguardando`;
+    corHeader = '#F9A825'; titulo = '⏳ Confirmação de alinhamento (D+5)';
+    acao = `<p><b>Ação necessária (Financeiro-Gestão):</b> o aprovador <b>${escapeHtml(aprovador)}</b> declarou ter alinhado com o financeiro o pagamento desta NF, que vence em menos de D+5.</p>
+            <p>A NF <b>só seguirá para pagamento após a sua confirmação</b>. Acesse a tela <b>Confirma Alinhamento</b> no sistema para <b>confirmar</b> ou <b>rejeitar</b>.</p>`;
   } else {
     assunto = `[Aprovação NF] ${evento}`; titulo = `Evento ${evento}`;
   }
@@ -211,6 +216,7 @@ async function enviarTeams(evento, dados, destinatariosEmail) {
   if (evento === 'lancada')   { titulo = '📬 Nova NF para aprovação'; cor = 'attention'; }
   if (evento === 'aprovada')  { titulo = '✓ NF aprovada'; cor = 'good'; }
   if (evento === 'rejeitada') { titulo = '✕ NF rejeitada'; cor = 'warning'; }
+  if (evento === 'alinhamento_pendente') { titulo = '⏳ Confirme o alinhamento (D+5)'; cor = 'warning'; }
 
   const facts = [
     { title: 'NF', value: String(numero) },
