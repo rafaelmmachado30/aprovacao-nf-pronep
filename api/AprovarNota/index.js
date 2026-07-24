@@ -249,6 +249,9 @@ module.exports = async function (context, req) {
     const naoAlinhou = body.alinhouFinanceiro === false || body.alinhouFinanceiro === 'false';
     const compliancePresente = alinhouFinanceiro || naoAlinhou;
     const gestorFinanceiroAlinhado = String(body.gestorFinanceiroAlinhado || '').trim();
+    // bypassAlinhamento: uso INTERNO (ConfirmarAlinhamento). Pula o gate de alinhamento
+    // E o roteamento N2 (a NF ja passou por tudo; falta so executar a aprovacao).
+    const bypassAlinhamento = body.bypassAlinhamento === true || body.bypassAlinhamento === 'true';
 
     diag.step = 'principal';
     const user = await getUser(req);
@@ -308,6 +311,7 @@ module.exports = async function (context, req) {
     const valorNF = Number(f.Valor || 0);
     const jaEstaNoSegundoNivel = (f.Status === 'AguardandoN2');
     const precisaSegundoNivel = !jaEstaNoSegundoNivel
+      && !bypassAlinhamento   // confirmacao do alinhamento nao re-roteia pro N2
       && config && config.multiNivel && config.multiNivel.habilitado
       && valorNF > Number(config.multiNivel.valorLimite || 0);
 
@@ -361,6 +365,46 @@ module.exports = async function (context, req) {
       }
     }
     // === FIM lógica multi-nivel — segue fluxo de aprovacao final ===
+
+    // === GATE DE ALINHAMENTO (compliance D+5) ===
+    // Se o aprovador declarou "alinhei com o financeiro", a NF NAO aprova direto:
+    // fica em AguardandoAlinhamento ate um gestor do Financeiro-Gestao CONFIRMAR
+    // (endpoint ConfirmarAlinhamento). O PDF NAO e movido/carimbado aqui. bypass pula.
+    if (!bypassAlinhamento && compliancePresente && alinhouFinanceiro && gestorFinanceiroAlinhado) {
+      diag.step = 'gate_alinhamento';
+      const patchGate = buildPatchPayload({
+        Status: 'AguardandoAlinhamento',
+        AlinhouFinanceiro: true,
+        GestorFinanceiroAlinhado: gestorFinanceiroAlinhado
+      }, colMap, colTypes);
+      await client.api(`/sites/${siteId}/lists/${listNotasId}/items/${itemId}/fields`).patch(patchGate);
+
+      diag.step = 'notify_alinhamento';
+      let destinos = [];
+      try {
+        const { emailsFinanceiroGestao } = require('../shared/financeiroGestao');
+        destinos = await emailsFinanceiroGestao(client);
+        if (destinos.length) {
+          await notificar('alinhamento_pendente', destinos, {
+            itemId: itemId, numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor,
+            vencimento: f.DataVencimento, unidade: f.Unidade, diretoria: f.Diretoria,
+            aprovador: aprovadorEmail, submitter: f.LancadoPor, urlPDF: f.UrlPDF
+          });
+        }
+      } catch (eNotif) { diag.notifyAlinhamentoError = eNotif.message; }
+
+      context.res = {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+        body: {
+          ok: true, aguardandoAlinhamento: true, itemId: itemId,
+          gestorFinanceiroAlinhado: gestorFinanceiroAlinhado, notificados: destinos,
+          mensagem: 'Alinhamento enviado ao Financeiro. A NF so segue para pagamento apos a confirmacao do Financeiro-Gestao.',
+          diag: diag
+        }
+      };
+      return;
+    }
+    // === FIM gate de alinhamento ===
 
     diag.step = 'find_pdf';
     // Encontra o PDF em /Pendentes/{Unidade}/Diretoria {Diretoria}/
