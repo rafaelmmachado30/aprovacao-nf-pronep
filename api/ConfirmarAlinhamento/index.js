@@ -111,6 +111,13 @@ module.exports = async function (context, req) {
         body: { error: 'Falha ao rejeitar.', detalhe: ctxR.res && ctxR.res.body, diag: diag } };
       return;
     }
+    // Atribuicao: quem rejeitou foi o FINANCEIRO (nao o gestor/aprovador que o RejeitarNota
+    // registrou pelo principal falso). Corrige RejeitadoPor pro financeiro que agiu.
+    diag.step = 'corrige_rejeitado_por';
+    try {
+      await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + itemId + '/fields')
+        .patch({ RejeitadoPor: authz.email, RejeitadoEm: new Date().toISOString() });
+    } catch (ePatch) { diag.rejeitadoPorPatchError = (ePatch && ePatch.message) || String(ePatch); }
     auditRegistrar(authz.user, 'alinhamento_rejeitado', { tipo: 'nf', id: itemId }, 'sucesso',
       { rejeitadoPor: authz.email, aprovadorOriginal: aprovador, motivo: motivoFinal }).catch(function () {});
     context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
