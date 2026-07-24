@@ -121,9 +121,9 @@
 // ============== STATE ==============
 const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','caixa-entrada','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
-  gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','minhas-nfs','contas-recorrentes','fechamento-mes','contratos','mapa-aprovadores','arquitetura'] },
-  financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','arquitetura','configuracoes'] },
+  gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','confirma-alinhamento','aprovadas','rejeitadas','nova-nf','minhas-nfs','contas-recorrentes','fechamento-mes','contratos','mapa-aprovadores','arquitetura'] },
+  financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['confirma-alinhamento','aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','arquitetura'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','confirma-alinhamento','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -1176,6 +1176,14 @@ const menuItems = [
       if (currentPersona.shortRole === 'Submitter') return pend.filter(n => isMinhaNF(n)).length;
       return pend.length;
     }},
+  { id: 'confirma-alinhamento', label: 'Confirma Alinhamento',    icon: ICONS.fila, badge: () => {
+      const aa = notas.filter(n => n.status === 'aguardando-alinhamento');
+      if (currentPersona.shortRole === 'Gestor') {
+        const escopo = escopoDoGestor(currentPersona.email);
+        return aa.filter(n => escopo.some(e => e.unidade === n.unidade && e.diretoria === n.diretoria)).length;
+      }
+      return aa.length;
+    }},
   { id: 'minhas-nfs',        label: 'Minhas NFs',                 icon: ICONS.minhas },
   { id: 'nova-nf',           label: 'Lançamento de Notas Fiscais',icon: ICONS.lancamento },
   { id: 'caixa-entrada',     label: 'Agrupar PDFs',               icon: ICONS.caixa },
@@ -1278,6 +1286,9 @@ function statusPill(s, n) {
   // Se a NF estiver no 2o nivel, mostra um badge diferente (azul) em vez de amarelo de pendente
   if (n && n.aguardandoN2) {
     return '<span class="status-pill" style="background:#E6F2F9;color:#1F4E79">🔼 2º NÍVEL</span>';
+  }
+  if (s === 'aguardando-alinhamento') {
+    return '<span class="status-pill" style="background:#FFF8E1;color:#8a6d00">⏳ AGUARDANDO FINANCEIRO</span>';
   }
   const map = { pendente: 'PENDENTE', aprovada: 'APROVADA', rejeitada: 'REJEITADA', duplicada: 'DUPLICADA' };
   return `<span class="status-pill status-${s}">${map[s] || s}</span>`;
@@ -1849,7 +1860,7 @@ async function carregarNotasReais() {
       } else {
         razaoLookup = '(fornecedor nao encontrado)';
       }
-      const statusMap = { 'Lancada': 'pendente', 'AguardandoN2': 'pendente', 'Aprovada': 'aprovada', 'Rejeitada': 'rejeitada' };
+      const statusMap = { 'Lancada': 'pendente', 'AguardandoN2': 'pendente', 'AguardandoAlinhamento': 'aguardando-alinhamento', 'Aprovada': 'aprovada', 'Rejeitada': 'rejeitada' };
       return {
         id: 'ID-' + n.id,
         spId: n.id,
@@ -3426,6 +3437,44 @@ const views = {
       window._filtroFila = { nf: '', fornecedor: 'TODOS', unidade: 'TODAS', diretoria: 'TODAS', solicitante: 'TODOS' };
     }
     return renderFilaAprovacaoView();
+  },
+
+  'confirma-alinhamento': () => {
+    const podeAgir = currentPersona && (currentPersona.roleKey === 'financeiro' || currentPersona.roleKey === 'admin');
+    let lista = notas.filter(n => n.status === 'aguardando-alinhamento');
+    if (currentPersona && currentPersona.shortRole === 'Gestor') {
+      const escopo = escopoDoGestor(currentPersona.email);
+      lista = lista.filter(n => escopo.some(e => e.unidade === n.unidade && e.diretoria === n.diretoria));
+    }
+    lista.sort((a, b) => new Date(a.vencimento) - new Date(b.vencimento));
+    const linhas = lista.map(n => {
+      const alinhado = (n.gestorFinanceiroAlinhado || '').split('@')[0] || '—';
+      const aprovador = (n.aprovadoPor || '').split('@')[0] || (n.lancadoPor || '—');
+      const acao = podeAgir
+        ? `<button class="btn btn-success" style="padding:5px 12px;font-size:12px" onclick="confirmarAlinhamento('${n.spId || n.id}')">✓ Confirmar</button>
+           <button class="btn btn-danger" style="padding:5px 12px;font-size:12px;margin-left:6px" onclick="rejeitarAlinhamento('${n.spId || n.id}')">✕ Rejeitar</button>`
+        : `<span class="tag" style="background:#FFF8E1;color:#8a6d00">aguardando financeiro</span>`;
+      return `<tr>
+        <td><b>${n.id}</b><br><span class="small muted">Nº ${n.numero || ''}</span></td>
+        <td>${escHtml(fornecedorOf(n).razao)}</td>
+        <td><span class="tag tag-${(n.unidade || '').toLowerCase()}">${n.unidade}</span> · ${escHtml(n.diretoria || '')}</td>
+        <td>${fmtDate(n.vencimento)}</td>
+        <td class="num"><b>${fmtBRL(n.valor)}</b></td>
+        <td>${escHtml(aprovador)}</td>
+        <td>${escHtml(alinhado)}</td>
+        <td class="center" style="white-space:nowrap">${acao}</td>
+      </tr>`;
+    }).join('');
+    return `
+      <h2>Confirma Alinhamento</h2>
+      <div class="view-sub">NFs vencendo em <b>menos de D+5</b> onde o aprovador declarou alinhamento com o financeiro. ${podeAgir ? '<b>Confirme</b> para liberar a aprovação (carimbo segue sendo o do gestor), ou <b>rejeite</b> (a NF é rejeitada).' : 'Acompanhamento — apenas o <b>Financeiro-Gestão</b> confirma/rejeita.'} A tela mostra <b>somente o que está pendente agora</b>.</div>
+      <div class="card">
+        <table class="data">
+          <thead><tr><th>NF</th><th>Fornecedor</th><th>Unid. · Diretoria</th><th>Vencimento</th><th class="num">Valor</th><th>Aprovador</th><th>Alinhado c/</th><th class="center">Ação</th></tr></thead>
+          <tbody>${linhas || '<tr><td colspan="8" class="muted center" style="padding:26px">Nenhuma NF aguardando confirmação de alinhamento. ✅</td></tr>'}</tbody>
+        </table>
+      </div>
+    `;
   },
 
   'minhas-nfs': () => {
@@ -8030,6 +8079,29 @@ async function doApprove(id) {
       return;
     }
 
+    // GATE DE ALINHAMENTO: NF <D+5 com "alinhei" NAO aprova direto — foi pro Financeiro.
+    if (data && data.aguardandoAlinhamento) {
+      n.status = 'aguardando-alinhamento';
+      n.alinhouFinanceiro = true;
+      n.gestorFinanceiroAlinhado = data.gestorFinanceiroAlinhado || gestorFinanceiroAlinhado || '';
+      closeModal();
+      const quem = String(data.gestorFinanceiroAlinhado || gestorFinanceiroAlinhado || 'o financeiro').split('@')[0];
+      openModal(`
+        <div style="text-align:center;padding:8px 6px">
+          <div style="font-size:42px;line-height:1">⏳</div>
+          <h3 style="margin:10px 0 8px">Enviado para confirmação do Financeiro</h3>
+          <p style="font-size:14px;line-height:1.6;color:#2C3E50;margin:0 0 8px">
+            Esta NF vence em <b>menos de D+5</b> e você indicou alinhamento com o financeiro, então
+            ela <b>não foi aprovada ainda</b>.</p>
+          <p style="font-size:14px;line-height:1.6;color:#2C3E50;margin:0 0 16px">
+            Enviamos uma <b>confirmação de alinhamento</b> ao Financeiro (<b>${escHtml(quem)}</b>).
+            A NF só seguirá para pagamento <b>após a confirmação</b> deles, na tela <b>Confirma Alinhamento</b>.</p>
+          <button class="btn btn-primary" onclick="closeModal(); showView(currentView)">OK, entendi</button>
+        </div>
+      `);
+      return;
+    }
+
     // Sucesso!
     n.status = 'aprovada';
     // Usa o E-MAIL (mesma fonte que o ListarNotas devolve em AprovadorAtual) pra que o
@@ -8047,6 +8119,47 @@ async function doApprove(id) {
     const prog = document.getElementById('approve-progress');
     if (prog) prog.remove();
   }
+}
+
+// ===== Confirma Alinhamento (Financeiro-Gestão) =====
+async function confirmarAlinhamento(id) {
+  const spId = String(id).replace(/^ID-/, '').replace(/^NF-/, '');
+  const ok = await confirmarAcao({
+    titulo: 'Confirmar alinhamento?',
+    mensagem: 'Ao confirmar, a NF será <b>aprovada</b> (o carimbo continua sendo o do gestor aprovador) e seguirá para pagamento.',
+    tipo: 'info', confirmLabel: 'Confirmar e aprovar', cancelLabel: 'Cancelar'
+  });
+  if (!ok) return;
+  try {
+    const r = await fetch('/api/ConfirmarAlinhamento', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: spId, acao: 'confirmar' })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { toast('Falha ao confirmar: ' + (data.error || ('HTTP ' + r.status)), 'error'); return; }
+    const n = notas.find(x => String(x.spId) === spId || x.id === id); if (n) n.status = 'aprovada';
+    toast('✓ Alinhamento confirmado — NF aprovada.', 'success');
+    showView(currentView);
+    if (typeof carregarNotasReais === 'function') carregarNotasReais().catch(() => {});
+  } catch (e) { toast('Erro: ' + (e.message || String(e)), 'error'); }
+}
+
+async function rejeitarAlinhamento(id) {
+  const spId = String(id).replace(/^ID-/, '').replace(/^NF-/, '');
+  const motivo = prompt('Motivo da rejeição do alinhamento (opcional — a NF será REJEITADA):', '');
+  if (motivo === null) return; // cancelou
+  try {
+    const r = await fetch('/api/ConfirmarAlinhamento', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: spId, acao: 'rejeitar', motivo: motivo || '' })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data.ok) { toast('Falha ao rejeitar: ' + (data.error || ('HTTP ' + r.status)), 'error'); return; }
+    const n = notas.find(x => String(x.spId) === spId || x.id === id); if (n) n.status = 'rejeitada';
+    toast('NF rejeitada — alinhamento não confirmado.', 'success');
+    showView(currentView);
+    if (typeof carregarNotasReais === 'function') carregarNotasReais().catch(() => {});
+  } catch (e) { toast('Erro: ' + (e.message || String(e)), 'error'); }
 }
 
 function confirmReject(id) {
