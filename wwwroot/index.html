@@ -8122,6 +8122,13 @@ async function doApprove(id) {
 }
 
 // ===== Confirma Alinhamento (Financeiro-Gestão) =====
+function _modalAlinhLoading(msg) {
+  openModal(`<div style="text-align:center;padding:22px 8px">
+    <div style="display:inline-block;width:36px;height:36px;border:4px solid #cfd8e3;border-top-color:#1F4E79;border-radius:50%;animation:_spinAl 0.8s linear infinite;vertical-align:middle"></div>
+    <p style="margin-top:16px;font-size:14px;color:#2C3E50">${escHtml(msg || 'Processando…')}</p>
+    <style>@keyframes _spinAl{to{transform:rotate(360deg)}}</style>
+  </div>`);
+}
 function _modalAlinhOK(icone, cor, titulo, msg) {
   openModal(`<div style="text-align:center;padding:10px 6px">
     <div style="font-size:44px;line-height:1">${icone}</div>
@@ -8156,6 +8163,7 @@ async function confirmarAlinhamento(id) {
     tipo: 'info', confirmLabel: 'Confirmar e aprovar', cancelLabel: 'Cancelar'
   });
   if (!ok) return;
+  _modalAlinhLoading('Confirmando alinhamento e aprovando a NF (gerando o carimbo)…');
   try {
     const r = await fetch('/api/ConfirmarAlinhamento', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -8166,13 +8174,14 @@ async function confirmarAlinhamento(id) {
     const n = notas.find(x => String(x.spId) === spId || x.id === id); if (n) n.status = 'aprovada';
     if (typeof carregarNotasReais === 'function') carregarNotasReais().catch(() => {});
     _modalAlinhOK('✅', '#2E7D32', 'Alinhamento confirmado', 'A NF <b>' + escHtml(id) + '</b> foi <b>aprovada</b> (carimbo do gestor) e seguiu para pagamento.');
-  } catch (e) { toast('Erro: ' + (e.message || String(e)), 'error'); }
+  } catch (e) { closeModal(); toast('Erro de rede: ' + (e.message || String(e)), 'error'); }
 }
 
 async function rejeitarAlinhamento(id) {
   const spId = String(id).replace(/^ID-/, '').replace(/^NF-/, '');
   const motivo = prompt('Motivo da rejeição do alinhamento (opcional — a NF será REJEITADA):', '');
   if (motivo === null) return; // cancelou
+  _modalAlinhLoading('Rejeitando a NF (gerando o carimbo de rejeição)…');
   try {
     const r = await fetch('/api/ConfirmarAlinhamento', {
       method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -8183,7 +8192,7 @@ async function rejeitarAlinhamento(id) {
     const n = notas.find(x => String(x.spId) === spId || x.id === id); if (n) n.status = 'rejeitada';
     if (typeof carregarNotasReais === 'function') carregarNotasReais().catch(() => {});
     _modalAlinhOK('✕', '#C62828', 'Alinhamento rejeitado', 'A NF <b>' + escHtml(id) + '</b> foi <b>rejeitada</b> — alinhamento não confirmado pelo financeiro.');
-  } catch (e) { toast('Erro: ' + (e.message || String(e)), 'error'); }
+  } catch (e) { closeModal(); toast('Erro de rede: ' + (e.message || String(e)), 'error'); }
 }
 
 function confirmReject(id) {

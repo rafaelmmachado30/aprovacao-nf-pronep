@@ -19,7 +19,7 @@ const { isAdminEmail } = require('../shared/authz');
 const { notificar } = require('../shared/notificar');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { getGraphClient } = require('../shared/graph');
-const { urlDeCampo, nomeArquivoDeUrl } = require('../shared/pdfNota');
+const { urlDeCampo, nomeArquivoDeUrl, acharPdfAlvo } = require('../shared/pdfNota');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 // Resolver local: alem de siteId/listId, resolve driveId + colMap desta lista.
@@ -271,25 +271,12 @@ module.exports = async function (context, req) {
       const urlNota = ehEstorno
         ? (urlDeCampo(f.UrlPDFAprovadoStr) || urlDeCampo(f.UrlPDFAprovado) || urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF))
         : (urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF));
-      const nomeExato = nomeArquivoDeUrl(urlNota);
-      if (nomeExato) pdfTarget = files.find(x => x.name === nomeExato);
-      diag.matchPor = pdfTarget ? 'nome_exato' : null;
-
-      // (2) FALLBACK ESTRITO (so se a nota nao tem URL/nome): exige numero E valor no
-      // nome, e so aceita se for UNICO. NUNCA aceita match frouxo unico por numero
-      // (era o bug: NumeroNF=3 casava com o sequencial _3_ de outro arquivo).
-      if (!pdfTarget) {
-        const numero = String(f.NumeroNF || '').trim();
-        const valorNum = (typeof f.Valor === 'number' ? f.Valor : Number(f.Valor)) || 0;
-        const valorStr = valorNum > 0 ? valorNum.toFixed(2).replace('.', ',') : '';
-        if (numero && valorStr) {
-          const cand = files.filter(x => x.name
-            && (x.name.startsWith(numero + '_') || x.name.includes('_' + numero + '_'))
-            && (x.name.includes('_' + valorStr + '_') || x.name.includes('_' + valorStr + '.')));
-          if (cand.length === 1) { pdfTarget = cand[0]; diag.matchPor = 'numero+valor'; }
-          else diag.matchAmbiguo = { numero, valorStr, encontrados: cand.length };
-        }
-      }
+      // Resolve por identidade exata (nome da URL) -> fallback estrito numero+valor (com
+      // variantes de zeros a esquerda). Mesmo criterio do AprovarNota (shared/pdfNota).
+      const achado = acharPdfAlvo(files, { url: urlNota, numero: f.NumeroNF, valor: f.Valor });
+      pdfTarget = achado.target;
+      diag.matchPor = achado.matchPor;
+      if (achado.ambiguo) diag.matchAmbiguo = achado.ambiguo;
       // Sem identificacao CONFIAVEL, nao move/carimba/deleta nada (evita mexer no arquivo
       // errado). A NF e rejeitada; o PDF fica pra reconciliacao manual.
     } catch (e) {

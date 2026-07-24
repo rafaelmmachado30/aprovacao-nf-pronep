@@ -55,14 +55,20 @@ function acharPdfAlvo(files, opts) {
   }
 
   // (2) FALLBACK ESTRITO: exige numero E valor no nome, e so aceita se UNICO.
-  const numero = String((opts && opts.numero) || '').trim();
+  // O nome do arquivo usa o numero SEM zeros a esquerda (ex.: NumeroNF "00190" -> "_190_").
+  // Por isso testamos variantes: cru, limpo, sem-zeros e com-zeros (6 digitos).
+  const numeroRaw = String((opts && opts.numero) || '').trim();
+  const numClean = numeroRaw.replace(/[^A-Za-z0-9]/g, '');
+  const numUnpadded = /^\d+$/.test(numClean) ? (numClean.replace(/^0+/, '') || '0') : numClean;
+  const numPadded = /^\d+$/.test(numClean) ? numClean.padStart(6, '0') : numClean;
+  const numeros = Array.from(new Set([numeroRaw, numClean, numUnpadded, numPadded].filter(Boolean)));
   const valorStr = valorStrDe(opts && opts.valor);
-  if (numero && valorStr) {
+  if (numeros.length && valorStr) {
     const cand = lista.filter(x => x.name
-      && (x.name.startsWith(numero + '_') || x.name.includes('_' + numero + '_'))
+      && numeros.some(nm => x.name.startsWith(nm + '_') || x.name.includes('_' + nm + '_'))
       && (x.name.includes('_' + valorStr + '_') || x.name.includes('_' + valorStr + '.')));
     if (cand.length === 1) { out.target = cand[0]; out.matchPor = 'numero+valor'; }
-    else out.ambiguo = { numero, valorStr, encontrados: cand.length };
+    else out.ambiguo = { numeros: numeros, valorStr: valorStr, encontrados: cand.length };
   }
   return out;
 }
