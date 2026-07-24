@@ -48,28 +48,45 @@ module.exports = async function (context, req) {
 
     diag.step = 'find_status_column';
     const colsResp = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').get();
-    const statusCol = (colsResp.value || []).find(function (c) {
-      return (c.displayName === 'Status' || c.name === 'Status') && c.choice;
-    });
-    if (!statusCol) throw new Error('Coluna Status (choice) nao encontrada');
-    const choices = (statusCol.choice && statusCol.choice.choices) || [];
-    diag.choicesAntes = choices.slice();
+    const cols = colsResp.value || [];
+    // Acha a coluna Status por displayName; fallback por nome interno conhecido (field_9).
+    const statusCol = cols.find(function (c) { return c.displayName === 'Status'; })
+      || cols.find(function (c) { return c.name === 'Status' || c.name === 'field_9'; });
+    if (!statusCol) {
+      context.res = { status: 404, headers: { 'Content-Type': 'application/json' },
+        body: { error: 'Coluna Status nao encontrada', colunas: cols.map(function (c) {
+          return { displayName: c.displayName, name: c.name, tipo: c.choice ? 'choice' : (c.text ? 'text' : 'outro') };
+        }) } };
+      return;
+    }
+    const tipo = statusCol.choice ? 'choice' : (statusCol.text ? 'text' : 'outro');
+    diag.statusColuna = { displayName: statusCol.displayName, name: statusCol.name, tipo: tipo };
 
-    if (choices.indexOf(NOVO_STATUS) >= 0) {
+    // Se NAO for choice (texto livre ou outro), aceita qualquer valor -> nada a migrar.
+    if (tipo !== 'choice') {
       diag.step = 'done';
       context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
-        body: { ok: true, jaExistia: true, choices: choices } };
+        body: { ok: true, migracaoNecessaria: false, tipo: tipo,
+          mensagem: 'Coluna Status e ' + tipo + ' (aceita qualquer valor). Nada a migrar — o status "' + NOVO_STATUS + '" ja funciona.' } };
       return;
     }
 
+    // choice: adiciona a opcao se ainda nao existir (idempotente).
+    const choices = (statusCol.choice && statusCol.choice.choices) || [];
+    diag.choicesAntes = choices.slice();
+    if (choices.indexOf(NOVO_STATUS) >= 0) {
+      diag.step = 'done';
+      context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
+        body: { ok: true, jaExistia: true, tipo: 'choice', choices: choices } };
+      return;
+    }
     diag.step = 'patch_choices';
     const novas = choices.concat([NOVO_STATUS]);
     await client.api('/sites/' + siteId + '/lists/' + listId + '/columns/' + statusCol.id)
       .patch({ choice: { choices: novas } });
-
     diag.step = 'done';
     context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
-      body: { ok: true, criado: NOVO_STATUS, choices: novas } };
+      body: { ok: true, criado: NOVO_STATUS, tipo: 'choice', choices: novas } };
   } catch (err) {
     context.res = { status: 500, headers: { 'Content-Type': 'application/json' },
       body: { error: (err && err.message) || String(err), diag: diag } };
