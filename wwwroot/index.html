@@ -8131,13 +8131,19 @@ function _modalAlinhOK(icone, cor, titulo, msg) {
   </div>`);
 }
 function _modalAlinhErro(acaoLabel, data, httpStatus) {
-  const passo = (data && data.detalhe && data.detalhe.diag && data.detalhe.diag.step) ? (' · passo: ' + data.detalhe.diag.step) : '';
-  const det = (data && data.detalhe && data.detalhe.error) ? data.detalhe.error : '';
+  const dt = (data && data.detalhe) || {};
+  const passo = (dt.diag && dt.diag.step) ? (' · passo: ' + dt.diag.step) : '';
+  const det = dt.error || '';
+  const folder = dt.folder ? `<p style="font-size:12px;color:#647883;margin:6px 0 2px">Pasta: <code>${escHtml(dt.folder)}</code></p>` : '';
+  const arqs = Array.isArray(dt.arquivosDisponiveis)
+    ? `<div style="text-align:left;background:#F4F8FB;border-radius:6px;padding:10px 12px;margin:6px 0 14px;font-size:11.5px;color:#647883;max-height:160px;overflow:auto">Arquivos na pasta (${dt.arquivosDisponiveis.length}):<br>${dt.arquivosDisponiveis.map(a => '• ' + escHtml(a)).join('<br>') || '<i>(vazia)</i>'}</div>`
+    : '';
   openModal(`<div style="text-align:center;padding:10px 6px">
     <div style="font-size:44px;line-height:1">⚠️</div>
     <h3 style="margin:12px 0 8px;color:#C62828">Falha ao ${acaoLabel}</h3>
     <p style="font-size:14px;color:#2C3E50;margin:0 0 6px">${escHtml((data && data.error) || ('HTTP ' + httpStatus))}</p>
-    ${det ? `<p style="font-size:12.5px;color:#647883;margin:0 0 16px;word-break:break-word">${escHtml(det)}${escHtml(passo)}</p>` : '<div style="margin-bottom:16px"></div>'}
+    ${det ? `<p style="font-size:12.5px;color:#647883;margin:0 0 4px;word-break:break-word">${escHtml(det)}${escHtml(passo)}</p>` : ''}
+    ${folder}${arqs}
     <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
   </div>`);
 }
