@@ -496,14 +496,21 @@ module.exports = async function (context, req) {
       };
     }
 
-    // Dispara notificacao pro submitter (quem lancou)
+    // Dispara notificacao pro submitter (quem lancou) — BEST-EFFORT: uma falha aqui
+    // (e-mail/Teams) NAO pode derrubar a aprovacao, que ja foi concluida (PDF movido +
+    // Status=Aprovada). Antes, sem try/catch, um erro de notificacao dava 500 falso.
     diag.step = 'notify';
-    await notificar('aprovada', [f.LancadoPor || aprovadorEmail], {
-      numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor,
-      vencimento: f.DataVencimento, unidade: f.Unidade, diretoria: f.Diretoria,
-      aprovador: aprovadorEmail, submitter: f.LancadoPor,
-      urlPDF: uploadResp.webUrl
-    });
+    try {
+      await notificar('aprovada', [f.LancadoPor || aprovadorEmail], {
+        numero: f.NumeroNF, fornecedor: f.CNPJFornecedor, valor: f.Valor,
+        vencimento: f.DataVencimento, unidade: f.Unidade, diretoria: f.Diretoria,
+        aprovador: aprovadorEmail, submitter: f.LancadoPor,
+        urlPDF: uploadResp.webUrl
+      });
+      diag.notify = 'ok';
+    } catch (notifErr) {
+      diag.notifyError = (notifErr && notifErr.message) || String(notifErr);
+    }
 
     // Audit log — best effort
     auditRegistrar(user, 'aprovacao',
