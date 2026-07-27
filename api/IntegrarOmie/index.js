@@ -208,65 +208,43 @@ module.exports = async function (context, req) {
     }
     diag.pdfBusca = { aprovadoEm, datasCandidatas, numero, unidade, pastasTentadas: [] };
 
-    const { normalizaNumeroNF } = require('../shared/omie');
-    const numAlvoFmt = normalizaNumeroNF(numero);
-    diag.pdfBusca.numAlvoFmt = numAlvoFmt;
-    function achaPdfNaLista(arquivos) {
-      return arquivos.find(function (x) {
-        if (!x.name) return false;
-        const base = x.name.replace(/\.pdf$/i, '');
-        // 1) algum token (separado por _ - espaco) igual ao numero normalizado
-        const tokens = base.split(/[_\-\s]+/);
-        if (tokens.some(function (t) { return numAlvoFmt && normalizaNumeroNF(t) === numAlvoFmt; })) return true;
-        // 2) numero normalizado aparece no nome inteiro normalizado (cobre nomes "colados")
-        return numAlvoFmt && normalizaNumeroNF(base).indexOf(numAlvoFmt) >= 0;
-      });
-    }
-
+    // BLINDAGEM (grave): casa o PDF por IDENTIDADE EXATA (nome do arquivo da URL aprovada
+    // da propria NF) -> fallback ESTRITO numero+valor UNICO. NUNCA casa so por numero — era
+    // o bug que anexava o PDF de OUTRA NF no Omie (numero colidindo com o sequencial do nome).
+    const { urlDeCampo, acharPdfAlvo } = require('../shared/pdfNota');
     const folderUnidade = 'Notas Fiscais/Notas Aprovadas/' + unidade;
-    let pdfMatch = null;
     let arquivosCandidatos = [];
 
-    // 1) Caminho rapido: tenta cada data candidata (BRT primeiro, depois UTC)
-    for (const data of datasCandidatas) {
-      const folder = folderUnidade + '/' + data;
-      try {
-        const resp = await client.api('/sites/' + siteId + '/drive/root:/' + folder + ':/children').get();
-        const arqs = (resp.value || []).filter(function (x) { return x.file; });
-        diag.pdfBusca.pastasTentadas.push({ folder: folder, arquivos: arqs.length });
-        const m = achaPdfNaLista(arqs);
-        if (m) { pdfMatch = m; arquivosCandidatos = arqs; diag.pdfBusca.folderUsado = folder; break; }
-        arquivosCandidatos = arquivosCandidatos.concat(arqs);
-      } catch (e) {
-        diag.pdfBusca.pastasTentadas.push({ folder: folder, erro: e.message });
+    // Coleta TODOS os PDFs das aprovadas da unidade (pasta + subpastas de data).
+    try {
+      const sub = await client.api('/sites/' + siteId + '/drive/root:/' + folderUnidade + ':/children').get();
+      for (const x of (sub.value || [])) {
+        if (x.file) arquivosCandidatos.push(x);
+        else if (x.folder) {
+          try {
+            const filesResp = await client.api('/sites/' + siteId + '/drive/items/' + x.id + '/children').get();
+            for (const y of (filesResp.value || [])) if (y.file) arquivosCandidatos.push(y);
+          } catch (e2) { /* subpasta inacessivel */ }
+        }
       }
+      diag.pdfBusca.arquivosColetados = arquivosCandidatos.length;
+    } catch (e) {
+      diag.pdfBusca.erroColeta = e.message;
     }
 
-    // 2) Rede de seguranca: varre TODAS as subpastas (datas) da unidade
-    if (!pdfMatch) {
-      try {
-        const sub = await client.api('/sites/' + siteId + '/drive/root:/' + folderUnidade + ':/children').get();
-        for (const sf of (sub.value || []).filter(function (x) { return x.folder; })) {
-          try {
-            const filesResp = await client.api('/sites/' + siteId + '/drive/items/' + sf.id + '/children').get();
-            const arqs = (filesResp.value || []).filter(function (x) { return x.file; });
-            const m = achaPdfNaLista(arqs);
-            if (m) { pdfMatch = m; diag.pdfBusca.folderUsado = folderUnidade + '/' + sf.name + ' (varredura)'; break; }
-          } catch (e2) {}
-        }
-        diag.pdfBusca.varreuSubpastas = true;
-      } catch (e) {
-        diag.pdfBusca.erroVarredura = e.message;
-      }
-    }
+    const urlAprov = urlDeCampo(f.UrlPDFAprovadoStr) || urlDeCampo(f.UrlPDFAprovado) || urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF);
+    const achado = acharPdfAlvo(arquivosCandidatos, { url: urlAprov, numero: f.NumeroNF, valor: f.Valor });
+    let pdfMatch = achado.target;
+    diag.pdfBusca.matchPor = achado.matchPor;
+    if (achado.ambiguo) diag.pdfBusca.ambiguo = achado.ambiguo;
 
     if (!pdfMatch) {
       diag.pdfBusca.nomesEncontrados = arquivosCandidatos.slice(0, 8).map(function (x) { return x.name; });
       context.res = {
         status: 404,
         body: {
-          error: 'PDF aprovado nao encontrado na pasta',
-          detail: 'NF ' + numero + ' (aprovada em ' + (aprovadoEm || '?') + '). Procurei nas pastas ' + (datasCandidatas.join(', ') || '?') + ' e varri as subpastas de ' + unidade + '.',
+          error: 'PDF aprovado nao identificado com seguranca — integracao NAO realizada',
+          detail: 'NF ' + numero + ' (valor ' + f.Valor + ', aprovada em ' + (aprovadoEm || '?') + '): nao achei o PDF por URL/nome exato nem por numero+valor unico nas aprovadas de ' + unidade + '. Por seguranca NAO anexei nenhum arquivo no Omie (evita anexar o PDF de outra NF). Verifique/reconcilie manualmente.',
           diag
         }
       };
