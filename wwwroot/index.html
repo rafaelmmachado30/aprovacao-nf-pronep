@@ -122,8 +122,8 @@
 const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','caixa-entrada','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
   gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','confirma-alinhamento','aprovadas','rejeitadas','nova-nf','minhas-nfs','contas-recorrentes','fechamento-mes','contratos','mapa-aprovadores','arquitetura'] },
-  financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['confirma-alinhamento','aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','confirma-alinhamento','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','arquitetura','configuracoes'] },
+  financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['confirma-alinhamento','aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','auditoria-omie','arquitetura'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','confirma-alinhamento','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','auditoria-omie','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -1197,6 +1197,7 @@ const menuItems = [
   { id: 'contas-recorrentes',label: 'Contas Recorrentes',         icon: ICONS.recorrentes },
   { id: 'fechamento-mes',    label: 'Fechamento do Mês',          icon: ICONS.fechamento },
   { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
+  { id: 'auditoria-omie',    label: 'Auditoria Omie (PDFs)',      icon: ICONS.auditoria },
   { id: 'arquitetura',       label: 'Arquitetura do Sistema',     icon: ICONS.arquitetura },
   { id: 'configuracoes',     label: 'Configurações',              icon: ICONS.configuracoes },
 ];
@@ -2274,6 +2275,58 @@ function fecharMenuMobile() {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && document.body.classList.contains('menu-open')) fecharMenuMobile();
 });
+
+async function carregarAuditIntegracaoOmie() {
+  const tbody = document.getElementById('audit-omie-tbody');
+  const statusEl = document.getElementById('audit-omie-status');
+  if (!tbody) return;
+  if (statusEl) statusEl.textContent = 'Analisando integrações…';
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#647883">Analisando integrações…</td></tr>';
+  const setKpi = function (id, v) { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const MOTIVO = {
+    sem_pdf_correto_identificavel: 'PDF correto não identificável com segurança',
+    numero_ambiguo_multiplos_arquivos: 'Número casa com vários arquivos (ambíguo)',
+    antigo_pegaria_outro_arquivo: 'Regra antiga anexaria OUTRO arquivo'
+  };
+  const esc = function (s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); };
+  try {
+    const r = await fetch('/api/DiagIntegracaoOmie?amostra=1000', { credentials: 'include' });
+    if (!r.ok) {
+      const errBody = await r.json().catch(() => ({}));
+      const msg = r.status === 403 ? 'Acesso restrito a admin ou financeiro.' : (errBody.error || ('HTTP ' + r.status));
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#C62828">❌ ' + esc(msg) + '</td></tr>';
+      if (statusEl) statusEl.textContent = '';
+      return;
+    }
+    const data = await r.json();
+    setKpi('ao-total', data.totalIntegradas != null ? data.totalIntegradas : '—');
+    setKpi('ao-sus', data.suspeitosCount != null ? data.suspeitosCount : '—');
+    setKpi('ao-ok', data.okCount != null ? data.okCount : '—');
+    const sus = data.suspeitos || [];
+    if (!sus.length) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#047857">✅ Nenhuma integração suspeita. Todos os PDFs anexados batem com a identidade exata.</td></tr>';
+      if (statusEl) statusEl.textContent = 'Concluído · ' + (data.totalIntegradas || 0) + ' integrada(s) analisada(s).';
+      return;
+    }
+    tbody.innerHTML = sus.map(function (n) {
+      const valor = (typeof n.valor === 'number') ? fmtBRL(n.valor) : esc(n.valor);
+      return '<tr>' +
+        '<td><b>' + esc(n.numero) + '</b></td>' +
+        '<td>' + esc(n.unidade) + '</td>' +
+        '<td>' + esc(n.diretoria) + '</td>' +
+        '<td>' + esc(n.fornecedor) + '</td>' +
+        '<td class="num">' + valor + '</td>' +
+        '<td style="color:#047857;font-size:11px;word-break:break-all">' + esc(n.correto || '—') + '</td>' +
+        '<td style="color:#b45309;font-weight:600;font-size:11px;word-break:break-all">' + esc(n.provavelAnexadoAntigo || '—') + '</td>' +
+        '<td class="small">' + esc(MOTIVO[n.motivo] || n.motivo) + '</td>' +
+        '</tr>';
+    }).join('');
+    if (statusEl) statusEl.textContent = 'Concluído · ' + sus.length + ' suspeita(s) de ' + (data.totalIntegradas || 0) + ' integrada(s). Confira o anexo dessas NFs no Omie.';
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:24px;color:#C62828">❌ Erro ao carregar: ' + esc((e && e.message) || e) + '</td></tr>';
+    if (statusEl) statusEl.textContent = '';
+  }
+}
 
 async function carregarAuditLog() {
   const f = window._filtroAudit || { acao: '', userEmail: '', periodo: '7d' };
@@ -3824,6 +3877,34 @@ const views = {
         <table class="data" id="audit-table">
           <thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Objeto</th><th>Resultado</th><th>Detalhes</th></tr></thead>
           <tbody id="audit-tbody"><tr><td colspan="6" style="text-align:center;padding:24px;color:#647883">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+    `;
+  },
+
+  'auditoria-omie': () => {
+    setTimeout(function(){ carregarAuditIntegracaoOmie(); }, 0);
+    return `
+      <h2>Auditoria da Integração Omie — PDFs anexados</h2>
+      <div class="view-sub">Verificação read-only: para cada NF já integrada no Omie, compara o PDF <b>correto</b> (identidade exata: link aprovado + número + valor) com o que a regra antiga (só número) teria anexado. As linhas listadas precisam de conferência no Omie.</div>
+      <div class="filter-bar" style="display:flex;gap:12px;flex-wrap:wrap;align-items:end">
+        <div>
+          <button class="btn" onclick="carregarAuditIntegracaoOmie()" style="background:#1F4E79;color:#fff;padding:8px 16px;border:0;border-radius:6px;cursor:pointer">🔄 Atualizar</button>
+        </div>
+        <div>
+          <a class="btn btn-secondary" href="/api/DiagIntegracaoOmie?format=html" target="_blank" rel="noopener" style="padding:8px 16px">↗ Abrir em nova aba</a>
+        </div>
+      </div>
+      <div class="kpi-row" id="audit-omie-kpis" style="margin:14px 0">
+        <div class="kpi"><div class="label">Integradas</div><div class="value" id="ao-total">…</div></div>
+        <div class="kpi"><div class="label">Suspeitas</div><div class="value" id="ao-sus" style="color:#b45309">…</div><div class="delta small muted">conferir no Omie</div></div>
+        <div class="kpi"><div class="label">OK</div><div class="value" id="ao-ok" style="color:#047857">…</div></div>
+      </div>
+      <div class="card">
+        <div id="audit-omie-status" style="padding:8px 4px;font-size:12px;color:#647883">Carregando…</div>
+        <table class="data" id="audit-omie-table">
+          <thead><tr><th>NF</th><th>Unidade</th><th>Diretoria</th><th>Fornecedor</th><th class="num">Valor</th><th>PDF correto</th><th>Provável anexado (antigo)</th><th>Motivo</th></tr></thead>
+          <tbody id="audit-omie-tbody"><tr><td colspan="8" style="text-align:center;padding:24px;color:#647883">Carregando…</td></tr></tbody>
         </table>
       </div>
     `;
