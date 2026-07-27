@@ -1452,6 +1452,10 @@ function loginAs(userData, emailLogin) {
   document.getElementById('login-email').value = '';
   document.getElementById('login-msg').innerHTML = '';
   window._viewAsDiretoria = null;   // toda sessao comeca como Admin (tudo)
+  // ZERA os dados de exemplo (seed hardcoded) ANTES de renderizar qualquer view.
+  // Sem isso, o dashboard/filas abrem exibindo NFs ficticias por 3-5s ate as
+  // notas reais chegarem do SharePoint. Agora abre vazio+overlay ate os dados reais.
+  notas = []; notasFull = []; window._notasProntas = false;
   try { renderSeletorVisao(); } catch (e) {}
   renderNav();
   showView(currentPersona.canSee[0]);
@@ -1478,8 +1482,16 @@ function mostrarLoadingInicial() {
   const div = document.createElement('div');
   div.id = 'loading-inicial-overlay';
   div.style.cssText = 'position:fixed;inset:0;background:#1F4E79;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:99998;font-family:Inter,system-ui,sans-serif;color:#fff';
-  div.innerHTML = '<div style="text-align:center"><div style="width:48px;height:48px;border:4px solid rgba(255,255,255,0.2);border-top-color:#27AAE1;border-radius:50%;animation:spinL 0.8s linear infinite;margin:0 auto 18px"></div><h2 style="margin:0;font-size:18px;font-weight:600">Carregando sistema...</h2><p style="margin:8px 0 0;font-size:13px;opacity:0.85">Conectando com Microsoft 365 e SharePoint</p></div><style>@keyframes spinL{to{transform:rotate(360deg)}}</style>';
+  div.innerHTML = '<div style="text-align:center"><div style="width:48px;height:48px;border:4px solid rgba(255,255,255,0.2);border-top-color:#27AAE1;border-radius:50%;animation:spinL 0.8s linear infinite;margin:0 auto 18px"></div><h2 id="loading-inicial-titulo" style="margin:0;font-size:18px;font-weight:600">Carregando sistema...</h2><p id="loading-inicial-sub" style="margin:8px 0 0;font-size:13px;opacity:0.85">Conectando com Microsoft 365 e SharePoint</p></div><style>@keyframes spinL{to{transform:rotate(360deg)}}</style>';
   document.body.appendChild(div);
+}
+// Atualiza o texto do overlay inicial sem recria-lo (usado ao passar de "conectando"
+// para "carregando notas fiscais...").
+function _setLoadingInicialMsg(titulo, sub) {
+  const t = document.getElementById('loading-inicial-titulo');
+  const s = document.getElementById('loading-inicial-sub');
+  if (t && titulo != null) t.textContent = titulo;
+  if (s && sub != null) s.textContent = sub;
 }
 function esconderLoadingInicial() {
   const el = document.getElementById('loading-inicial-overlay');
@@ -1944,7 +1956,7 @@ async function carregarDadosIniciais() {
   // Guard contra chamadas simultaneas
   if (window._carregamentoEmAndamento) return window._carregamentoEmAndamento;
   window._carregamentoEmAndamento = (async () => {
-    const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
+    const viewsQueDependem = ['fornecedores','nova-nf','lancamento','fila-aprovacao','confirma-alinhamento','minhas-nfs','aprovadas','rejeitadas','rejeitadas-minhas','mapa-aprovadores','mapa','dashboard'];
     try {
       // Carrega as REFERENCIAS (fornecedores/diretorias/gestores/config/feriados).
       // As notas NAO entram aqui — saem do caminho critico pra UI abrir antes.
@@ -1958,19 +1970,40 @@ async function carregarDadosIniciais() {
     } catch (e) {
       console.error('[carregarDadosIniciais] erro geral:', e);
     } finally {
-      // Libera a UI assim que as referencias estao prontas (perf: nao espera as notas).
-      esconderLoadingInicial();
-      if (viewsQueDependem.includes(currentView)) {
-        try { showView(currentView); } catch (e) { console.error('[showView no boot]', e); }
+      const dependeDeNotas = viewsQueDependem.includes(currentView);
+      // Renderiza o shell/view por baixo do overlay ja com as referencias prontas.
+      try { showView(currentView); } catch (e) { console.error('[showView no boot]', e); }
+      if (dependeDeNotas) {
+        // View depende de notas: MANTEM o overlay ate os dados reais chegarem, pra o
+        // sistema NUNCA abrir mostrando dados de exemplo/desatualizados.
+        _setLoadingInicialMsg('Carregando notas fiscais...', 'Buscando os dados mais recentes no SharePoint');
+      } else {
+        // View atual nao usa notas (ex.: configuracoes): libera a UI ja.
+        esconderLoadingInicial();
       }
     }
-    // NOTAS EM SEGUNDO PLANO: a tela ja esta usavel; quando chegarem, re-renderiza
-    // a view atual pra preencher as listas. Indicador discreto enquanto carregam.
-    _mostrarPillNotas();
+    // Carrega as NOTAS. Enquanto isso, mantem o overlay (se a view depende) OU o pill
+    // discreto (se ja liberou). Rede de seguranca: se demorar demais / falhar, libera
+    // a UI assim mesmo — sem dados ficticios (listas vazias + indicador ativo).
+    const _viewDependia = viewsQueDependem.includes(currentView);
+    if (!_viewDependia) _mostrarPillNotas();
+    let _revelou = false;
+    const _revelarUI = function () {
+      if (_revelou) return; _revelou = true;
+      esconderLoadingInicial();
+      _esconderPillNotas();
+    };
+    const _safetyBoot = setTimeout(function () {
+      console.warn('[boot] notas demoraram >15s — liberando a UI assim mesmo.');
+      if (_viewDependia) _mostrarPillNotas();  // segue indicando que ainda carregam
+      esconderLoadingInicial();
+    }, 15000);
     carregarNotasReais()
       .catch(e => console.error('[carregarNotas]', e))
       .finally(() => {
-        _esconderPillNotas();
+        clearTimeout(_safetyBoot);
+        window._notasProntas = true;
+        _revelarUI();
         if (viewsQueDependem.includes(currentView)) {
           try { showView(currentView); } catch (e) { console.error('[showView pos-notas]', e); }
         }
@@ -2072,6 +2105,7 @@ async function tryAutoLoginFromAzure() {
 }
 
 function mostrarSemAcesso(email, detalhe) {
+  esconderLoadingInicial();  // sem acesso: libera o overlay pra mostrar a mensagem
   const msg = document.getElementById('login-msg');
   if (!msg) return;
   msg.innerHTML = '<div class="alert alert-error"><span class="ico">x</span><div><b>Usuario sem acesso ao sistema.</b><br>'
