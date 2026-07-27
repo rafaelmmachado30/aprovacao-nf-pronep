@@ -19,7 +19,7 @@ const { isAdminEmail } = require('../shared/authz');
 const { notificar } = require('../shared/notificar');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { getGraphClient } = require('../shared/graph');
-const { urlDeCampo, nomeArquivoDeUrl, acharPdfAlvo } = require('../shared/pdfNota');
+const { urlDeCampo, nomeArquivoDeUrl, acharPdfAlvo, resolverPdfNota } = require('../shared/pdfNota');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 // Resolver local: alem de siteId/listId, resolve driveId + colMap desta lista.
@@ -84,24 +84,9 @@ function normalizeFields(fields, invColMap) {
 
 // urlDeCampo / nomeArquivoDeUrl agora vem de shared/pdfNota (usados tambem no AprovarNota).
 
-// Coleta arquivos de uma pasta + 1 nivel de subpastas. Usado no ESTORNO: as aprovadas
-// ficam em "Notas Aprovadas/{Unidade}/{AAAA-MM-DD}/", entao varremos as subpastas de data.
-async function coletarArquivosComSubpastas(client, siteId, baseFolder) {
-  const out = [];
-  let resp;
-  try { resp = await client.api(`/sites/${siteId}/drive/root:/${baseFolder}:/children`).get(); }
-  catch (e) { return out; }
-  for (const x of (resp.value || [])) {
-    if (x.file) out.push(x);
-    else if (x.folder) {
-      try {
-        const sub = await client.api(`/sites/${siteId}/drive/items/${x.id}/children`).get();
-        for (const y of (sub.value || [])) if (y.file) out.push(y);
-      } catch (e) { /* subpasta inacessivel — ignora */ }
-    }
-  }
-  return out;
-}
+// REMOVIDO: coletarArquivosComSubpastas(). Varrer "Notas Aprovadas/{Unidade}" fazia 1
+// chamada Graph por subpasta de data (centenas) e estourava o timeout da Function.
+// O estorno agora usa resolverPdfNota() (caminho direto da URL + pastas candidatas).
 
 // Aplica watermark REJEITADA (vermelho, 4 linhas: REJEITADA + data + por + motivo)
 async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
@@ -280,24 +265,44 @@ module.exports = async function (context, req) {
     diag.folderOrigem = ehEstorno ? baseAprov : folderPendente;
     let pdfTarget = null;
     try {
-      let files;
-      if (ehEstorno) {
-        files = await coletarArquivosComSubpastas(client, siteId, baseAprov);
-        if (!files.length) files = await coletarArquivosComSubpastas(client, siteId, 'Notas Aprovadas'); // legado plano
-      } else {
-        const folderListResp = await client.api(`/sites/${siteId}/drive/root:/${folderPendente}:/children`).get();
-        files = (folderListResp.value || []).filter(x => x.file);
-      }
-      diag.arquivosOrigem = files.length;
-
       // Nome EXATO da URL da nota (UrlPDFAprovado no estorno; UrlPDF no fluxo normal) ->
       // fallback estrito numero+valor (com variantes de zeros). Mesmo criterio do AprovarNota.
       const urlNota = ehEstorno
         ? (urlDeCampo(f.UrlPDFAprovadoStr) || urlDeCampo(f.UrlPDFAprovado) || urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF))
         : (urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF));
-      const achado = acharPdfAlvo(files, { url: urlNota, numero: f.NumeroNF, valor: f.Valor });
+
+      // PERF (regressao corrigida): no estorno, varrer todas as subpastas de data de
+      // "Notas Aprovadas/{Unidade}" fazia 1 chamada Graph por dia de aprovacao (centenas)
+      // e estourava o timeout da Function. Agora: caminho direto da URL da nota, e como
+      // fallback SO as pastas de data candidatas.
+      let pastas;
+      if (ehEstorno) {
+        const dts = [];
+        if (f.AprovadoEm) {
+          const dUtc = new Date(f.AprovadoEm);
+          if (!isNaN(dUtc.getTime())) {
+            const dBrt = new Date(dUtc.getTime() - 3 * 60 * 60 * 1000);
+            const fmt = (d) => d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+            dts.push(fmt(dBrt));
+            const utcStr = String(f.AprovadoEm).substring(0, 10);
+            if (dts.indexOf(utcStr) < 0) dts.push(utcStr);
+          } else {
+            dts.push(String(f.AprovadoEm).substring(0, 10));
+          }
+        }
+        pastas = dts.map(d => `${baseAprov}/${d}`);
+        pastas.push(baseAprov);                       // solto na raiz da unidade
+        pastas.push(`Notas Aprovadas/${f.Unidade}`);  // legado
+        pastas.push('Notas Aprovadas');               // legado plano
+      } else {
+        pastas = [folderPendente];
+      }
+      diag.pastasTentadas = pastas;
+
+      const achado = await resolverPdfNota(client, siteId, { url: urlNota, numero: f.NumeroNF, valor: f.Valor }, pastas);
       pdfTarget = achado.target;
       diag.matchPor = achado.matchPor;
+      diag.arquivosOrigem = achado.arquivosVistos;
       if (achado.ambiguo) diag.matchAmbiguo = achado.ambiguo;
       // Sem identificacao CONFIAVEL, nao move/deleta nada — a NF e rejeitada e o PDF fica
       // pra reconciliacao manual (evita mexer no arquivo errado).

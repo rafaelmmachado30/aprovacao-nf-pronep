@@ -211,35 +211,27 @@ module.exports = async function (context, req) {
     // BLINDAGEM (grave): casa o PDF por IDENTIDADE EXATA (nome do arquivo da URL aprovada
     // da propria NF) -> fallback ESTRITO numero+valor UNICO. NUNCA casa so por numero — era
     // o bug que anexava o PDF de OUTRA NF no Omie (numero colidindo com o sequencial do nome).
-    const { urlDeCampo, acharPdfAlvo } = require('../shared/pdfNota');
+    // PERF (regressao corrigida): antes coletavamos TODOS os PDFs da unidade varrendo
+    // 1 chamada Graph por subpasta de data (centenas) -> estourava o timeout da Function
+    // e o SWA devolvia HTTP 500 "Backend call failure". Agora resolvemos pelo CAMINHO
+    // DIRETO da URL guardada na nota (1 chamada, identidade exata por construcao) e, se
+    // preciso, olhamos SO as pastas de data candidatas. Poucas chamadas, sem timeout.
+    const { urlDeCampo, resolverPdfNota } = require('../shared/pdfNota');
     const folderUnidade = 'Notas Fiscais/Notas Aprovadas/' + unidade;
-    let arquivosCandidatos = [];
-
-    // Coleta TODOS os PDFs das aprovadas da unidade (pasta + subpastas de data).
-    try {
-      const sub = await client.api('/sites/' + siteId + '/drive/root:/' + folderUnidade + ':/children').get();
-      for (const x of (sub.value || [])) {
-        if (x.file) arquivosCandidatos.push(x);
-        else if (x.folder) {
-          try {
-            const filesResp = await client.api('/sites/' + siteId + '/drive/items/' + x.id + '/children').get();
-            for (const y of (filesResp.value || [])) if (y.file) arquivosCandidatos.push(y);
-          } catch (e2) { /* subpasta inacessivel */ }
-        }
-      }
-      diag.pdfBusca.arquivosColetados = arquivosCandidatos.length;
-    } catch (e) {
-      diag.pdfBusca.erroColeta = e.message;
-    }
+    const pastasCandidatas = datasCandidatas.map(function (d) { return folderUnidade + '/' + d; });
+    pastasCandidatas.push(folderUnidade);            // arquivos soltos na raiz da unidade
+    pastasCandidatas.push('Notas Aprovadas/' + unidade); // legado
+    diag.pdfBusca.pastasTentadas = pastasCandidatas;
 
     const urlAprov = urlDeCampo(f.UrlPDFAprovadoStr) || urlDeCampo(f.UrlPDFAprovado) || urlDeCampo(f.UrlPDFStr) || urlDeCampo(f.UrlPDF);
-    const achado = acharPdfAlvo(arquivosCandidatos, { url: urlAprov, numero: f.NumeroNF, valor: f.Valor });
+    const achado = await resolverPdfNota(client, siteId, { url: urlAprov, numero: f.NumeroNF, valor: f.Valor }, pastasCandidatas);
     let pdfMatch = achado.target;
     diag.pdfBusca.matchPor = achado.matchPor;
+    diag.pdfBusca.tentativas = achado.tentativas;
     if (achado.ambiguo) diag.pdfBusca.ambiguo = achado.ambiguo;
 
     if (!pdfMatch) {
-      diag.pdfBusca.nomesEncontrados = arquivosCandidatos.slice(0, 8).map(function (x) { return x.name; });
+      diag.pdfBusca.nomesEncontrados = achado.nomesVistos || [];
       context.res = {
         status: 404,
         body: {
