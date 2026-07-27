@@ -3,18 +3,24 @@
  *
  * Audita as NFs ja integradas no Omie pra achar as que PODEM ter recebido o PDF ERRADO
  * (bug do match so por numero, corrigido no #55). Para cada NF integrada:
- *   - correto : PDF resolvido por IDENTIDADE EXATA (acharPdfAlvo: URL aprovada -> num+valor unico)
- *   - porNumero: TODOS os PDFs que a regra ANTIGA (so numero) casaria; o [0] e o "provavel anexado"
+ *   - correto : PDF resolvido por IDENTIDADE EXATA (acharPdfAlvo: URL aprovada -> num+valor)
+ *   - porNumero: TODOS os PDFs aprovados (de qualquer NF) que a regra ANTIGA (so numero)
+ *               casaria; o [0] e o "provavel anexado".
  *   - risco   : se porNumero tem >1 candidato, OU o provavel anexado != correto, OU nao ha correto.
  *
- * NAO altera nada. Serve pra o financeiro saber quais contas do Omie conferir/corrigir.
- * Query: ?limite= (default 3000)  ?amostra= (itens listados, default 200)
+ * IMPORTANTE (perf): NAO varre o drive do SharePoint (isso estourava o timeout da function).
+ * O universo de PDFs aprovados e montado a partir da PROPRIA lista de notas — cada nota
+ * aprovada carrega o nome do seu PDF no campo UrlPDFAprovado. Isso captura exatamente as
+ * colisoes de numero (que sao NFs diferentes com o mesmo numero) sem nenhuma chamada extra.
+ *
+ * NAO altera nada. Query: ?limite= (default 5000)  ?amostra= (itens listados, default 1000)
+ *                        ?format=html (tabela legivel)
  */
 
 require('isomorphic-fetch');
 const { resolveAuthz } = require('../shared/authz');
 const { getGraphClient, resolveSiteId } = require('../shared/graph');
-const { acharPdfAlvo, urlDeCampo } = require('../shared/pdfNota');
+const { acharPdfAlvo, urlDeCampo, nomeArquivoDeUrl } = require('../shared/pdfNota');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 
@@ -35,22 +41,8 @@ function norm(item, inv) {
 function ehIntegrada(n) {
   return n.IntegradoOmie === true || n.IntegradoOmie === 'Sim' || n.IntegradoOmie === 'true';
 }
-// Coleta PDFs de uma pasta + 1 nivel de subpastas (datas).
-async function coletarArquivos(client, siteId, baseFolder) {
-  const out = [];
-  let resp;
-  try { resp = await client.api('/sites/' + siteId + '/drive/root:/' + baseFolder + ':/children').get(); }
-  catch (e) { return out; }
-  for (const x of (resp.value || [])) {
-    if (x.file) out.push(x);
-    else if (x.folder) {
-      try {
-        const sub = await client.api('/sites/' + siteId + '/drive/items/' + x.id + '/children').get();
-        for (const y of (sub.value || [])) if (y.file) out.push(y);
-      } catch (e) { /* ignora */ }
-    }
-  }
-  return out;
+function urlPdfDe(n) {
+  return urlDeCampo(n.UrlPDFAprovadoStr) || urlDeCampo(n.UrlPDFAprovado) || urlDeCampo(n.UrlPDFStr) || urlDeCampo(n.UrlPDF) || '';
 }
 
 module.exports = async function (context, req) {
@@ -59,17 +51,18 @@ module.exports = async function (context, req) {
     if (!authz) { context.res = { status: 401, body: { error: 'Nao autenticado' } }; return; }
     if (!authz.isAdmin && !authz.isFinanceiro) { context.res = { status: 403, body: { error: 'Acesso restrito a admin ou financeiro' } }; return; }
 
-    const limite = Math.min(5000, Math.max(1, parseInt((req.query && req.query.limite) || '3000', 10) || 3000));
-    const amostra = Math.min(1000, Math.max(1, parseInt((req.query && req.query.amostra) || '200', 10) || 200));
+    const limite = Math.min(8000, Math.max(1, parseInt((req.query && req.query.limite) || '5000', 10) || 5000));
+    const amostra = Math.min(2000, Math.max(1, parseInt((req.query && req.query.amostra) || '1000', 10) || 1000));
 
     let normalizaNumeroNF;
-    try { normalizaNumeroNF = require('../shared/omie').normalizaNumeroNF; } catch (e) { normalizaNumeroNF = function (s) { return String(s || '').replace(/\D/g, '').replace(/^0+/, ''); }; }
+    try { normalizaNumeroNF = require('../shared/omie').normalizaNumeroNF; }
+    catch (e) { normalizaNumeroNF = function (s) { return String(s || '').replace(/\D/g, '').replace(/^0+/, ''); }; }
 
     const client = await getGraphClient();
     const siteId = await resolveSiteId(client);
     const { listId, inv } = await resolveLista(client, siteId);
 
-    // Carrega todas as NFs.
+    // Le todas as NFs (paginado). So a lista — sem tocar no drive.
     const all = [];
     let url = '/sites/' + siteId + '/lists/' + listId + '/items?expand=fields&$top=1000';
     let pages = 0;
@@ -79,15 +72,17 @@ module.exports = async function (context, req) {
       pages++;
       url = r['@odata.nextLink'] ? r['@odata.nextLink'].replace('https://graph.microsoft.com/v1.0', '') : null;
     }
-    const integradas = all.map(function (it) { return norm(it, inv); }).filter(ehIntegrada);
+    const notas = all.map(function (it) { return norm(it, inv); });
 
-    // Coleta os PDFs aprovados por unidade (uma vez por unidade).
-    const filesPorUnidade = {};
-    for (const n of integradas) {
-      const u = n.Unidade || '';
-      if (u && !filesPorUnidade[u]) {
-        filesPorUnidade[u] = await coletarArquivos(client, siteId, 'Notas Fiscais/Notas Aprovadas/' + u);
-      }
+    // Universo de PDFs aprovados por unidade, montado da propria lista.
+    // Cada entrada { id, name } imita um arquivo do drive pra reusar acharPdfAlvo/porNumero.
+    const universoPorUnidade = {};
+    for (const n of notas) {
+      const u = urlPdfDe(n);
+      const nome = u ? nomeArquivoDeUrl(u) : '';
+      if (!nome) continue;
+      const uni = n.Unidade || '';
+      (universoPorUnidade[uni] = universoPorUnidade[uni] || []).push({ id: n.id, name: nome });
     }
 
     function candidatosPorNumero(files, numero) {
@@ -102,10 +97,11 @@ module.exports = async function (context, req) {
       });
     }
 
+    const integradas = notas.filter(ehIntegrada);
     const suspeitos = [], ok = [];
     for (const n of integradas) {
-      const files = filesPorUnidade[n.Unidade || ''] || [];
-      const urlAprov = urlDeCampo(n.UrlPDFAprovadoStr) || urlDeCampo(n.UrlPDFAprovado) || urlDeCampo(n.UrlPDFStr) || urlDeCampo(n.UrlPDF);
+      const files = universoPorUnidade[n.Unidade || ''] || [];
+      const urlAprov = urlPdfDe(n);
       const achado = acharPdfAlvo(files, { url: urlAprov, numero: n.NumeroNF, valor: n.Valor });
       const correto = achado.target;
       const porNum = candidatosPorNumero(files, n.NumeroNF);
@@ -178,7 +174,8 @@ module.exports = async function (context, req) {
       status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       body: {
         ok: true,
-        _obs: 'READ-ONLY. Compara o PDF correto (identidade exata) com o que a regra antiga (so numero) pegaria. Suspeitos = conferir/corrigir o anexo no Omie.',
+        _obs: 'READ-ONLY. Universo montado da lista de notas (campo UrlPDFAprovado), sem varrer o drive. Suspeitos = conferir/corrigir o anexo no Omie.',
+        totalNotas: notas.length,
         totalIntegradas: integradas.length,
         suspeitosCount: suspeitos.length,
         okCount: ok.length,
