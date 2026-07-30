@@ -710,6 +710,9 @@ window.solChat = (function() {
       var data = await r.json().catch(function(){return{};});
       if (r.ok) {
         state.history.push({ role: 'assistant', content: okMsg + ' com sucesso. ID: ' + id });
+        if (data.carimboAplicado === false) {
+          state.history.push({ role: 'assistant', content: '⚠️ ' + data.avisoCarimbo });
+        }
         try { if (typeof carregarNotasReais === 'function') await carregarNotasReais(); } catch (e2) {}
       } else {
         state.history.push({ role: 'assistant', content: '❌ Falha: ' + (data.error || ('HTTP '+r.status)) });
@@ -8226,6 +8229,24 @@ async function doApprove(id) {
     n.aprovadoEm = agoraBRT().substring(0,16);
     n.urlPDFAprovado = data.urlPDFAprovado || '';
     closeModal();
+    // PDF protegido: a NF aprova, mas o carimbo nao sai. Nao pode virar toast de sucesso —
+    // um "aprovada com watermark" mentiroso aqui e o Financeiro descobre no estorno.
+    if (data.carimboAplicado === false) {
+      openModal(`
+        <div style="text-align:center;padding:8px 6px">
+          <div style="font-size:42px;line-height:1">⚠️</div>
+          <h3 style="margin:10px 0 8px">NF aprovada, mas <u>sem o carimbo</u> no PDF</h3>
+          <p style="font-size:14px;line-height:1.6;color:#2C3E50;margin:0 0 8px">
+            A aprovação de <b>${escHtml(id)}</b> foi registrada normalmente, porém o PDF
+            <b>não pôde ser carimbado</b>: ${escHtml(data.diag && data.diag.carimboMotivo || 'o arquivo está protegido')}.</p>
+          <p style="font-size:14px;line-height:1.6;color:#2C3E50;margin:0 0 16px">
+            O arquivo foi arquivado <b>íntegro</b> em Notas Aprovadas. <b>Avise o Financeiro</b>:
+            sem o carimbo eles costumam estornar a NF.</p>
+          <button class="btn btn-primary" onclick="closeModal(); showView(currentView)">OK, entendi</button>
+        </div>
+      `);
+      return;
+    }
     toast(`✓ ${id} aprovada · PDF com watermark movido para Notas Aprovadas`, 'success');
     showView(currentView);
   } catch (e) {
@@ -8390,6 +8411,7 @@ async function doReject(id) {
     n.motivo = data.motivo || motivo;
     closeModal();
     toast(`✕ ${id} rejeitada · PDF movido para Rejeitadas`, 'error');
+    if (data.carimboAplicado === false) toast(data.avisoCarimbo, 'error');
     showView(currentView);
   } catch (e) {
     toast('Falha ao comunicar com servidor: ' + (e && e.message), 'error');
@@ -8574,6 +8596,7 @@ async function rejeitarAprovada(id, numero, fornecedor, valor) {
       return;
     }
     toast('✓ NF ' + numero + ' estornada com sucesso. Submetedor e gestor notificados.', 'success');
+    if (data.carimboAplicado === false) toast(data.avisoCarimbo, 'error');
     // Recarrega notas pra atualizar a view
     try { if (typeof carregarNotasReais === 'function') await carregarNotasReais(); } catch (e) {}
     showView(currentView);

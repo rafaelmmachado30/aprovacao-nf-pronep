@@ -88,7 +88,9 @@ function normalizeFields(fields, invColMap) {
 // chamada Graph por subpasta de data (centenas) e estourava o timeout da Function.
 // O estorno agora usa resolverPdfNota() (caminho direto da URL + pastas candidatas).
 
-// Aplica watermark REJEITADA (vermelho, 4 linhas: REJEITADA + data + por + motivo)
+// Aplica watermark REJEITADA (vermelho, 4 linhas: REJEITADA + data + por + motivo).
+// Retorna { pdf, carimbado, motivo }: em PDF protegido o carimbo NAO sai, e quem chama
+// precisa avisar — sem isso o arquivo vai pra Rejeitadas parecendo uma NF ainda em aberto.
 async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
   // LAZY require — so carrega pdf-lib quando essa funcao for chamada
   const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
@@ -98,7 +100,13 @@ async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
   const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
   // Se criptografado, salvar com watermark geraria arquivo corrompido — arquiva o
   // original intacto (sem o carimbo) pra nao perder o documento.
-  if (pdfDoc.isEncrypted) return pdfBuffer;
+  if (pdfDoc.isEncrypted) {
+    return {
+      pdf: pdfBuffer,
+      carimbado: false,
+      motivo: 'o PDF esta protegido (criptografado) e carimba-lo corromperia o arquivo'
+    };
+  }
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
@@ -158,7 +166,7 @@ async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
   }
 
   const pdfBytes = await pdfDoc.save();
-  return Buffer.from(pdfBytes);
+  return { pdf: Buffer.from(pdfBytes), carimbado: true, motivo: null };
 }
 
 function buildPatchPayload(displayPayload, colMap, colTypes) {
@@ -314,6 +322,9 @@ module.exports = async function (context, req) {
     const motivoBase = observacao ? `${motivo} — ${observacao}` : motivo;
     const motivoCompletoStr = ehEstorno ? `[ESTORNO PELO FINANCEIRO] ${motivoBase}` : motivoBase;
     let urlPDFRejeitado = '';
+    // null = nao houve PDF pra carimbar (ja tratado por diag.pdfNotFound)
+    let carimboAplicado = null;
+    let carimboMotivo = null;
     if (pdfTarget) {
       // Baixa, aplica watermark REJEITADA, sobe pra Rejeitadas, deleta original
       const downloadUrl = pdfTarget['@microsoft.graph.downloadUrl'];
@@ -321,8 +332,13 @@ module.exports = async function (context, req) {
       const pdfBuffer = Buffer.from(await dlResp.arrayBuffer());
       diag.pdfSize = pdfBuffer.length;
 
-      const stampedPdf = await aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivoCompletoStr);
+      const carimbo = await aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivoCompletoStr);
+      const stampedPdf = carimbo.pdf;
       diag.stampedSize = stampedPdf.length;
+      carimboAplicado = carimbo.carimbado;
+      carimboMotivo = carimbo.motivo;
+      diag.carimboAplicado = carimboAplicado;
+      if (!carimboAplicado) diag.carimboMotivo = carimboMotivo;
 
       // No estorno, o arquivo carrega o sufixo "_APROVADA_{data}" — remove ao arquivar em Rejeitadas.
       const nomeRejeitado = String(pdfTarget.name).replace(/_APROVADA_\d{4}-\d{2}-\d{2}(?=\.[^.]+$)/i, '');
@@ -387,7 +403,15 @@ module.exports = async function (context, req) {
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
-      body: { ok: true, itemId, motivo: motivoCompletoStr, urlPDFRejeitado, diag }
+      body: {
+        ok: true, itemId, motivo: motivoCompletoStr, urlPDFRejeitado,
+        carimboAplicado,
+        avisoCarimbo: carimboAplicado === false
+          ? 'A NF foi rejeitada, mas o PDF arquivado NAO tem o carimbo REJEITADA porque '
+            + carimboMotivo + '. O arquivo foi preservado intacto.'
+          : undefined,
+        diag
+      }
     };
   } catch (err) {
     context.log && context.log.error && context.log.error('RejeitarNota error:', err);
