@@ -94,18 +94,23 @@ function normalizeFields(fields, invColMap) {
 async function aplicarWatermarkRejeitado(pdfBuffer, aprovadorEmail, motivo) {
   // LAZY require — so carrega pdf-lib quando essa funcao for chamada
   const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+  const { removerProtecao } = require('../shared/pdfCripto');
 
   // ignoreEncryption: PDFs de NF as vezes vem com criptografia/permissoes — sem isso
   // o pdf-lib falha no watermark com "document is encrypted".
-  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-  // Se criptografado, salvar com watermark geraria arquivo corrompido — arquiva o
-  // original intacto (sem o carimbo) pra nao perder o documento.
+  let pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+  // PDF cifrado: o pdf-lib nao decifra os streams e salvar corromperia o arquivo. O mupdf
+  // decifra, entao removemos a protecao e carimbamos pelo caminho normal.
   if (pdfDoc.isEncrypted) {
-    return {
-      pdf: pdfBuffer,
-      carimbado: false,
-      motivo: 'o PDF esta protegido (criptografado) e carimba-lo corromperia o arquivo'
-    };
+    const semProtecao = await removerProtecao(pdfBuffer);
+    if (semProtecao) pdfDoc = await PDFDocument.load(semProtecao, { ignoreEncryption: true });
+    if (pdfDoc.isEncrypted) {
+      return {
+        pdf: pdfBuffer,
+        carimbado: false,
+        motivo: 'o PDF esta protegido por senha e carimba-lo corromperia o arquivo'
+      };
+    }
   }
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);

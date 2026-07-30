@@ -164,19 +164,26 @@ function buildPatchPayload(displayNamePayload, colMap, colTypes) {
 async function aplicarWatermark(pdfBuffer, aprovadorEmail) {
   // LAZY require — so carrega pdf-lib quando essa funcao for chamada
   const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+  const { removerProtecao } = require('../shared/pdfCripto');
 
   // ignoreEncryption: alguns PDFs de NF vem com criptografia/permissoes (mesmo sem
   // senha de abertura). Sem isso o pdf-lib lanca "document is encrypted" no watermark.
-  const pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
-  // IMPORTANTE: se o PDF e criptografado, o pdf-lib carrega mas NAO decifra os streams —
-  // salvar geraria um arquivo CORROMPIDO (nao abre no SharePoint). Nesse caso arquivamos
-  // o ORIGINAL intacto, sem watermark, pra preservar o documento legivel.
+  let pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+  // PDF cifrado: o pdf-lib carrega mas NAO decifra os streams — salvar geraria arquivo
+  // CORROMPIDO. O mupdf decifra de verdade, entao removemos a protecao e carimbamos pelo
+  // caminho normal. Boleto de banco cai aqui (criptografia de permissoes, abre sem senha).
   if (pdfDoc.isEncrypted) {
-    return {
-      pdf: pdfBuffer,
-      carimbado: false,
-      motivo: 'o PDF esta protegido (criptografado) e carimba-lo corromperia o arquivo'
-    };
+    const semProtecao = await removerProtecao(pdfBuffer);
+    if (semProtecao) pdfDoc = await PDFDocument.load(semProtecao, { ignoreEncryption: true });
+    // Ainda cifrado (ex.: senha de abertura) = sem carimbo possivel. Arquiva o ORIGINAL
+    // intacto e avisa quem aprovou — arquivar em silencio faz o Financeiro estornar depois.
+    if (pdfDoc.isEncrypted) {
+      return {
+        pdf: pdfBuffer,
+        carimbado: false,
+        motivo: 'o PDF esta protegido por senha e carimba-lo corromperia o arquivo'
+      };
+    }
   }
   const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
   const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica);
