@@ -38,7 +38,8 @@ const TELAS = [
   { id: 'fechamento-mes',     label: 'Fechamento do Mês' },
   { id: 'fornecedores',       label: 'Fornecedores' },
   { id: 'contratos',          label: 'Contratos' },
-  { id: 'mapa-aprovadores',   label: 'Mapa de Aprovadores' }
+  { id: 'mapa-aprovadores',   label: 'Mapa de Aprovadores' },
+  { id: 'nfs-a-pagar',        label: 'NFs a Pagar' }
 ];
 const TELAS_IDS = TELAS.map(function (t) { return t.id; });
 

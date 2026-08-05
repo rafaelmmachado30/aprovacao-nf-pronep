@@ -657,6 +657,28 @@ module.exports = async function (context, req) {
       diag.urlPDFStrError = { message: e.message, statusCode: e.statusCode };
     }
 
+    // Passo 4: MERGE com o quadro "NFs a Pagar".
+    // Se a SEFAZ ja tinha baixado esta NF-e, o colaborador acabou de lancar algo que
+    // ja estava no quadro. Aqui as duas viram UMA: o documento e vinculado a esta nota
+    // em vez de virar um card separado.
+    // BEST-EFFORT DE PROPOSITO: o lancamento e o que nao pode falhar. Se o quadro
+    // estiver fora do ar ou a lista nem existir ainda, a nota entra igual e o card
+    // fica orfao — que e visivel na tela e corrigivel a mao. O contrario (derrubar o
+    // lancamento por causa do quadro) seria muito pior.
+    diag.step = 'merge_quadro';
+    try {
+      const { casarNotaComDocumento } = require('../shared/documentosFiscais');
+      diag.merge = await casarNotaComDocumento(client, siteId, {
+        itemId: itemResp.id,
+        chaveAcesso: chaveAcesso || '',
+        cnpjFornecedor: fornecedorCNPJ,
+        numeroNF: numeroFinal,
+        serie: serie || ''
+      });
+    } catch (eMerge) {
+      diag.mergeErro = eMerge.message;
+    }
+
     // Dispara notificacao (nao-bloqueante) pro aprovador
     diag.step = 'notify';
     const notifResult = await notificar('lancada', [aprovador.email], {
