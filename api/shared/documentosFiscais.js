@@ -324,12 +324,57 @@ function lerCnpjsConfigurados() {
   }).filter(function (x) { return /^[0-9]{14}$/.test(x.cnpj); });
 }
 
+/**
+ * Le o base64 do certificado das App Settings.
+ *
+ * ACEITA DUAS FORMAS:
+ *   SEFAZ_CERT_<cnpj>_PFX              inteiro numa setting so
+ *   SEFAZ_CERT_<cnpj>_PFX1, _PFX2, ... dividido em partes, concatenadas em ordem
+ *
+ * A segunda existe porque o painel do Azure truncou o valor na primeira tentativa
+ * em producao: o .pfx chegou cortado e o OpenSSL recusou com "not enough data" —
+ * erro que nao diz nada sobre a causa. Dividir em pedacos menores contorna o limite
+ * sem tirar o certificado das App Settings.
+ *
+ * A ordem e numerica, nao alfabetica: com 10+ partes, ordenar como texto colocaria
+ * _PFX10 antes de _PFX2 e o arquivo sairia embaralhado.
+ */
+function lerBase64Certificado(doc) {
+  const inteiro = process.env['SEFAZ_CERT_' + doc + '_PFX'];
+  if (inteiro) return { b64: inteiro.replace(/\s/g, ''), partes: 1 };
+
+  const prefixo = 'SEFAZ_CERT_' + doc + '_PFX';
+  const encontradas = [];
+  for (const chave of Object.keys(process.env)) {
+    if (chave.indexOf(prefixo) !== 0) continue;
+    const sufixo = chave.slice(prefixo.length);
+    if (!/^[0-9]+$/.test(sufixo)) continue;
+    encontradas.push({ n: parseInt(sufixo, 10), v: process.env[chave] || '' });
+  }
+  if (!encontradas.length) return { b64: '', partes: 0 };
+  encontradas.sort(function (a, b) { return a.n - b.n; });
+
+  /* Numeracao com buraco (_PFX1, _PFX3) montaria um arquivo corrompido em silencio.
+     Melhor falhar aqui, com o motivo, do que devolver um erro de TLS ilegivel. */
+  for (let i = 0; i < encontradas.length; i++) {
+    if (encontradas[i].n !== i + 1) {
+      throw new Error('Partes do certificado ' + doc + ' fora de sequencia: esperava _PFX' +
+                      (i + 1) + ' e achei _PFX' + encontradas[i].n +
+                      '. Numere de 1 em diante, sem pular.');
+    }
+  }
+  return {
+    b64: encontradas.map(function (p) { return p.v.replace(/\s/g, ''); }).join(''),
+    partes: encontradas.length
+  };
+}
+
 function lerCertificado(cnpj) {
   const doc = soDigitos(cnpj);
-  const b64 = process.env['SEFAZ_CERT_' + doc + '_PFX'];
+  const { b64 } = lerBase64Certificado(doc);
   const senha = process.env['SEFAZ_CERT_' + doc + '_SENHA'];
   if (!b64) throw new Error('Certificado nao configurado para o CNPJ ' + doc +
-                            ' (App Setting SEFAZ_CERT_' + doc + '_PFX)');
+                            ' (App Setting SEFAZ_CERT_' + doc + '_PFX, ou _PFX1/_PFX2/...)');
   return { pfx: Buffer.from(b64, 'base64'), passphrase: senha || '' };
 }
 
@@ -339,5 +384,5 @@ module.exports = {
   resolveListId, soDigitos, chaveValida, chaveFraca,
   buscarPorChave, gravarDocumento, vincularNota, casarNotaComDocumento,
   lerPonteiro, garantirPonteiro, gravarPonteiro,
-  lerCnpjsConfigurados, lerCertificado
+  lerCnpjsConfigurados, lerCertificado, lerBase64Certificado
 };

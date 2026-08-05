@@ -24,7 +24,7 @@
 require('isomorphic-fetch');
 const { getGraphClient, resolveSiteId } = require('../shared/graph');
 const {
-  lerCnpjsConfigurados, lerCertificado, garantirPonteiro, gravarPonteiro,
+  lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, garantirPonteiro, gravarPonteiro,
   gravarDocumento, soDigitos
 } = require('../shared/documentosFiscais');
 const { consultarLote, extrairNFe } = require('../shared/sefaz');
@@ -85,6 +85,65 @@ module.exports = async function (context, req) {
       if (!alvos.length) throw new Error('CNPJ ' + filtro + ' nao esta em SEFAZ_CNPJS');
     }
     if (!alvos.length) throw new Error('SEFAZ_CNPJS vazio ou nao configurado');
+
+    /* ?diagCert=1 — checa SO o certificado. Nao fala com a SEFAZ, nao le o
+       SharePoint, nao grava nada. Existe porque um erro de TLS ("not enough data",
+       "mac verify failure") nao diz SE o problema e o arquivo ou a senha, e sem
+       essa separacao a investigacao vira tentativa e erro em producao.
+       NAO EXPOE SEGREDO: reporta tamanho, cabecalho ASN.1 e o erro do OpenSSL —
+       nunca o conteudo do .pfx nem a senha. */
+    if (q.diagCert === '1' || q.diagCert === 'true') {
+      const tls = require('tls');
+      diag.step = 'diag_cert';
+      for (const alvo of alvos) {
+        const bloco = { cnpj: alvo.cnpj, apelido: alvo.apelido };
+        let b64 = '';
+        try {
+          const lido = lerBase64Certificado(alvo.cnpj);
+          b64 = lido.b64;
+          bloco.partes = lido.partes;
+        } catch (eSeq) {
+          bloco.veredito = eSeq.message; diag.cnpjs.push(bloco); continue;
+        }
+        bloco.base64Chars = b64.length;
+        bloco.senhaDefinida = !!process.env['SEFAZ_CERT_' + alvo.cnpj + '_SENHA'];
+        if (!b64) { bloco.veredito = 'App Setting _PFX ausente ou vazia'; diag.cnpjs.push(bloco); continue; }
+
+        const buf = Buffer.from(b64, 'base64');
+        bloco.bytes = buf.length;
+        /* PKCS#12 e um SEQUENCE ASN.1: sempre comeca com 0x30 0x82. Se nao comecar,
+           o que esta na App Setting nao e um .pfx — nem adianta olhar a senha. */
+        bloco.cabecalho = buf.slice(0, 2).toString('hex');
+        bloco.pareceP12 = buf.length > 2 && buf[0] === 0x30 && buf[1] === 0x82;
+        if (bloco.pareceP12) {
+          /* Byte 3-4 = tamanho declarado do SEQUENCE. Comparar com o tamanho real
+             detecta truncamento na colagem, que e a hipotese principal. */
+          const declarado = buf.readUInt16BE(2) + 4;
+          bloco.tamanhoDeclarado = declarado;
+          bloco.truncado = buf.length < declarado;
+        }
+        try {
+          tls.createSecureContext({
+            pfx: buf,
+            passphrase: process.env['SEFAZ_CERT_' + alvo.cnpj + '_SENHA'] || ''
+          });
+          bloco.veredito = 'OK — certificado e senha aceitos pelo OpenSSL';
+        } catch (eTls) {
+          bloco.erroOpenSSL = eTls.message;
+          bloco.codigo = eTls.code || null;
+          bloco.veredito = /mac verify|invalid password|wrong password/i.test(eTls.message)
+            ? 'Arquivo valido, SENHA errada'
+            : (bloco.truncado ? 'Arquivo TRUNCADO na App Setting'
+                              : 'Arquivo nao e um PKCS#12 valido');
+        }
+        diag.cnpjs.push(bloco);
+      }
+      diag.step = 'done';
+      diag.timeMs = Date.now() - t0;
+      context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
+        body: Object.assign({ ok: true, mensagem: 'Diagnostico de certificado — nenhuma chamada a SEFAZ.' }, diag) };
+      return;
+    }
 
     diag.step = 'graph';
     const client = await getGraphClient();
