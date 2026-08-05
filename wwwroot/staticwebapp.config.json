@@ -73,6 +73,11 @@
       "allowedRoles": ["anonymous", "authenticated"]
     },
     {
+      "comment": "Busca de NF-e na SEFAZ: cron do GitHub Actions chama com X-Automacao-Secret. Sem o secret o endpoint exige admin. CriarListaDocumentosFiscais NAO entra aqui de proposito — so admin logado.",
+      "route": "/api/BuscarNFeSefaz",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
       "comment": "Demais endpoints exigem sessao Entra ID. Fecha spoofing de x-ms-client-principal (C2).",
       "route": "/api/*",
       "allowedRoles": ["authenticated"]

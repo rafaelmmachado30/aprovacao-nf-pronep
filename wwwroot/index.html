@@ -121,9 +121,9 @@
 // ============== STATE ==============
 const personas = {
   submitter:  { name: 'Carla Souza',       initials: 'CS', role: 'Submetedor (Colaborador)',               shortRole: 'Submitter',  unit: 'RJ',    dept: 'Suprimentos',    canSee: ['nova-nf','caixa-entrada','minhas-nfs','rejeitadas-minhas','mapa-aprovadores','arquitetura'] },
-  gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','confirma-alinhamento','aprovadas','rejeitadas','nova-nf','minhas-nfs','contas-recorrentes','fechamento-mes','contratos','mapa-aprovadores','arquitetura'] },
-  financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['confirma-alinhamento','aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','auditoria-omie','arquitetura'] },
-  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','confirma-alinhamento','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','contas-recorrentes','fechamento-mes','caixa-entrada','auditoria','auditoria-omie','arquitetura','configuracoes'] },
+  gestor:     { name: 'Bruno Hioka',       initials: 'BH', role: 'Aprovador · Suprimentos (SP/RJ/ES)',     shortRole: 'Gestor',     unit: 'TODAS', dept: 'Suprimentos',    canSee: ['dashboard','fila-aprovacao','confirma-alinhamento','aprovadas','rejeitadas','nova-nf','minhas-nfs','contas-recorrentes','fechamento-mes','contratos','mapa-aprovadores','nfs-a-pagar','arquitetura'] },
+  financeiro: { name: 'Sandra Ferreira',   initials: 'SF', role: 'Financeiro',                             shortRole: 'Financeiro',                                       canSee: ['confirma-alinhamento','aprovadas','rejeitadas','nova-nf','minhas-nfs','rejeitadas-minhas','fornecedores','contratos','mapa-aprovadores','nfs-a-pagar','auditoria-omie','arquitetura'] },
+  admin:      { name: 'Rafael Machado',    initials: 'RM', role: 'Admin / Presidência',                    shortRole: 'Admin',                                            canSee: ['dashboard','fila-aprovacao','confirma-alinhamento','aprovadas','rejeitadas','nova-nf','fornecedores','contratos','mapa-aprovadores','contas-recorrentes','fechamento-mes','caixa-entrada','nfs-a-pagar','auditoria','auditoria-omie','arquitetura','configuracoes'] },
   ti:         { name: 'Time TI',           initials: 'TI', role: 'TI / Suporte Técnico',                   shortRole: 'TI',                                                canSee: ['nova-nf','fornecedores','mapa-aprovadores','arquitetura','configuracoes','minhas-nfs'] }
 };
 
@@ -237,6 +237,7 @@ const ICONS = {
   controleAcessos: '<svg viewBox="0 0 24 24"><path d="M12 2l7 3v6c0 4.5-3 8-7 11-4-3-7-6.5-7-11V5z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg>',
   recorrentes:  '<svg viewBox="0 0 24 24"><path d="M17 2.1l4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="M7 21.9l-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>',
   fechamento:   '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M9 15l2 2 4-4"/></svg>',
+  nfsAPagar:    '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="9.5" y="3" width="5" height="13" rx="1"/><rect x="16" y="3" width="5" height="8" rx="1"/></svg>',
   caixa:        '<svg viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>',
   arquitetura:  '<svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2.5"/><circle cx="5" cy="19" r="2.5"/><circle cx="19" cy="19" r="2.5"/><path d="M12 7.5v4M9 14l-3 3M15 14l3 3M8 19h8"/></svg>',
   configuracoes:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
@@ -710,6 +711,9 @@ window.solChat = (function() {
       var data = await r.json().catch(function(){return{};});
       if (r.ok) {
         state.history.push({ role: 'assistant', content: okMsg + ' com sucesso. ID: ' + id });
+        if (data.carimboAplicado === false) {
+          state.history.push({ role: 'assistant', content: '⚠️ ' + data.avisoCarimbo });
+        }
         try { if (typeof carregarNotasReais === 'function') await carregarNotasReais(); } catch (e2) {}
       } else {
         state.history.push({ role: 'assistant', content: '❌ Falha: ' + (data.error || ('HTTP '+r.status)) });
@@ -1198,6 +1202,7 @@ const menuItems = [
   { id: 'fechamento-mes',    label: 'Fechamento do Mês',          icon: ICONS.fechamento },
   { id: 'auditoria',         label: 'Auditoria',                  icon: ICONS.auditoria },
   { id: 'auditoria-omie',    label: 'Auditoria Omie (PDFs)',      icon: ICONS.auditoria },
+  { id: 'nfs-a-pagar',       label: 'NFs a Pagar',                icon: ICONS.nfsAPagar },
   { id: 'arquitetura',       label: 'Arquitetura do Sistema',     icon: ICONS.arquitetura },
   { id: 'configuracoes',     label: 'Configurações',              icon: ICONS.configuracoes },
 ];
@@ -2477,6 +2482,12 @@ function showView(id) {
   const area = document.getElementById('content-area');
   area.innerHTML = views[id] ? views[id]() : '<div class="card">Tela em construção.</div>';
   requestAnimationFrame(() => animateKPIs());
+  // Veio do quadro "NFs a Pagar": preenche o que a SEFAZ ja sabe.
+  if (id === 'nova-nf' && window._prefillSefaz) {
+    const _pf = window._prefillSefaz;
+    window._prefillSefaz = null;   // uso unico: evita reaparecer no proximo lancamento
+    requestAnimationFrame(() => aplicarPrefillSefaz(_pf));
+  }
   if (id === 'dashboard') {
     requestAnimationFrame(() => mountDashboardCharts());
     carregarMetricaDuplicidade();
@@ -4062,8 +4073,232 @@ const views = {
   'caixa-entrada': () => {
     setTimeout(carregarCaixa, 30);
     return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Carregando sua caixa de entrada...</div></div>';
+  },
+  'nfs-a-pagar': () => {
+    setTimeout(carregarNFsAPagar, 30);
+    return '<div class="card" style="text-align:center;padding:40px"><div style="font-size:18px;color:var(--azul-escuro);margin-bottom:8px">Carregando o quadro de NFs a pagar...</div><div class="small muted">Cruzando os documentos da SEFAZ com as notas do sistema</div></div>';
   }
 };
+
+// ===== NFs a Pagar — quadro alimentado pela SEFAZ =====
+// A coluna de cada card NAO e um campo gravado: vem do status da nota vinculada
+// (ver /api/ListarDocumentosFiscais). Por isso o quadro nunca discorda da fila de
+// aprovacao — nao ha um segundo estado para sair de sincronia.
+// Este quadro e SO LEITURA de posicao: quem move o card e o fluxo de aprovacao.
+// A unica acao daqui e "Lancar", que abre o formulario ja preenchido.
+
+var _nfsAPagarCache = null;
+
+function _npFmtBRL(v) {
+  var n = Number(v || 0) || 0;
+  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+function _npData(d) {
+  if (!d) return '—';
+  var s = String(d).substring(0, 10).split('-');
+  return s.length === 3 ? (s[2] + '/' + s[1] + '/' + s[0]) : String(d);
+}
+function _npCnpj(c) {
+  var d = String(c || '').replace(/\D/g, '');
+  if (d.length !== 14) return c || '—';
+  return d.substr(0,2)+'.'+d.substr(2,3)+'.'+d.substr(5,3)+'/'+d.substr(8,4)+'-'+d.substr(12,2);
+}
+function _npEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function carregarNFsAPagar() {
+  var area = document.getElementById('content-area');
+  if (!area) return;
+  try {
+    var r = await fetch('/api/ListarDocumentosFiscais', { credentials: 'include' });
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    _nfsAPagarCache = data;
+    area.innerHTML = renderNFsAPagar(data);
+  } catch (e) {
+    area.innerHTML = '<div class="card"><div class="alert alert-error"><span class="ico">x</span><div>'
+      + '<b>Nao foi possivel carregar o quadro.</b><br>' + _npEsc(e.message) + '</div></div></div>';
+  }
+}
+
+function renderNFsAPagar(data) {
+  if (data.precisaCriarEstrutura) {
+    return '<div class="card">'
+      + '<h2 style="margin-top:0">NFs a Pagar</h2>'
+      + '<div class="alert alert-warn"><span class="ico">!</span><div>'
+      + '<b>O quadro ainda nao foi criado neste ambiente.</b><br>'
+      + 'As listas do SharePoint precisam existir antes da primeira busca. '
+      + 'Um administrador deve abrir <span class="mono">/api/CriarListaDocumentosFiscais</span> uma vez.'
+      + '</div></div></div>';
+  }
+
+  var cols = [
+    { k: 'novas',     titulo: 'Novas na SEFAZ', cor: '#1565C0', ajuda: 'Emitidas contra nossos CNPJs e ainda nao lancadas.' },
+    { k: 'lancadas',  titulo: 'Lançadas',       cor: '#EF6C00', ajuda: 'Ja viraram NF e estao aguardando aprovacao.' },
+    { k: 'aprovadas', titulo: 'Aprovadas',      cor: '#2E7D32', ajuda: 'Aprovadas, aguardando pagamento.' },
+    { k: 'quitadas',  titulo: 'Quitadas',       cor: '#5E6C77', ajuda: 'Processadas no financeiro.' }
+  ];
+
+  var html = '<div class="card" style="margin-bottom:14px">'
+    + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">'
+    + '<div><h2 style="margin:0">NFs a Pagar</h2>'
+    + '<div class="small muted">O que a SEFAZ diz que temos a pagar, cruzado com o que ja entrou no sistema.</div></div>'
+    + '<button class="btn btn-secondary" onclick="carregarNFsAPagar()">Atualizar</button>'
+    + '</div>'
+    + renderPainelSefaz(data.sefaz || [])
+    + '</div>';
+
+  /* 200px de piso: com 4 colunas abaixo disso o card fica ilegivel e a linha
+     estoura na horizontal em telas de 13". */
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;align-items:start">';
+  for (var i = 0; i < cols.length; i++) {
+    var c = cols[i];
+    var itens = (data.colunas && data.colunas[c.k]) || [];
+    var soma = itens.reduce(function (s, x) { return s + (Number(x.valor) || 0); }, 0);
+    html += '<div class="card" style="padding:12px;border-top:3px solid ' + c.cor + '">'
+      + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">'
+      + '<b style="color:' + c.cor + '">' + c.titulo + '</b>'
+      + '<span class="tag" style="background:#EEF2F5;color:#42525E">' + itens.length + '</span>'
+      + '</div>'
+      + '<div class="small muted" style="margin:2px 0 8px">' + _npFmtBRL(soma) + '</div>';
+    if (!itens.length) {
+      html += '<div class="small muted" style="padding:14px 4px;text-align:center">' + c.ajuda + '</div>';
+    } else {
+      for (var j = 0; j < itens.length; j++) html += renderCardNFPagar(itens[j], c.k);
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function renderPainelSefaz(sefaz) {
+  if (!sefaz.length) {
+    return '<div class="alert alert-warn" style="margin-top:12px"><span class="ico">!</span><div>'
+      + '<b>Nenhum CNPJ configurado para a busca automatica.</b><br>'
+      + 'Enquanto <span class="mono">SEFAZ_CNPJS</span> estiver vazio nas configuracoes do Azure, '
+      + 'o quadro so recebe o que for lancado a mao.</div></div>';
+  }
+  var html = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">';
+  for (var i = 0; i < sefaz.length; i++) {
+    var s = sefaz[i];
+    var cor = s.saudavel ? '#2E7D32' : '#C62828';
+    html += '<div style="border:1px solid var(--cinza-borda);border-left:3px solid ' + cor
+      + ';border-radius:6px;padding:8px 10px;min-width:190px;background:#fff">'
+      + '<div style="font-weight:600;font-size:12px">' + _npEsc(s.apelido || s.cnpj) + '</div>'
+      + '<div class="small muted mono" style="font-size:10px">' + _npCnpj(s.cnpj) + '</div>'
+      + '<div class="small muted" style="margin-top:3px">NSU ' + s.ultimoNSU
+      + (s.maxNSU ? ' de ' + s.maxNSU : '') + '</div>'
+      + '<div class="small muted" style="font-size:10px">Consulta: '
+      + (s.ultimaConsulta ? _npData(s.ultimaConsulta) : 'nunca') + '</div>'
+      + (s.saudavel ? '' : '<div class="small" style="color:#C62828;font-size:10px;margin-top:3px">'
+          + _npEsc(s.cStat + ' ' + (s.motivo || '')) + '</div>')
+      + '</div>';
+  }
+  return html + '</div>';
+}
+
+function renderCardNFPagar(d, coluna) {
+  var hoje = new Date().toISOString().substring(0, 10);
+  var venc = d.dataVencimento ? String(d.dataVencimento).substring(0, 10) : '';
+  /* So alerta em coluna que ainda exige acao. Quitada vencida nao e problema. */
+  var atrasada = venc && venc < hoje && (coluna === 'novas' || coluna === 'lancadas');
+  var cinza = (coluna === 'quitadas');
+
+  var h = '<div style="border:1px solid var(--cinza-borda);border-radius:6px;padding:9px;margin-bottom:8px;'
+    + 'background:' + (cinza ? '#F7F8F9' : '#fff') + (cinza ? ';opacity:.75' : '') + '">'
+    + '<div style="font-weight:600;font-size:12.5px;line-height:1.3">' + _npEsc(d.emitenteNome || 'Emitente nao identificado') + '</div>'
+    + '<div class="small muted mono" style="font-size:10px">' + _npCnpj(d.emitenteCNPJ) + '</div>'
+    + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:5px;gap:6px">'
+    + '<span style="font-weight:700;font-size:13px">' + _npFmtBRL(d.valor) + '</span>'
+    + '<span class="small muted" style="font-size:10px">NF ' + _npEsc(d.numeroNF || '—')
+    + (d.serie ? '/' + _npEsc(d.serie) : '') + '</span>'
+    + '</div>'
+    + '<div class="small" style="font-size:10.5px;margin-top:3px;color:' + (atrasada ? '#C62828' : 'var(--cinza-medio)') + '">'
+    + 'Vence ' + _npData(d.dataVencimento) + (atrasada ? ' · vencida' : '') + '</div>';
+
+  if (coluna === 'novas') {
+    h += '<button class="btn btn-primary" style="width:100%;margin-top:7px;padding:5px;font-size:11.5px"'
+      + ' onclick="lancarDaSefaz(\'' + _npEsc(d.id) + '\')">Lançar</button>';
+  } else if (d.vinculadoAuto) {
+    /* Sinaliza o merge: o card e a nota eram a mesma coisa e o sistema juntou. */
+    h += '<div class="small muted" style="font-size:10px;margin-top:5px">↔ unificada com a NF lançada</div>';
+  }
+  return h + '</div>';
+}
+
+// Abre o lancamento ja preenchido com o que veio da SEFAZ. O PDF continua sendo
+// anexado pelo usuario: a SEFAZ entrega XML, nao o boleto/PDF que o financeiro usa.
+function lancarDaSefaz(docId) {
+  var d = null;
+  var novas = (_nfsAPagarCache && _nfsAPagarCache.colunas && _nfsAPagarCache.colunas.novas) || [];
+  for (var i = 0; i < novas.length; i++) if (String(novas[i].id) === String(docId)) d = novas[i];
+  if (!d) { showView('nfs-a-pagar'); return; }
+  window._prefillSefaz = d;
+  showView('nova-nf');
+}
+
+// Preenche o formulario com o que a SEFAZ ja informou.
+// O PDF continua obrigatorio e manual: a SEFAZ entrega XML, nao o documento que o
+// financeiro precisa arquivar. O fornecedor so e selecionado quando o CNPJ ja esta
+// cadastrado — se nao estiver, deixa o CNPJ na busca e o usuario resolve, em vez de
+// o sistema escolher um fornecedor parecido por conta propria.
+function aplicarPrefillSefaz(d) {
+  try {
+    var num = document.getElementById('frm-numero');
+    if (num && d.numeroNF) num.value = d.numeroNF;
+    var ser = document.getElementById('frm-serie');
+    if (ser && d.serie) ser.value = d.serie;
+
+    var val = document.getElementById('frm-valor');
+    if (val && d.valor != null) {
+      val.value = Number(d.valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    if (d.dataVencimento) {
+      var iso = String(d.dataVencimento).substring(0, 10);
+      var hid = document.getElementById('frm-venc');
+      if (hid) hid.value = iso;
+      var disp = document.getElementById('frm-venc-display');
+      if (disp) disp.value = iso.split('-').reverse().join('/');
+      if (typeof onVencChange === 'function') onVencChange();
+    }
+
+    var cnpj = String(d.emitenteCNPJ || '').replace(/\D/g, '');
+    var busca = document.getElementById('frm-forn-busca');
+    if (cnpj && busca) {
+      var idx = -1;
+      for (var i = 0; i < fornecedores.length; i++) {
+        var doc = String(fornecedores[i].documento || fornecedores[i].cnpj || '').replace(/\D/g, '');
+        if (doc && doc === cnpj) { idx = i; break; }
+      }
+      if (idx >= 0) selecionarFornecedorLancamento(idx);
+      else {
+        busca.value = cnpj;
+        if (typeof filtrarFornecedoresLancamento === 'function') filtrarFornecedoresLancamento();
+      }
+    }
+
+    if (typeof atualizarCamposDescritivos === 'function') atualizarCamposDescritivos();
+    if (typeof validarBotaoEnvio === 'function') validarBotaoEnvio();
+
+    var card = document.querySelector('#content-area .card');
+    if (card) {
+      var aviso = document.createElement('div');
+      aviso.className = 'alert alert-info';
+      aviso.style.marginBottom = '12px';
+      aviso.innerHTML = '<span class="ico">i</span><div><b>Dados vindos da SEFAZ.</b> '
+        + 'Confira e anexe o PDF — a SEFAZ entrega o XML, nao o documento de pagamento.'
+        + (cnpj ? '<br><span class="small mono">Chave ' + _npEsc(d.chaveAcesso || '—') + '</span>' : '')
+        + '</div>';
+      card.parentNode.insertBefore(aviso, card);
+    }
+  } catch (e) {
+    console.warn('[prefill SEFAZ]', e && e.message);
+  }
+}
 
 // ===== Contas Recorrentes (Estagio 1) — deteccao + confirmacao do gestor =====
 function _recFmtBRL(v) {
@@ -8226,6 +8461,24 @@ async function doApprove(id) {
     n.aprovadoEm = agoraBRT().substring(0,16);
     n.urlPDFAprovado = data.urlPDFAprovado || '';
     closeModal();
+    // PDF protegido: a NF aprova, mas o carimbo nao sai. Nao pode virar toast de sucesso —
+    // um "aprovada com watermark" mentiroso aqui e o Financeiro descobre no estorno.
+    if (data.carimboAplicado === false) {
+      openModal(`
+        <div style="text-align:center;padding:8px 6px">
+          <div style="font-size:42px;line-height:1">⚠️</div>
+          <h3 style="margin:10px 0 8px">NF aprovada, mas <u>sem o carimbo</u> no PDF</h3>
+          <p style="font-size:14px;line-height:1.6;color:#2C3E50;margin:0 0 8px">
+            A aprovação de <b>${escHtml(id)}</b> foi registrada normalmente, porém o PDF
+            <b>não pôde ser carimbado</b>: ${escHtml(data.diag && data.diag.carimboMotivo || 'o arquivo está protegido')}.</p>
+          <p style="font-size:14px;line-height:1.6;color:#2C3E50;margin:0 0 16px">
+            O arquivo foi arquivado <b>íntegro</b> em Notas Aprovadas. <b>Avise o Financeiro</b>:
+            sem o carimbo eles costumam estornar a NF.</p>
+          <button class="btn btn-primary" onclick="closeModal(); showView(currentView)">OK, entendi</button>
+        </div>
+      `);
+      return;
+    }
     toast(`✓ ${id} aprovada · PDF com watermark movido para Notas Aprovadas`, 'success');
     showView(currentView);
   } catch (e) {
@@ -8390,6 +8643,7 @@ async function doReject(id) {
     n.motivo = data.motivo || motivo;
     closeModal();
     toast(`✕ ${id} rejeitada · PDF movido para Rejeitadas`, 'error');
+    if (data.carimboAplicado === false) toast(data.avisoCarimbo, 'error');
     showView(currentView);
   } catch (e) {
     toast('Falha ao comunicar com servidor: ' + (e && e.message), 'error');
@@ -8574,6 +8828,7 @@ async function rejeitarAprovada(id, numero, fornecedor, valor) {
       return;
     }
     toast('✓ NF ' + numero + ' estornada com sucesso. Submetedor e gestor notificados.', 'success');
+    if (data.carimboAplicado === false) toast(data.avisoCarimbo, 'error');
     // Recarrega notas pra atualizar a view
     try { if (typeof carregarNotasReais === 'function') await carregarNotasReais(); } catch (e) {}
     showView(currentView);

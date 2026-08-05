@@ -1,0 +1,77 @@
+name: Buscar NF-e na SEFAZ (cron)
+
+# Baixa da SEFAZ as NF-e emitidas CONTRA os nossos CNPJs e alimenta o quadro
+# "NFs a Pagar". Chama /api/BuscarNFeSefaz com o header X-Automacao-Secret.
+#
+# POR QUE UM WORKFLOW E NAO UM TIMER: as Functions gerenciadas do Static Web Apps
+# so aceitam gatilho HTTP. Mesmo arranjo ja usado em varrer-emails-nf-cron.yml.
+#
+# Pre-requisitos no Azure (Configuration -> Application settings):
+#   SEFAZ_SECRET                       mesmo valor do secret abaixo
+#   SEFAZ_CNPJS                        JSON com os CNPJs e apelidos
+#   SEFAZ_CERT_<cnpj>_PFX              certificado A1 em base64
+#   SEFAZ_CERT_<cnpj>_SENHA            senha do .pfx
+# No repositorio:
+#   Secret SEFAZ_SECRET                Settings -> Secrets and variables -> Actions
+#
+# CADENCIA: de 2 em 2 horas, 07h-19h BRT (=10h-22h UTC), dias uteis. A SEFAZ trata
+# consulta repetida sem documento novo como "consumo indevido" e pode bloquear o
+# CNPJ por 1 hora — por isso NAO roda de hora em hora nem no fim de semana.
+#
+# O ponteiro de NSU fica no SharePoint: cada execucao continua de onde a anterior
+# parou. Perder uma execucao nao perde nota (a janela da SEFAZ e de 90 dias).
+
+on:
+  schedule:
+    - cron: '0 10-22/2 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      cnpj:
+        description: 'CNPJ especifico (vazio = todos)'
+        required: false
+        default: ''
+      lotes:
+        description: 'Lotes por CNPJ nesta execucao'
+        required: false
+        default: '3'
+      dryRun:
+        description: 'Simulacao (consulta mas nao grava nem avanca o ponteiro): 1 ou 0'
+        required: false
+        default: '0'
+
+concurrency:
+  # Duas execucoes ao mesmo tempo consultariam o mesmo NSU e cairiam em consumo
+  # indevido. Nunca paralelizar isto.
+  group: buscar-nfe-sefaz
+  cancel-in-progress: false
+
+jobs:
+  buscar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Consultar SEFAZ
+        env:
+          SECRET: ${{ secrets.SEFAZ_SECRET }}
+          CNPJ: ${{ github.event.inputs.cnpj || '' }}
+          LOTES: ${{ github.event.inputs.lotes || '3' }}
+          DRYRUN: ${{ github.event.inputs.dryRun || '0' }}
+        run: |
+          if [ -z "$SECRET" ]; then
+            echo "::error::Secret SEFAZ_SECRET nao configurado no repo (Settings -> Secrets and variables -> Actions)"; exit 1
+          fi
+          URL="https://purple-forest-09588fe10.7.azurestaticapps.net/api/BuscarNFeSefaz?lotes=${LOTES}&dryRun=${DRYRUN}"
+          [ -n "$CNPJ" ] && URL="${URL}&cnpj=${CNPJ}"
+          echo "Chamando (sem expor o secret): ${URL}"
+          HTTP_CODE=$(curl -s -o /tmp/sefaz.json -w "%{http_code}" \
+            -H "X-Automacao-Secret: $SECRET" -H "Accept: application/json" \
+            --max-time 290 "$URL")
+          echo "HTTP $HTTP_CODE"
+          head -c 6000 /tmp/sefaz.json; echo ""
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::BuscarNFeSefaz retornou HTTP $HTTP_CODE"; exit 1
+          fi
+          # ok=false significa que ao menos um CNPJ falhou (certificado vencido,
+          # cStat de recusa). Avisa sem derrubar: os demais CNPJs foram processados.
+          if grep -q '"ok":false' /tmp/sefaz.json; then
+            echo "::warning::Ao menos um CNPJ retornou erro — veja o campo cnpjs[].erro acima."
+          fi
