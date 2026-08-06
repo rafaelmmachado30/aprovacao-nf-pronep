@@ -4360,10 +4360,12 @@ function renderNFsAPagar(data) {
     + '<div class="small muted">O que a SEFAZ diz que temos a pagar, cruzado com o que ja entrou no sistema.</div></div>'
     + '<button class="btn btn-secondary" onclick="carregarNFsAPagar()">Atualizar</button>'
     + '</div>'
+    + renderAvisoEscopo(data.escopo)
     + renderAvisoDesligada(data.integracao)
     + renderAvisoCadastro(data.totais || {})
     + renderPainelSefaz(data.sefaz || [])
-    + '<div style="margin-top:12px;position:relative;max-width:460px">'
+    + '<div style="margin-top:12px;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start">'
+    + '<div style="position:relative;flex:1;min-width:260px;max-width:460px">'
     + '<input id="np-busca" type="text" autocomplete="off"'
     + ' placeholder="Buscar por fornecedor, CNPJ ou número da NF..."'
     + ' oninput="filtrarNFsAPagar()"'
@@ -4373,6 +4375,8 @@ function renderNFsAPagar(data) {
     + ' style="display:none;position:absolute;right:9px;top:50%;transform:translateY(-50%);'
     + 'cursor:pointer;color:var(--cinza-medio);font-size:15px;line-height:1">×</span>'
     + '<div id="np-busca-resumo" class="small muted" style="margin-top:5px;min-height:15px"></div>'
+    + '</div>'
+    + renderFiltroDiretoria(data)
     + '</div>'
     + '</div>';
 
@@ -4390,6 +4394,17 @@ function renderColunasNFPagar(data) {
     { k: 'quitadas',  titulo: 'Quitadas',       cor: '#5E6C77', ajuda: 'Processadas no financeiro.' }
   ];
   var termo = (window._nfsAPagarBusca || '').trim();
+  var fUnid = window._nfsAPagarUnidade || '';
+  var fDir = window._nfsAPagarDiretoria || '';
+  /* Os tres filtros se somam (E, nao OU): buscar "fernice" com unidade RJ deve
+     dar as notas da Fernice NO RJ, nao a uniao das duas coisas. */
+  var filtra = function (x) {
+    if (fUnid && String(x.unidade || '') !== fUnid) return false;
+    if (fDir && String(x.diretoria || '') !== fDir) return false;
+    if (termo && !_npCasaBusca(x, termo)) return false;
+    return true;
+  };
+  var temFiltro = !!(termo || fUnid || fDir);
 
   /* 200px de piso: com 4 colunas abaixo disso o card fica ilegivel e a linha
      estoura na horizontal em telas de 13". */
@@ -4397,19 +4412,19 @@ function renderColunasNFPagar(data) {
   for (var i = 0; i < cols.length; i++) {
     var c = cols[i];
     var todos = (data.colunas && data.colunas[c.k]) || [];
-    var itens = termo ? todos.filter(function (x) { return _npCasaBusca(x, termo); }) : todos;
+    var itens = temFiltro ? todos.filter(filtra) : todos;
     var soma = itens.reduce(function (s, x) { return s + (Number(x.valor) || 0); }, 0);
     html += '<div class="card" style="padding:12px;border-top:3px solid ' + c.cor + '">'
       + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">'
       + '<b style="color:' + c.cor + '">' + c.titulo + '</b>'
       + '<span class="tag" style="background:#EEF2F5;color:#42525E">' + itens.length
       /* Com filtro, mostra "3 de 41": some o total e a coluna parece ter esvaziado. */
-      + (termo && todos.length !== itens.length ? ' de ' + todos.length : '') + '</span>'
+      + (temFiltro && todos.length !== itens.length ? ' de ' + todos.length : '') + '</span>'
       + '</div>'
       + '<div class="small muted" style="margin:2px 0 8px">' + _npFmtBRL(soma) + '</div>';
     if (!itens.length) {
       html += '<div class="small muted" style="padding:14px 4px;text-align:center">'
-        + (termo ? 'Nada nesta coluna para “' + _npEsc(termo) + '”.' : c.ajuda) + '</div>';
+        + (temFiltro ? 'Nada nesta coluna com os filtros atuais.' : c.ajuda) + '</div>';
     } else {
       for (var j = 0; j < itens.length; j++) html += renderCardNFPagar(itens[j], c.k);
     }
@@ -4452,10 +4467,12 @@ function _npCasaBusca(d, termo) {
 }
 
 function filtrarNFsAPagar() {
+  if (!_nfsAPagarCache) return;
   var input = document.getElementById('np-busca');
-  if (!input || !_nfsAPagarCache) return;
-  window._nfsAPagarBusca = input.value || '';
-  var termo = window._nfsAPagarBusca.trim();
+  if (input) window._nfsAPagarBusca = input.value || '';
+  var selDir = document.getElementById('np-diretoria');
+  if (selDir) window._nfsAPagarDiretoria = selDir.value || '';
+  var termo = (window._nfsAPagarBusca || '').trim();
 
   var alvo = document.getElementById('np-colunas');
   if (alvo) alvo.innerHTML = renderColunasNFPagar(_nfsAPagarCache);
@@ -4465,22 +4482,34 @@ function filtrarNFsAPagar() {
 
   var resumo = document.getElementById('np-busca-resumo');
   if (resumo) {
-    if (!termo) { resumo.textContent = ''; return; }
+    var fU = window._nfsAPagarUnidade || '', fD = window._nfsAPagarDiretoria || '';
+    if (!termo && !fU && !fD) { resumo.textContent = ''; return; }
     var achou = 0, total = 0;
     var cols = _nfsAPagarCache.colunas || {};
     for (var k in cols) {
       total += cols[k].length;
-      achou += cols[k].filter(function (x) { return _npCasaBusca(x, termo); }).length;
+      achou += cols[k].filter(function (x) {
+        if (fU && String(x.unidade || '') !== fU) return false;
+        if (fD && String(x.diretoria || '') !== fD) return false;
+        if (termo && !_npCasaBusca(x, termo)) return false;
+        return true;
+      }).length;
     }
-    resumo.textContent = achou
-      ? achou + ' de ' + total + ' nota(s) encontrada(s).'
-      : 'Nenhuma nota encontrada para “' + termo + '”.';
+    /* Diz QUAIS filtros estao ativos. "3 de 522" sem dizer o porque faz alguem
+       procurar uma nota que esta ali, so escondida por um filtro esquecido. */
+    var ativos = [];
+    if (fU) ativos.push('unidade ' + fU);
+    if (fD) ativos.push('diretoria ' + fD);
+    if (termo) ativos.push('“' + termo + '”');
+    resumo.textContent = (achou ? achou + ' de ' + total + ' nota(s)' : 'Nenhuma nota')
+      + ' · filtrando por ' + ativos.join(' + ') + '.';
   }
 }
 
 function limparBuscaNFsAPagar() {
   var input = document.getElementById('np-busca');
   if (input) { input.value = ''; input.focus(); }
+  window._nfsAPagarBusca = '';
   filtrarNFsAPagar();
 }
 
@@ -4513,6 +4542,77 @@ function renderAvisoCadastro(t) {
     + '</div></div>';
 }
 
+// Aviso de visao parcial. Um quadro filtrado que se apresenta como completo faz
+// o gestor concluir que nao ha nada a fazer — precisa estar dito.
+function renderAvisoEscopo(esc) {
+  if (!esc || esc.verTudo) return '';
+  var dirs = esc.minhasDiretorias || [];
+  return '<div class="alert alert-info" style="margin-top:12px"><span class="ico">i</span><div>'
+    + '<b>Você está vendo as notas da'
+    + (dirs.length > 1 ? 's suas diretorias' : ' sua diretoria') + '</b>'
+    + (dirs.length ? ': ' + dirs.map(_npEsc).join(', ') : ' (nenhuma diretoria atribuída a você)')
+    + '.<br><span class="small">Notas de outras diretorias não aparecem aqui. As que estão '
+    + 'sem cadastro de fornecedor aparecem para todos, porque ainda não têm dono e alguém '
+    + 'precisa poder corrigir.</span>'
+    + (esc.ocultadosPorEscopo
+        ? '<br><span class="small muted">' + esc.ocultadosPorEscopo
+          + ' nota(s) de outras diretorias ocultada(s).</span>' : '')
+    + '</div></div>';
+}
+
+// Filtros de unidade (nos proprios cards do topo) e de diretoria.
+// Ambos sao APENAS DE APRESENTACAO: o que o usuario pode ver ja foi decidido no
+// servidor. Estes recortam o que ele ja tem direito de ver.
+function _npUnidadesDisponiveis(data) {
+  var us = {};
+  var cols = data.colunas || {};
+  for (var k in cols) for (var i = 0; i < cols[k].length; i++) {
+    var u = cols[k][i].unidade;
+    if (u) us[u] = (us[u] || 0) + 1;
+  }
+  return us;
+}
+
+function _npDiretoriasDisponiveis(data) {
+  var ds = {};
+  var cols = data.colunas || {};
+  for (var k in cols) for (var i = 0; i < cols[k].length; i++) {
+    var d = cols[k][i].diretoria;
+    if (d) ds[d] = (ds[d] || 0) + 1;
+  }
+  return ds;
+}
+
+function renderFiltroDiretoria(data) {
+  var ds = _npDiretoriasDisponiveis(data);
+  var nomes = Object.keys(ds).sort();
+  if (nomes.length < 2) return '';   /* uma so: o filtro nao filtra nada */
+  var sel = window._nfsAPagarDiretoria || '';
+  var h = '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+    + '<span class="small muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em">Diretoria</span>'
+    + '<select id="np-diretoria" onchange="filtrarNFsAPagar()"'
+    + ' style="padding:6px 10px;border:1.5px solid var(--cinza-borda);border-radius:5px;font-size:12.5px;background:#fff">'
+    + '<option value="">Todas (' + nomes.reduce(function (s, n) { return s + ds[n]; }, 0) + ')</option>';
+  for (var i = 0; i < nomes.length; i++) {
+    h += '<option value="' + _npEsc(nomes[i]) + '"' + (sel === nomes[i] ? ' selected' : '') + '>'
+      + _npEsc(nomes[i]) + ' (' + ds[nomes[i]] + ')</option>';
+  }
+  return h + '</select></div>';
+}
+
+function filtrarPorUnidade(u) {
+  /* Clicar na unidade ja selecionada volta para Todas — o mesmo gesto liga e
+     desliga, sem precisar caçar um botao de limpar. */
+  window._nfsAPagarUnidade = (window._nfsAPagarUnidade === u) ? '' : u;
+  var area = document.getElementById('content-area');
+  if (area && _nfsAPagarCache) {
+    area.innerHTML = renderNFsAPagar(_nfsAPagarCache);
+    var b = document.getElementById('np-busca');
+    if (b && (window._nfsAPagarBusca || '')) b.value = window._nfsAPagarBusca;
+    filtrarNFsAPagar();
+  }
+}
+
 function renderPainelSefaz(sefaz) {
   if (!sefaz.length) {
     return '<div class="alert alert-warn" style="margin-top:12px"><span class="ico">!</span><div>'
@@ -4520,16 +4620,37 @@ function renderPainelSefaz(sefaz) {
       + 'Enquanto <span class="mono">SEFAZ_CNPJS</span> estiver vazio nas configuracoes do Azure, '
       + 'o quadro so recebe o que for lancado a mao.</div></div>';
   }
-  var html = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px">';
+  /* Os cards de CNPJ viram o FILTRO POR UNIDADE. O usuario ja lia esses cards
+     como "a caixinha do RJ" — transformar a leitura que ele ja faz em acao custa
+     menos do que ensinar um controle novo em outro canto da tela. */
+  var sel = window._nfsAPagarUnidade || '';
+  var contagem = _npUnidadesDisponiveis(_nfsAPagarCache || {});
+  var total = Object.keys(contagem).reduce(function (t, k) { return t + contagem[k]; }, 0);
+
+  var html = '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;align-items:stretch">';
+
+  html += '<div onclick="filtrarPorUnidade(\'\')" style="cursor:pointer;border:1px solid '
+    + (sel ? 'var(--cinza-borda)' : '#1F4E79') + ';border-width:' + (sel ? '1px' : '2px')
+    + ';border-radius:6px;padding:8px 12px;min-width:96px;display:flex;flex-direction:column;'
+    + 'justify-content:center;background:' + (sel ? '#fff' : '#EEF4FA') + '">'
+    + '<div style="font-weight:700;font-size:12.5px;color:#1F4E79">Todas</div>'
+    + '<div class="small muted" style="font-size:10px">' + total + ' nota(s)</div></div>';
+
   for (var i = 0; i < sefaz.length; i++) {
     var s = sefaz[i];
     var cor = s.saudavel ? '#2E7D32' : '#C62828';
-    html += '<div style="border:1px solid var(--cinza-borda);border-left:3px solid ' + cor
-      + ';border-radius:6px;padding:8px 10px;min-width:190px;background:#fff">'
-      + '<div style="font-weight:600;font-size:12px">' + _npEsc(s.apelido || s.cnpj) + '</div>'
+    var uf = String(s.unidade || (s.apelido || '').split(' ').pop() || '').toUpperCase();
+    var ativo = (sel && sel === uf);
+    var n = contagem[uf] || 0;
+    html += '<div onclick="filtrarPorUnidade(\'' + _npEsc(uf) + '\')"'
+      + ' style="cursor:pointer;border:' + (ativo ? '2px' : '1px') + ' solid '
+      + (ativo ? '#1F4E79' : 'var(--cinza-borda)') + ';border-left:3px solid ' + cor
+      + ';border-radius:6px;padding:8px 10px;min-width:190px;background:' + (ativo ? '#EEF4FA' : '#fff') + '">'
+      + '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:6px">'
+      + '<span style="font-weight:600;font-size:12px">' + _npEsc(s.apelido || s.cnpj) + '</span>'
+      + '<span class="tag" style="background:#EEF2F5;color:#42525E;font-size:10px">' + n + '</span>'
+      + '</div>'
       + '<div class="small muted mono" style="font-size:10px">' + _npCnpj(s.cnpj) + '</div>'
-      + '<div class="small muted" style="margin-top:3px">NSU ' + s.ultimoNSU
-      + (s.maxNSU ? ' de ' + s.maxNSU : '') + '</div>'
       + '<div class="small muted" style="font-size:10px">Consulta: '
       + (s.ultimaConsulta ? _npData(s.ultimaConsulta) : 'nunca') + '</div>'
       + (s.saudavel ? '' : '<div class="small" style="color:#C62828;font-size:10px;margin-top:3px">'

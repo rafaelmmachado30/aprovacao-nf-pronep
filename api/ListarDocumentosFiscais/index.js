@@ -19,8 +19,9 @@
 
 require('isomorphic-fetch');
 const { getGraphClient } = require('../shared/graph');
+const { resolveAuthz } = require('../shared/authz');
 const {
-  LIST_DOCFIS, LIST_SEFAZ, LIST_NOTAS, resolveListId, soDigitos, lerConfigSefaz, lerCorteVencimento
+  LIST_DOCFIS, LIST_SEFAZ, LIST_NOTAS, resolveListId, soDigitos, lerConfigSefaz, lerCorteVencimento, lerCnpjsConfigurados
 } = require('../shared/documentosFiscais');
 
 async function todosItens(client, siteId, listId, maxPaginas) {
@@ -44,6 +45,68 @@ function colunaPorStatus(status, processado) {
   if (s === 'aprovada') return 'aprovadas';
   if (s === 'rejeitada') return null;   /* rejeitada volta a ser pendencia, nao card */
   return 'lancadas';
+}
+
+/**
+ * Monta o escopo de visao do usuario.
+ *
+ * ISTO E CONTROLE DE ACESSO E POR ISSO VIVE NO SERVIDOR. Filtrar no front seria
+ * so esconder: bastaria chamar /api/ListarDocumentosFiscais direto para ver as
+ * notas de todas as diretorias. O que nao e devolvido aqui nao existe para quem
+ * chamou.
+ *
+ * Regras:
+ *   admin e financeiro       veem tudo (o financeiro paga; precisa da visao completa)
+ *   gestor                   ve as diretorias que ELE aprova, conforme a lista
+ *                            PRONEP-NF-Diretorias (Unidade x Diretoria -> e-mail)
+ *   cadastro incompleto      visivel para TODOS, de proposito: e um card que ainda
+ *                            nao tem diretoria, entao nao ha a quem pertencer, e
+ *                            alguem precisa poder corrigir o cadastro. Esconder
+ *                            deixaria a nota travada sem ninguem responsavel.
+ */
+async function montarEscopo(client, siteId, req) {
+  let authz = null;
+  try { authz = await resolveAuthz(req); } catch (e) { /* segue restrito */ }
+
+  if (!authz) return { autenticado: false, verTudo: false, pares: {}, email: '' };
+  if (authz.isAdmin || authz.isFinanceiro) {
+    return { autenticado: true, verTudo: true, motivo: authz.isAdmin ? 'admin' : 'financeiro',
+             pares: {}, email: authz.email };
+  }
+
+  const pares = {};
+  const diretorias = [];
+  try {
+    const idDir = await resolveListId(client, siteId, 'PRONEP-NF-Diretorias');
+    if (idDir) {
+      for (const it of await todosItens(client, siteId, idDir, 5)) {
+        const f = it.fields || {};
+        /* field_1=Unidade, field_2=Diretoria, field_3=Email do aprovador
+           (mesmo mapa de ListarDiretorias — se um mudar, os dois mudam). */
+        const email = String(f.field_3 || '').toLowerCase().trim();
+        if (!email || email !== authz.email) continue;
+        const un = String(f.field_1 || '').trim();
+        const dir = String(f.field_2 || '').trim();
+        if (!dir) continue;
+        pares[un + '|' + dir] = true;
+        if (diretorias.indexOf(dir) < 0) diretorias.push(dir);
+      }
+    }
+  } catch (e) { /* sem mapa, o gestor fica sem par nenhum — restritivo por padrao */ }
+
+  return { autenticado: true, verTudo: false, pares: pares, diretorias: diretorias,
+           email: authz.email };
+}
+
+/* Decide se o card entra na visao deste usuario. */
+function podeVer(card, escopo) {
+  if (escopo.verTudo) return true;
+  /* Sem diretoria definida nao ha dono: fica visivel para quem puder consertar. */
+  if (!card.fornecedorCadastrado || card.cadastroIncompleto || !card.diretoria) return true;
+  /* Aprovador de "TODAS" as unidades cobre qualquer unidade daquela diretoria. */
+  return !!(escopo.pares[(card.unidade || '') + '|' + card.diretoria] ||
+            escopo.pares['TODAS|' + card.diretoria] ||
+            escopo.pares['|' + card.diretoria]);
 }
 
 module.exports = async function (context, req) {
@@ -149,7 +212,11 @@ module.exports = async function (context, req) {
       porGrupo[chaveGrupo].parcelas.push(d);
     }
 
+    diag.step = 'escopo';
+    const escopo = await montarEscopo(client, siteId, req);
+
     const colunas = { novas: [], lancadas: [], aprovadas: [], quitadas: [] };
+    let foraDoEscopo = 0;
 
     for (const grupo of grupos) {
       const d = grupo.principal;
@@ -239,15 +306,22 @@ module.exports = async function (context, req) {
           card.notaItemId = String(nota.id);
           card.statusNota = (nota.fields || {}).Status || '';
         }
-        colunas.quitadas.push(card);
+        if (podeVer(card, escopo)) colunas.quitadas.push(card); else foraDoEscopo++;
         continue;
       }
 
-      if (!nota) { colunas.novas.push(card); continue; }
+      if (!nota) {
+        if (podeVer(card, escopo)) colunas.novas.push(card); else foraDoEscopo++;
+        continue;
+      }
 
       const nf = nota.fields || {};
       const alvo = colunaPorStatus(nf.Status, nf.Processado === true || nf.Processado === 'Sim');
-      if (!alvo) { colunas.novas.push(card); continue; }   /* rejeitada: volta pra fila */
+      if (!alvo) {
+        /* rejeitada: volta pra fila */
+        if (podeVer(card, escopo)) colunas.novas.push(card); else foraDoEscopo++;
+        continue;
+      }
 
       card.notaItemId = String(nota.id);
       card.statusNota = nf.Status || '';
@@ -262,7 +336,7 @@ module.exports = async function (context, req) {
          de coisa que explica NF na fila do aprovador errado. */
       card.divergeDoCadastro = !!(forn && nf.Diretoria && forn.diretoria &&
                                   nf.Diretoria !== forn.diretoria);
-      colunas[alvo].push(card);
+      if (podeVer(card, escopo)) colunas[alvo].push(card); else foraDoEscopo++;
     }
 
     /* Vencimento mais proximo primeiro; sem vencimento vai para o fim. */
@@ -274,10 +348,22 @@ module.exports = async function (context, req) {
       });
     }
 
+    /* A UNIDADE vem da configuracao, nao do apelido. Deduzir "RJ" da ultima
+       palavra de "PRONEP RJ" funciona hoje e quebraria em silencio no dia em que
+       alguem renomear para "PRONEP Rio de Janeiro" — e o filtro por unidade da
+       tela depende disso casar com o UnidadeOmie dos cards. */
+    const unidadePorCnpj = {};
+    try {
+      for (const c of lerCnpjsConfigurados()) {
+        if (c.unidade) unidadePorCnpj[c.cnpj] = String(c.unidade).toUpperCase();
+      }
+    } catch (e) { /* sem config, a tela cai no apelido */ }
+
     const sefaz = ponteiros.map(function (p) {
       const f = p.fields || {};
       return {
         cnpj: f.CNPJ || '', apelido: f.Apelido || '',
+        unidade: unidadePorCnpj[soDigitos(f.CNPJ)] || '',
         ultimoNSU: Number(f.UltimoNSU || 0), maxNSU: Number(f.MaxNSU || 0),
         ultimaConsulta: f.UltimaConsulta || null,
         cStat: f.UltimoCStat || '', motivo: f.UltimoMotivo || '',
@@ -295,6 +381,14 @@ module.exports = async function (context, req) {
         ok: true,
         colunas: colunas,
         sefaz: sefaz,
+        /* A tela precisa DIZER que a visao e parcial. Um quadro filtrado que se
+           apresenta como completo faz o gestor concluir que nao ha nada a fazer. */
+        escopo: {
+          verTudo: escopo.verTudo,
+          motivo: escopo.motivo || (escopo.verTudo ? '' : 'gestor'),
+          minhasDiretorias: escopo.diretorias || [],
+          ocultadosPorEscopo: foraDoEscopo
+        },
         integracao: await lerConfigSefaz(client, siteId),
         corteVencimento: await lerCorteVencimento(client, siteId),
         totais: {
