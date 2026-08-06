@@ -4526,6 +4526,24 @@ function _npRoteamento(d) {
     + '</div>';
 }
 
+// Parcelamento em uma linha compacta, com barra de progresso.
+// Uma NF em 3x gera tres contas no Omie e o quadro mostra UM card — mas esconder
+// isso enganaria: o valor exibido e o total da nota, nao o do proximo boleto.
+// A barra existe para o financeiro ver de relance quanto da nota ja saiu do caixa.
+function _npParcelas(d) {
+  if (!d.totalParcelas || d.totalParcelas < 2) return '';
+  var pagas = d.parcelasPagas || 0;
+  var pct = Math.round((pagas / d.totalParcelas) * 100);
+  return '<div style="margin-top:5px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:baseline">'
+    + '<span class="small muted" style="font-size:9.5px">' + pagas + ' de ' + d.totalParcelas + ' parcelas pagas</span>'
+    + '<span class="small muted" style="font-size:9.5px">' + pct + '%</span>'
+    + '</div>'
+    + '<div style="height:3px;border-radius:2px;background:#E8ECEF;margin-top:2px;overflow:hidden">'
+    + '<div style="height:100%;width:' + pct + '%;background:#2E7D32"></div>'
+    + '</div></div>';
+}
+
 function renderCardNFPagar(d, coluna) {
   var hoje = new Date().toISOString().substring(0, 10);
   var venc = d.dataVencimento ? String(d.dataVencimento).substring(0, 10) : '';
@@ -4548,7 +4566,12 @@ function renderCardNFPagar(d, coluna) {
     + (d.serie ? '/' + _npEsc(d.serie) : '') + '</span>'
     + '</div>'
     + '<div class="small" style="font-size:10.5px;margin-top:3px;color:' + (atrasada ? '#C62828' : 'var(--cinza-medio)') + '">'
-    + 'Vence ' + _npData(d.dataVencimento) + (atrasada ? ' · vencida' : '') + '</div>'
+    + 'Vence ' + _npData(d.dataVencimento) + (atrasada ? ' · vencida' : '')
+    /* Com parcelas, deixa explicito que a data e a do PROXIMO vencimento em
+       aberto — nao a da primeira parcela, que pode estar paga ha meses. */
+    + (d.totalParcelas > 1 && !d.todasPagas ? ' <span class="small muted" style="font-size:9.5px">(próxima)</span>' : '')
+    + '</div>'
+    + _npParcelas(d)
     + _npRoteamento(d);
 
   if (coluna === 'novas') {

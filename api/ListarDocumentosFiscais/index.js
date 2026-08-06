@@ -116,12 +116,44 @@ module.exports = async function (context, req) {
       if (ch.length === 44) notaPorChave[ch] = n;
     }
 
-    const colunas = { novas: [], lancadas: [], aprovadas: [], quitadas: [] };
+    /* AGRUPAMENTO DE PARCELAS.
+       Uma NF em 3x vira TRES contas a pagar no Omie, cada uma com seu vencimento
+       e seu status. Sem agrupar, o quadro mostraria tres cards da mesma nota —
+       exatamente a duplicidade que ele existe para evitar.
+       Agrupa por chave de acesso; sem chave, por emitente + numero da NF. Linha da
+       SEFAZ ou lancamento manual (sem CodigoLancamentoOmie) fica sozinha: ali cada
+       linha ja e um documento, nao uma parcela. */
+    const grupos = [];
+    const porGrupo = {};
     let descartados = 0;
-
     for (const d of docs) {
       const f = d.fields || {};
       if (String(f.Descartado || '') === 'Sim') { descartados++; continue; }
+
+      let chaveGrupo = null;
+      if (f.CodigoLancamentoOmie) {
+        const ch = soDigitos(f.ChaveAcesso);
+        chaveGrupo = (ch.length === 44)
+          ? 'ch:' + ch
+          : 'nf:' + (f.UnidadeOmie || '') + '|' + soDigitos(f.CodigoClienteOmie) + '|' + (f.NumeroNF || '');
+        /* Numero de NF vazio nao pode virar chave de grupo: juntaria contas de
+           fornecedores diferentes num card so. */
+        if (!f.NumeroNF && !soDigitos(f.ChaveAcesso)) chaveGrupo = null;
+      }
+
+      if (!chaveGrupo) { grupos.push({ principal: d, parcelas: [d] }); continue; }
+      if (!porGrupo[chaveGrupo]) {
+        porGrupo[chaveGrupo] = { principal: d, parcelas: [] };
+        grupos.push(porGrupo[chaveGrupo]);
+      }
+      porGrupo[chaveGrupo].parcelas.push(d);
+    }
+
+    const colunas = { novas: [], lancadas: [], aprovadas: [], quitadas: [] };
+
+    for (const grupo of grupos) {
+      const d = grupo.principal;
+      const f = d.fields || {};
 
       let nota = f.NotaItemId ? notaPorId[String(f.NotaItemId)] : null;
       if (!nota) {
@@ -145,6 +177,38 @@ module.exports = async function (context, req) {
         vinculadoAuto: String(f.VinculadoAuto || '') === 'Sim'
       };
 
+      /* Consolida as parcelas: o card mostra o TOTAL da nota e o PROXIMO
+         vencimento em aberto — nao o da primeira parcela, que pode estar paga
+         ha meses e faria a nota parecer vencida sem estar. */
+      if (grupo.parcelas.length > 1 || f.CodigoLancamentoOmie) {
+        const pcs = grupo.parcelas.map(function (p) {
+          const pf = p.fields || {};
+          return {
+            id: p.id,
+            numero: pf.NumeroParcela || '',
+            valor: pf.Valor == null ? null : Number(pf.Valor),
+            vencimento: pf.DataVencimento ? String(pf.DataVencimento).substring(0, 10) : null,
+            status: pf.StatusOmie || '',
+            paga: String(pf.StatusOmie || '').toUpperCase().indexOf('PAGO') >= 0,
+            codigoBarras: pf.CodigoBarras || ''
+          };
+        }).sort(function (a, b) {
+          return (a.vencimento || '9999') < (b.vencimento || '9999') ? -1 : 1;
+        });
+
+        card.parcelas = pcs;
+        card.totalParcelas = pcs.length;
+        card.parcelasPagas = pcs.filter(function (p) { return p.paga; }).length;
+        card.valor = pcs.reduce(function (s, p) { return s + (Number(p.valor) || 0); }, 0);
+
+        const emAberto = pcs.filter(function (p) { return !p.paga; });
+        card.dataVencimento = (emAberto[0] || pcs[0] || {}).vencimento || null;
+        card.statusOmie = emAberto.length ? (emAberto[0].status || '') : 'PAGO';
+        card.unidadeOmie = f.UnidadeOmie || '';
+        card.codigoBarras = (emAberto[0] || pcs[0] || {}).codigoBarras || '';
+        card.todasPagas = emAberto.length === 0;
+      }
+
       const forn = fornecedorPorCnpj[soDigitos(f.EmitenteCNPJ)] || null;
       if (forn) {
         card.unidade = forn.unidade || '';
@@ -159,6 +223,24 @@ module.exports = async function (context, req) {
         card.fornecedorCadastrado = false;
         card.unidade = '';
         card.diretoria = '';
+      }
+
+      /* A unidade da empresa Omie e mais confiavel que a do cadastro de
+         fornecedor: o cadastro diz onde o fornecedor costuma atender, o Omie diz
+         qual filial de fato assumiu a conta. */
+      if (f.UnidadeOmie) card.unidade = f.UnidadeOmie;
+
+      /* PAGO NO OMIE E VERDADE FINANCEIRA e vem antes de tudo. Se o financeiro ja
+         pagou, o card vai para Quitadas mesmo que a NF aqui nunca tenha sido
+         lancada ou aprovada — o contrario deixaria uma conta paga parada em
+         "Novas", convidando alguem a pagar de novo. */
+      if (card.todasPagas) {
+        if (nota) {
+          card.notaItemId = String(nota.id);
+          card.statusNota = (nota.fields || {}).Status || '';
+        }
+        colunas.quitadas.push(card);
+        continue;
       }
 
       if (!nota) { colunas.novas.push(card); continue; }
