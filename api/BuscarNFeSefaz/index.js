@@ -117,13 +117,26 @@ module.exports = async function (context, req) {
           bloco.senhaComEspacoNasPontas = _senha !== _senha.trim();
         }
 
-        /* O arquivo vem do Blob Storage; App Setting so como fallback de teste. */
-        let buf;
+        /* MESMA REGRA de lerCertificado, de proposito: o fallback de App Setting so
+           vence o blob se REALMENTE for um PKCS#12 (0x30 0x82). Antes o diagnostico
+           aceitava qualquer valor e acusava erro em cima de um lixo que a producao
+           ja descartava — diagnostico que discorda do codigo que ele diagnostica e
+           pior do que nao ter diagnostico. Se as duas regras divergirem de novo,
+           e este par de trechos que precisa ser reconciliado. */
+        let buf = null;
         if (b64) {
-          bloco.origem = 'appsetting';
-          bloco.base64Chars = b64.length;
-          buf = Buffer.from(b64, 'base64');
-        } else {
+          const cand = Buffer.from(b64, 'base64');
+          if (cand.length > 2 && cand[0] === 0x30 && cand[1] === 0x82) {
+            bloco.origem = 'appsetting';
+            bloco.base64Chars = b64.length;
+            buf = cand;
+          } else {
+            /* Nao e certificado: registra e segue para o blob, igual a producao. */
+            bloco.appSettingIgnorada = 'valor em SEFAZ_CERT_' + alvo.cnpj +
+              '_PFX nao e um PKCS#12 (' + cand.length + ' bytes) — ignorado, usando o Blob';
+          }
+        }
+        if (!buf) {
           bloco.origem = 'blob';
           try {
             buf = await require('../shared/blobCert').lerPfx(alvo.cnpj);
