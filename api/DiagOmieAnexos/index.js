@@ -112,6 +112,45 @@ module.exports = async function (context, req) {
       diag.contasTestadas.push(bloco);
     }
 
+    /* 2b) RECEBIMENTO DE NF-e — o modulo que de fato tem o que interessa.
+       A tela do Omie "Recebimento NF-e" mostra itens, transporte, totais e
+       parcelas, e tem os botoes "Exibir DANFE" e "Exibir XML". Isso NAO vem de
+       contas a pagar: e outro modulo, com outra API. E o XML de la que permite
+       montar um detalhe igual ao do Omie sem depender de raspagem de tela.
+       Os nomes abaixo sao candidatos; o Omie recusa com faultstring o que nao
+       existe, entao sondar e barato e conclusivo. */
+    const chaveTeste = (amostra.find(function (c) {
+      return c.chave_nfe && String(c.chave_nfe).replace(/\D/g, '').length === 44;
+    }) || {}).chave_nfe;
+    diag.chaveUsadaNoTeste = chaveTeste || '(nenhuma conta da amostra tem chave)';
+
+    const candidatosNFe = [
+      ['xml_ListarDocumentos',   '/produtos/xml/',        'ListarDocumentos',
+        { pagina: 1, registros_por_pagina: 5 }],
+      ['xml_ObterDocumento',     '/produtos/xml/',        'ObterDocumento',
+        { nChaveNFe: chaveTeste || '' }],
+      ['nfe_ListarNFesRecebidas','/produtos/nfe/',        'ListarNFesRecebidas',
+        { pagina: 1, registros_por_pagina: 5 }],
+      ['recebimento_Listar',     '/produtos/recebimentonfe/', 'ListarRecebimentos',
+        { pagina: 1, registros_por_pagina: 5 }],
+      ['dfe_ListarDocumentos',   '/produtos/dfedocsfiscais/', 'ListarDocumentos',
+        { pagina: 1, registros_por_pagina: 5 }]
+    ];
+    diag.recebimentoNFe = {};
+    for (const [nome, ep, call, param] of candidatosNFe) {
+      if (/Obter/.test(call) && !chaveTeste) {
+        diag.recebimentoNFe[nome] = { pulado: 'sem chave na amostra' };
+        continue;
+      }
+      const rr = await chamar(ep, call, param, creds);
+      /* Nao despeja o XML inteiro na resposta: so o formato e o tamanho. */
+      diag.recebimentoNFe[nome] = rr.aceito
+        ? { aceito: true, chaves: Object.keys(rr.data || {}).slice(0, 12),
+            total: (rr.data && (rr.data.total_de_registros || rr.data.nTotRegistros)) || null,
+            tamanhoResposta: JSON.stringify(rr.data || {}).length }
+        : rr;
+    }
+
     /* 3) Se houver anexo, da para BAIXAR? Testa o Obter no primeiro que tiver. */
     const comAnexo = diag.contasTestadas.find(function (b) { return b.anexos && b.anexos.length; });
     if (comAnexo) {
