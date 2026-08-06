@@ -280,6 +280,115 @@ async function gravarContaOmie(client, siteId, conta, indice) {
   return { novo: false, mudou: true, itemId: existente.id };
 }
 
+/**
+ * Grava varias contas do Omie de uma vez, usando o $batch do Graph.
+ *
+ * POR QUE ISTO EXISTE: medido em producao, ler as contas do RJ leva ~20s e a
+ * Function corta em ~45s. Gravando uma por uma (~0,3s cada), 541 linhas levariam
+ * ~160s — seriam 6 execucoes so para a primeira carga de UMA unidade, 18 nas
+ * tres. Com lotes de 20 por requisicao isso vira ~28 chamadas, e cabe numa
+ * execucao so.
+ *
+ * O $batch NAO e transacional: cada requisicao do lote pode falhar sozinha. Por
+ * isso o retorno diz o que passou e o que falhou, item a item — em vez de tratar
+ * o lote como tudo-ou-nada, que esconderia falhas parciais.
+ *
+ * @param operacoes [{ tipo:'post'|'patch', itemId?, fields }]
+ * @returns {{ ok:number, falhas:[{indice,status,erro}] }}
+ */
+async function gravarEmLote(client, siteId, listId, operacoes) {
+  const LIMITE = 20;                 /* teto do $batch do Graph */
+  let ok = 0;
+  const falhas = [];
+
+  for (let i = 0; i < operacoes.length; i += LIMITE) {
+    const fatia = operacoes.slice(i, i + LIMITE);
+    const requests = fatia.map(function (op, j) {
+      const base = '/sites/' + siteId + '/lists/' + listId + '/items';
+      return op.tipo === 'patch'
+        ? { id: String(j + 1), method: 'PATCH', url: base + '/' + op.itemId + '/fields',
+            headers: { 'Content-Type': 'application/json' }, body: op.fields }
+        : { id: String(j + 1), method: 'POST', url: base,
+            headers: { 'Content-Type': 'application/json' }, body: { fields: op.fields } };
+    });
+
+    let resp;
+    try {
+      resp = await client.api('/$batch').post({ requests: requests });
+    } catch (e) {
+      /* Lote inteiro nao saiu: registra todos como falha e segue para o proximo.
+         Abortar aqui perderia o que ainda daria certo depois. */
+      for (let j = 0; j < fatia.length; j++) {
+        falhas.push({ indice: i + j, status: 0, erro: e.message });
+      }
+      continue;
+    }
+
+    const porId = {};
+    for (const r of ((resp && resp.responses) || [])) porId[String(r.id)] = r;
+    for (let j = 0; j < fatia.length; j++) {
+      const r = porId[String(j + 1)];
+      if (r && r.status >= 200 && r.status < 300) { ok++; continue; }
+      falhas.push({
+        indice: i + j,
+        status: r ? r.status : -1,
+        erro: (r && r.body && r.body.error && r.body.error.message) || 'sem resposta no lote'
+      });
+    }
+  }
+  return { ok: ok, falhas: falhas };
+}
+
+/* Monta a operacao de gravacao SEM executar — para o chamador juntar tudo e
+   mandar em lote. Mesma regra do gravarContaOmie: o Omie manda, mas nunca apaga
+   o CNPJ ja resolvido nem o vinculo com a nota. */
+function prepararContaOmie(conta, indice) {
+  const cod = String(conta.codigoLancamentoOmie || '');
+  if (!cod) return null;
+
+  const campos = {
+    CodigoLancamentoOmie: cod,
+    CodigoClienteOmie: String(conta.codigoClienteOmie || ''),
+    Origem: 'omie',
+    NumeroNF: String(conta.numeroNF || ''),
+    NumeroParcela: String(conta.numeroParcela || ''),
+    Valor: conta.valor != null ? Number(conta.valor) : null,
+    DataEmissao: conta.dataEmissao || null,
+    DataVencimento: conta.dataVencimento || null,
+    StatusOmie: conta.statusOmie || '',
+    UnidadeOmie: conta.unidade || '',
+    CodigoBarras: conta.codigoBarras || '',
+    SincronizadoEm: new Date().toISOString()
+  };
+  const ch = soDigitos(conta.chaveAcesso);
+  if (chaveValida(ch)) campos.ChaveAcesso = ch;
+  const cnpj = soDigitos(conta.emitenteCNPJ);
+  if (cnpj.length === 14) campos.EmitenteCNPJ = cnpj;
+  if (conta.emitenteNome) campos.EmitenteNome = conta.emitenteNome;
+
+  const existente = indice ? indice[cod] : null;
+  if (!existente) {
+    campos.Title = 'NF ' + (conta.numeroNF || '') + ' - ' + (conta.emitenteNome || '');
+    campos.Descartado = 'Nao';
+    campos.VinculadoAuto = 'Nao';
+    return { tipo: 'post', fields: campos, novo: true };
+  }
+
+  const antes = existente.fields || {};
+  const mudou = Object.keys(campos).some(function (k) {
+    if (k === 'SincronizadoEm') return false;
+    const a = antes[k], b = campos[k];
+    if (a == null && (b == null || b === '')) return false;
+    if (k === 'Valor') return Number(a || 0) !== Number(b || 0);
+    if (k === 'DataEmissao' || k === 'DataVencimento') {
+      return String(a || '').substring(0, 10) !== String(b || '').substring(0, 10);
+    }
+    return String(a || '') !== String(b || '');
+  });
+  if (!mudou) return { tipo: 'nenhum' };
+  return { tipo: 'patch', itemId: existente.id, fields: campos, novo: false };
+}
+
 async function vincularNota(client, siteId, docItemId, notaItemId, auto) {
   const listId = await resolveListId(client, siteId, LIST_DOCFIS);
   await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + docItemId + '/fields')
@@ -572,7 +681,7 @@ module.exports = {
   COLUNAS_DOCFIS, COLUNAS_SEFAZ, COLUNAS_NOTAS_EXTRA,
   resolveListId, soDigitos, chaveValida, chaveFraca,
   buscarPorChave, gravarDocumento, vincularNota, casarNotaComDocumento,
-  gravarContaOmie, indexarPorCodigoOmie,
+  gravarContaOmie, indexarPorCodigoOmie, gravarEmLote, prepararContaOmie,
   lerPonteiro, garantirPonteiro, gravarPonteiro,
   lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, lerConfigSefaz
 };

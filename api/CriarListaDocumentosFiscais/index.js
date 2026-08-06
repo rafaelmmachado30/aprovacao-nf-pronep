@@ -144,13 +144,38 @@ module.exports = async function (context, req) {
       }
     }
 
-    /* Avisa sobre certificado faltando ANTES de o cron falhar de madrugada. */
+    /* Avisa sobre certificado faltando ANTES de o cron falhar de madrugada.
+       Precisa olhar as DUAS fontes: o .pfx vive no Blob Storage (nao cabe em App
+       Setting — teto de 10 KB no total) e a App Setting so existe como fallback.
+       Checar so uma delas produzia "certificado ausente" com o certificado
+       presente e validado — aviso errado manda consertar o que nao esta quebrado,
+       e e pior do que nao avisar. */
+    diag.step = 'certificados';
+    let noBlob = [];
+    let erroBlob = null;
+    try { noBlob = await require('../shared/blobCert').listar(); }
+    catch (eB) { erroBlob = eB.message; }
+    diag.certificados = { noBlob: noBlob, erroBlob: erroBlob };
+
     for (const c of cnpjs) {
-      if (!process.env['SEFAZ_CERT_' + c.cnpj + '_PFX']) {
-        diag.avisos.push('Certificado ausente para ' + c.apelido +
-                         ' (App Setting SEFAZ_CERT_' + c.cnpj + '_PFX).');
+      const emAppSetting = !!process.env['SEFAZ_CERT_' + c.cnpj + '_PFX'];
+      const temBlob = noBlob.indexOf(c.cnpj + '.pfx') >= 0;
+      if (!emAppSetting && !temBlob) {
+        diag.avisos.push('Certificado ausente para ' + c.apelido + ': nao esta no Blob ' +
+          '(container "certificados", arquivo ' + c.cnpj + '.pfx)' +
+          (erroBlob ? ' — e a leitura do Blob falhou: ' + erroBlob : '') +
+          ' nem em App Setting.');
+      }
+      if (!process.env['SEFAZ_CERT_' + c.cnpj + '_SENHA']) {
+        diag.avisos.push('Senha ausente para ' + c.apelido +
+          ' (App Setting SEFAZ_CERT_' + c.cnpj + '_SENHA). O certificado nao abre sem ela.');
       }
     }
+    /* O caminho SEFAZ esta desativado de proposito (o Omie ja consome o mesmo DFe
+       e a cota e por CNPJ). Deixar claro aqui evita que a ausencia de ponteiros
+       avancando pareca defeito. */
+    diag.avisos.push('Lembrete: a busca automatica na SEFAZ esta com o cron desligado. ' +
+      'A fonte do quadro e o Omie (/api/SincronizarOmie).');
 
     diag.step = 'done';
     diag.timeMs = Date.now() - t0;

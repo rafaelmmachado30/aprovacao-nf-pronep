@@ -31,8 +31,8 @@ require('isomorphic-fetch');
 const { getGraphClient, resolveSiteId } = require('../shared/graph');
 const { getCredentials, listarContasPagarPorVencimento,
         resolverFornecedoresPorCodigo } = require('../shared/omie');
-const { gravarContaOmie, indexarPorCodigoOmie, lerConfigSefaz, soDigitos } =
-  require('../shared/documentosFiscais');
+const { indexarPorCodigoOmie, gravarEmLote, prepararContaOmie, resolveListId,
+        LIST_DOCFIS, lerConfigSefaz, soDigitos } = require('../shared/documentosFiscais');
 
 const ORCAMENTO_MS = 30000;   // margem para fechar antes dos ~45s da plataforma
 
@@ -77,7 +77,10 @@ module.exports = async function (context, req) {
   const t0 = Date.now();
   const q = req.query || {};
   const dryRun = q.dryRun === '1' || q.dryRun === 'true';
-  const dias = Math.max(1, Math.min(90, parseInt(q.dias, 10) || 10));
+  /* 3 dias por padrao, nao 10: o cron roda 3x ao dia, entao 3 dias ja cobrem
+     com folga qualquer execucao perdida. Cada dia extra e uma pagina a mais de
+     leitura, e a leitura ja custa ~20s por unidade. */
+  const dias = Math.max(1, Math.min(90, parseInt(q.dias, 10) || 3));
   const pedido = String(q.unidade || 'TODAS').toUpperCase();
   const unidades = pedido === 'TODAS' ? ['RJ', 'SP', 'ES'] : [pedido];
 
@@ -164,7 +167,7 @@ module.exports = async function (context, req) {
       const porCodigo = {};
       for (const c of abertas) porCodigo[String(c.codigo_lancamento_omie)] = c;
       for (const c of alteradas) porCodigo[String(c.codigo_lancamento_omie)] = c;
-      const contas = Object.keys(porCodigo).map(function (k) { return porCodigo[k]; });
+      let contas = Object.keys(porCodigo).map(function (k) { return porCodigo[k]; });
       bloco.contas = contas.length;
 
       if (dryRun) {
@@ -179,6 +182,19 @@ module.exports = async function (context, req) {
       let indice;
       try { indice = await indexarPorCodigoOmie(client, siteId, u); }
       catch (e) { bloco.erro = 'indice: ' + e.message; continue; }
+
+      /* CONTA PAGA QUE NUNCA CONHECEMOS NAO ENTRA. A consulta de alteracoes traz
+         centenas de titulos ja quitados (medido no RJ: 300 de 830) que nunca
+         passaram pelo quadro. Guardar isso so incharia a lista sem informar nada:
+         o quadro existe para acompanhar o que ainda vai ser pago. Uma conta que
+         JA esta na lista e virou PAGO continua entrando — e assim que o card
+         chega em "Quitadas". */
+      const antesDoCorte = contas.length;
+      contas = contas.filter(function (c) {
+        const paga = String(c.status_titulo || '').toUpperCase().indexOf('PAGO') >= 0;
+        return !paga || !!indice[String(c.codigo_lancamento_omie)];
+      });
+      bloco.pagasIgnoradas = antesDoCorte - contas.length;
 
       /* A conta a pagar traz so o CODIGO interno do fornecedor, e quem decide
          unidade e diretoria e o CNPJ. Resolve apenas os codigos que ainda nao
@@ -203,8 +219,13 @@ module.exports = async function (context, req) {
       }
       let mapaForn = jaResolvido;
       if (codigosFaltando.length) {
+        /* Teto pelo TEMPO que sobrou, nao por um numero fixo: cada consulta custa
+           ~0,5s e a leitura das contas ja consumiu ~20s. Numero fixo ora sobra,
+           ora estoura. */
+        const sobra = ORCAMENTO_MS - (Date.now() - t0);
+        const teto = Math.max(0, Math.min(60, Math.floor((sobra - 12000) / 600)));
         try {
-          const rf = await resolverFornecedoresPorCodigo(codigosFaltando, creds, 40);
+          const rf = await resolverFornecedoresPorCodigo(codigosFaltando, creds, teto);
           mapaForn = Object.assign({}, jaResolvido, rf.mapa);
           bloco.fornecedoresConsultados = rf.consultados;
           bloco.fornecedoresPendentes = codigosFaltando.length - rf.consultados;
@@ -218,41 +239,47 @@ module.exports = async function (context, req) {
         }
       }
 
+      /* Monta TUDO primeiro, grava em lotes de 20 pelo $batch do Graph. Uma a uma
+         seriam ~0,3s cada: 541 linhas dariam ~160s e a Function corta em 45. */
+      const listId = await resolveListId(client, siteId, LIST_DOCFIS);
+      const ops = [];
       for (const c of contas) {
-        if (Date.now() - t0 > ORCAMENTO_MS) {
-          diag.avisos.push(u + ': parou por tempo apos ' + (bloco.novos + bloco.atualizados) +
-            ' gravacoes. A proxima execucao continua — nada se perde.');
-          break;
-        }
         if (ehCancelada(c.status_titulo)) { bloco.canceladas++; continue; }
-
         const cod = String(c.codigo_cliente_fornecedor || '');
         const forn = mapaForn[cod] || {};
         if (!forn.cnpj) bloco.semFornecedor++;
 
-        try {
-          const r = await gravarContaOmie(client, siteId, {
-            codigoLancamentoOmie: c.codigo_lancamento_omie,
-            codigoClienteOmie: cod,
-            chaveAcesso: c.chave_nfe,
-            numeroNF: c.numero_documento_fiscal || c.nota_fiscal || c.numero_documento || '',
-            numeroParcela: c.numero_parcela,
-            emitenteCNPJ: forn.cnpj || '',
-            emitenteNome: forn.razao || '',
-            valor: c.valor_documento,
-            dataEmissao: dataOmieParaISO(c.data_emissao),
-            dataVencimento: dataOmieParaISO(c.data_vencimento),
-            statusOmie: c.status_titulo || '',
-            unidade: u,
-            codigoBarras: c.codigo_barras_ficha_compensacao || ''
-          }, indice);
-          if (r.novo) bloco.novos++;
-          else if (r.mudou) bloco.atualizados++;
-          else bloco.semMudanca++;
-        } catch (eG) {
-          bloco.erro = 'gravacao ' + c.codigo_lancamento_omie + ': ' + eG.message;
-          break;
-        }
+        const op = prepararContaOmie({
+          codigoLancamentoOmie: c.codigo_lancamento_omie,
+          codigoClienteOmie: cod,
+          chaveAcesso: c.chave_nfe,
+          numeroNF: c.numero_documento_fiscal || c.nota_fiscal || c.numero_documento || '',
+          numeroParcela: c.numero_parcela,
+          emitenteCNPJ: forn.cnpj || '',
+          emitenteNome: forn.razao || '',
+          valor: c.valor_documento,
+          dataEmissao: dataOmieParaISO(c.data_emissao),
+          dataVencimento: dataOmieParaISO(c.data_vencimento),
+          statusOmie: c.status_titulo || '',
+          unidade: u,
+          codigoBarras: c.codigo_barras_ficha_compensacao || ''
+        }, indice);
+
+        if (!op || op.tipo === 'nenhum') { bloco.semMudanca++; continue; }
+        ops.push(op);
+      }
+
+      const r = await gravarEmLote(client, siteId, listId, ops);
+      bloco.novos = ops.filter(function (o) { return o.tipo === 'post'; }).length;
+      bloco.atualizados = ops.filter(function (o) { return o.tipo === 'patch'; }).length;
+      bloco.gravados = r.ok;
+      if (r.falhas.length) {
+        /* Falha parcial nao pode passar por sucesso: a proxima execucao reprocessa
+           o que nao entrou, mas quem le o resultado precisa saber. */
+        bloco.falhas = r.falhas.length;
+        bloco.primeirasFalhas = r.falhas.slice(0, 3);
+        diag.avisos.push(u + ': ' + r.falhas.length + ' de ' + ops.length +
+          ' gravacoes falharam — a proxima sincronizacao tenta de novo.');
       }
     }
 
