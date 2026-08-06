@@ -131,6 +131,16 @@ module.exports = async function (context, req) {
       catch (e) { bloco.erro = e.message; continue; }
       bloco.empresa = creds.empresa;
 
+      /* O INDICE VEM PRIMEIRO, de proposito. Ele decide se a consulta de
+         alteracoes vale a pena: na primeira carga a lista esta vazia, entao nao
+         existe card para mover para "Quitadas" e as ~584 alteracoes seriam ~10s
+         jogados fora de um orcamento de 45s. */
+      let indice;
+      try { indice = await indexarPorCodigoOmie(client, siteId, u); }
+      catch (e) { bloco.erro = 'indice: ' + e.message; continue; }
+      const primeiraCarga = Object.keys(indice).length === 0;
+      bloco.jaNaLista = Object.keys(indice).length;
+
       /* 1) tudo que esta em aberto */
       let abertas = [];
       try {
@@ -148,7 +158,10 @@ module.exports = async function (context, req) {
 
       /* 2) o que mudou — e como o card sai de "Aprovadas" para "Quitadas" */
       let alteradas = [];
-      try {
+      if (primeiraCarga) {
+        diag.avisos.push(u + ': primeira carga — pulei a consulta de alteracoes, ' +
+          'que so serve para mover cards que ainda nao existem.');
+      } else try {
         const r = await listarContasPagarPorVencimento({
           de: desde, ate: hoje,
           filtroExtra: { filtrar_apenas_alteracao: 'S' },
@@ -177,11 +190,6 @@ module.exports = async function (context, req) {
         bloco.comChaveNFe = contas.filter(function (c) { return soDigitos(c.chave_nfe).length === 44; }).length;
         continue;
       }
-
-      /* Uma leitura so do que ja existe, em vez de uma busca por conta. */
-      let indice;
-      try { indice = await indexarPorCodigoOmie(client, siteId, u); }
-      catch (e) { bloco.erro = 'indice: ' + e.message; continue; }
 
       /* CONTA PAGA QUE NUNCA CONHECEMOS NAO ENTRA. A consulta de alteracoes traz
          centenas de titulos ja quitados (medido no RJ: 300 de 830) que nunca
@@ -269,10 +277,16 @@ module.exports = async function (context, req) {
         ops.push(op);
       }
 
-      const r = await gravarEmLote(client, siteId, listId, ops);
+      const r = await gravarEmLote(client, siteId, listId, ops, t0 + ORCAMENTO_MS);
       bloco.novos = ops.filter(function (o) { return o.tipo === 'post'; }).length;
       bloco.atualizados = ops.filter(function (o) { return o.tipo === 'patch'; }).length;
       bloco.gravados = r.ok;
+      if (r.restantes > 0) {
+        bloco.restantes = r.restantes;
+        diag.avisos.push(u + ': parou no prazo com ' + r.restantes + ' de ' + ops.length +
+          ' ainda por gravar. Rode /api/SincronizarOmie?unidade=' + u + ' de novo — ' +
+          'ele continua de onde parou e nada se perde.');
+      }
       if (r.falhas.length) {
         /* Falha parcial nao pode passar por sucesso: a proxima execucao reprocessa
            o que nao entrou, mas quem le o resultado precisa saber. */

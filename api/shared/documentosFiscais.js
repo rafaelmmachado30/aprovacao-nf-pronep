@@ -296,12 +296,18 @@ async function gravarContaOmie(client, siteId, conta, indice) {
  * @param operacoes [{ tipo:'post'|'patch', itemId?, fields }]
  * @returns {{ ok:number, falhas:[{indice,status,erro}] }}
  */
-async function gravarEmLote(client, siteId, listId, operacoes) {
+async function gravarEmLote(client, siteId, listId, operacoes, prazoFinal) {
   const LIMITE = 20;                 /* teto do $batch do Graph */
   let ok = 0;
+  let processadas = 0;
   const falhas = [];
 
   for (let i = 0; i < operacoes.length; i += LIMITE) {
+    /* PRAZO. Sem esta parada a funcao seguia gravando ate a plataforma matar a
+       execucao — e ai o cliente recebe "Backend call failure", sem resposta e sem
+       saber o que entrou. Parar por conta propria devolve o diagnostico e diz
+       quantas ficaram; a proxima execucao continua de onde parou. */
+    if (prazoFinal && Date.now() > prazoFinal) break;
     const fatia = operacoes.slice(i, i + LIMITE);
     const requests = fatia.map(function (op, j) {
       const base = '/sites/' + siteId + '/lists/' + listId + '/items';
@@ -321,6 +327,7 @@ async function gravarEmLote(client, siteId, listId, operacoes) {
       for (let j = 0; j < fatia.length; j++) {
         falhas.push({ indice: i + j, status: 0, erro: e.message });
       }
+      processadas += fatia.length;
       continue;
     }
 
@@ -335,8 +342,10 @@ async function gravarEmLote(client, siteId, listId, operacoes) {
         erro: (r && r.body && r.body.error && r.body.error.message) || 'sem resposta no lote'
       });
     }
+    processadas += fatia.length;
   }
-  return { ok: ok, falhas: falhas };
+  return { ok: ok, falhas: falhas, processadas: processadas,
+           restantes: operacoes.length - processadas };
 }
 
 /* Monta a operacao de gravacao SEM executar — para o chamador juntar tudo e
