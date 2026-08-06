@@ -575,14 +575,20 @@ async function listarContasPagarPorVencimento(opts, creds) {
   const contas = [];
   let paginas = 0, totalRegistros = 0, totalPags = 1;
 
+  /* A janela de data e OPCIONAL: filtrar_por_status sozinho ja e o recorte certo
+     para "o que esta em aberto", e nao existe filtro por vencimento no Omie
+     (medido — ver DiagOmieFiltros). Mandar filtrar_por_data_de sem querer filtrar
+     por data restringiria por data de ALTERACAO, que nao e o que se pediu. */
+  const base = { pagina: 0, registros_por_pagina: 50, apenas_importado_api: 'N' };
+  if (opts.de && opts.ate) {
+    base.filtrar_por_data_de = fmtDataOmie(opts.de);
+    base.filtrar_por_data_ate = fmtDataOmie(opts.ate);
+  }
+  Object.assign(base, opts.filtroExtra || {});
+
   for (let pagina = 1; pagina <= maxPag; pagina++) {
-    const resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', {
-      pagina: pagina,
-      registros_por_pagina: 50,
-      apenas_importado_api: 'N',
-      filtrar_por_data_de: fmtDataOmie(opts.de),
-      filtrar_por_data_ate: fmtDataOmie(opts.ate)
-    }, creds);
+    const resp = await callOmie('/financas/contapagar/', 'ListarContasPagar',
+      Object.assign({}, base, { pagina: pagina }), creds);
 
     paginas++;
     totalRegistros = (resp && resp.total_de_registros) || totalRegistros;
@@ -599,10 +605,57 @@ async function listarContasPagarPorVencimento(opts, creds) {
   return { contas, paginas, totalRegistros, truncado: paginas < totalPags };
 }
 
+/* Cache em memoria do codigo interno do Omie -> CNPJ. A instancia da Function e
+   reaproveitada entre chamadas, entao na pratica cada fornecedor e consultado uma
+   vez por instancia. Chave inclui a empresa: o mesmo codigo significa fornecedores
+   diferentes em empresas Omie diferentes. */
+const _cacheFornecedor = {};
+
+/**
+ * Resolve codigo_cliente_fornecedor -> { cnpj, razao }.
+ *
+ * A conta a pagar do Omie traz so o codigo interno, e o que decide unidade e
+ * diretoria no nosso quadro e o CNPJ. Nao existe consulta em lote por codigo, so
+ * uma por vez — por isso o LIMITE por execucao.
+ *
+ * O limite nao perde nada: o CNPJ resolvido e gravado na propria linha e nao
+ * precisa ser consultado de novo. Com 3 sincronizacoes por dia, um cadastro de
+ * algumas centenas de fornecedores termina de resolver no primeiro dia. A
+ * alternativa — resolver tudo de uma vez — estouraria os 45s da Function e nao
+ * gravaria nada, que e estritamente pior.
+ */
+async function resolverFornecedoresPorCodigo(codigos, creds, limite) {
+  const out = {};
+  let gastos = 0;
+  for (const cod of codigos) {
+    const ck = creds.empresa + '|' + cod;
+    if (_cacheFornecedor[ck]) { out[cod] = _cacheFornecedor[ck]; continue; }
+    if (gastos >= (limite || 40)) continue;   /* fica para a proxima execucao */
+    gastos++;
+    try {
+      const resp = await callOmie('/geral/clientes/', 'ConsultarCliente',
+        { codigo_cliente_omie: Number(cod) }, creds);
+      const r = {
+        cnpj: normalizaDoc(resp && resp.cnpj_cpf),
+        razao: (resp && (resp.razao_social || resp.nome_fantasia)) || ''
+      };
+      _cacheFornecedor[ck] = r;
+      out[cod] = r;
+    } catch (e) {
+      /* Fornecedor que nao resolve nao derruba a sincronizacao: a conta entra sem
+         CNPJ e aparece no quadro como "fornecedor sem cadastro", que ja tem
+         tratamento proprio na tela. */
+      out[cod] = { cnpj: '', razao: '', erro: e.message };
+    }
+  }
+  return { mapa: out, consultados: gastos, pendentes: codigos.length - Object.keys(out).length };
+}
+
 module.exports = {
   getCredentials,
   buscarCliente,
   listarContasPagarPorVencimento,
+  resolverFornecedoresPorCodigo,
   buscarContaPagar,
   buscarContaPagarPF,
   anexarPDF,

@@ -1,0 +1,276 @@
+/**
+ * /api/SincronizarOmie  (GET|POST) — cron/admin. Alimenta o quadro "NFs a Pagar".
+ *
+ * Traz as contas a pagar EM ABERTO do Omie e as guarda no SharePoint, para a tela
+ * ler de um lugar so e abrir instantaneamente.
+ *
+ * POR QUE O OMIE E NAO A SEFAZ: o Omie ja consome o DFe dos mesmos CNPJs e a SEFAZ
+ * conta as consultas POR CNPJ — com os dois puxando veio cStat 656 nas tres
+ * filiais. Alem disso o Omie entrega o que a SEFAZ nao tem: data de vencimento
+ * tratada e o status de pagamento do financeiro.
+ *
+ * Query:
+ *   ?unidade=RJ     RJ | SP | ES | TODAS  (default TODAS)
+ *   ?dias=10        alem das em aberto, traz o que foi ALTERADO nos ultimos N dias
+ *   ?dryRun=1       consulta o Omie mas nao grava no SharePoint
+ *
+ * DUAS CONSULTAS, POR MOTIVOS DIFERENTES:
+ *   1. filtrar_por_status=EMABERTO  -> tudo que esta em aberto agora (RJ: ~548)
+ *   2. filtrar_apenas_alteracao     -> o que MUDOU, incluindo o que virou PAGO
+ * Sem a segunda, uma conta paga simplesmente sumiria do resultado 1 e o card
+ * ficaria eternamente parado em "Aprovadas" — nunca chegaria em "Quitadas".
+ *
+ * REGRA QUE NAO PODE SER RELAXADA: filtrar para estreitar, CLASSIFICAR pelo
+ * status_titulo do proprio registro. O filtro EMABERTO/ATRASADO do Omie devolve
+ * tambem contas pagas com atraso (medido: 10 ATRASADO + 10 PAGO numa amostra de
+ * 20). Confiar no filtro para decidir "esta em aberto" faria conta ja paga voltar
+ * a aparecer como pendente — e alguem pagaria duas vezes.
+ */
+
+require('isomorphic-fetch');
+const { getGraphClient, resolveSiteId } = require('../shared/graph');
+const { getCredentials, listarContasPagarPorVencimento,
+        resolverFornecedoresPorCodigo } = require('../shared/omie');
+const { gravarContaOmie, indexarPorCodigoOmie, lerConfigSefaz, soDigitos } =
+  require('../shared/documentosFiscais');
+
+const ORCAMENTO_MS = 30000;   // margem para fechar antes dos ~45s da plataforma
+
+function readClientPrincipal(req) {
+  const h = req.headers && req.headers['x-ms-client-principal'];
+  if (!h) return null;
+  try { return JSON.parse(Buffer.from(h, 'base64').toString('utf-8')); } catch (e) { return null; }
+}
+
+async function autorizado(req) {
+  const segredo = process.env.SEFAZ_SECRET;
+  const enviado = (req.headers &&
+    (req.headers['x-automacao-secret'] || req.headers['X-Automacao-Secret'])) || '';
+  if (segredo && enviado && enviado === segredo) return true;
+  const p = readClientPrincipal(req);
+  const roles = (p && p.userRoles) || [];
+  if (roles.includes('administrador') || roles.includes('admin')) return true;
+  try {
+    const { getUser } = require('../shared/auth');
+    const user = await getUser(req);
+    if (!user) return false;
+    const { isAdminEmail } = require('../shared/authz');
+    if (isAdminEmail((user.email || '').toLowerCase())) return true;
+    const { getUserRoles } = require('../shared/userRoles');
+    return ((await getUserRoles(user)) || []).includes('administrador');
+  } catch (e) { return false; }
+}
+
+/* "20/03/2026" -> "2026-03-20". O Omie usa DD/MM/AAAA; o SharePoint quer ISO. */
+function dataOmieParaISO(d) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(d || '').trim());
+  return m ? (m[3] + '-' + m[2] + '-' + m[1]) : null;
+}
+
+/* CANCELADO nao vira card: e uma conta que deixou de existir para o financeiro.
+   Mantida na lista (o historico importa) porem marcada, e a leitura a esconde. */
+function ehCancelada(status) {
+  return String(status || '').toUpperCase().indexOf('CANCEL') >= 0;
+}
+
+module.exports = async function (context, req) {
+  const t0 = Date.now();
+  const q = req.query || {};
+  const dryRun = q.dryRun === '1' || q.dryRun === 'true';
+  const dias = Math.max(1, Math.min(90, parseInt(q.dias, 10) || 10));
+  const pedido = String(q.unidade || 'TODAS').toUpperCase();
+  const unidades = pedido === 'TODAS' ? ['RJ', 'SP', 'ES'] : [pedido];
+
+  const diag = { step: 'init', dryRun: dryRun, dias: dias, unidades: [], avisos: [], timeMs: 0 };
+
+  try {
+    if (!(await autorizado(req))) {
+      context.res = { status: 403, headers: { 'Content-Type': 'application/json' },
+        body: { error: 'Nao autorizado' } };
+      return;
+    }
+
+    diag.step = 'graph';
+    const client = await getGraphClient();
+    const siteId = await resolveSiteId(client);
+
+    /* Mesmo freio de mao do quadro: se a integracao esta desligada em
+       Configuracoes, nao consulta nada. dryRun ignora, por ser diagnostico. */
+    const cfg = await lerConfigSefaz(client, siteId);
+    diag.integracao = cfg;
+    if (!cfg.habilitado && !dryRun) {
+      diag.timeMs = Date.now() - t0;
+      context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
+        body: Object.assign({ ok: true, desligada: true,
+          mensagem: 'Integracao DESLIGADA em Configuracoes' +
+                    (cfg.motivo ? ' — ' + cfg.motivo : '') + '. Nada foi consultado.' }, diag) };
+      return;
+    }
+
+    const hoje = new Date();
+    const desde = new Date(hoje.getTime() - dias * 86400000);
+
+    for (const u of unidades) {
+      const bloco = {
+        unidade: u, emAberto: 0, alteradas: 0, contas: 0,
+        novos: 0, atualizados: 0, semMudanca: 0, canceladas: 0,
+        semFornecedor: 0, erro: null, truncado: false
+      };
+      diag.unidades.push(bloco);
+
+      if (Date.now() - t0 > ORCAMENTO_MS) {
+        bloco.erro = 'sem tempo nesta execucao — rode com ?unidade=' + u;
+        continue;
+      }
+
+      let creds;
+      try { creds = getCredentials(u); }
+      catch (e) { bloco.erro = e.message; continue; }
+      bloco.empresa = creds.empresa;
+
+      /* 1) tudo que esta em aberto */
+      let abertas = [];
+      try {
+        const r = await listarContasPagarPorVencimento(
+          { filtroExtra: { filtrar_por_status: 'EMABERTO' }, maxPaginas: 20 }, creds);
+        abertas = r.contas;
+        bloco.emAberto = abertas.length;
+        bloco.truncado = r.truncado;
+        if (r.truncado) {
+          diag.avisos.push(u + ': a lista de contas em aberto foi truncada (' + r.paginas +
+            ' paginas lidas de ' + Math.ceil(r.totalRegistros / 50) + '). O quadro pode ' +
+            'estar incompleto — aumente maxPaginas ou sincronize essa unidade sozinha.');
+        }
+      } catch (e) { bloco.erro = 'em aberto: ' + e.message; continue; }
+
+      /* 2) o que mudou — e como o card sai de "Aprovadas" para "Quitadas" */
+      let alteradas = [];
+      try {
+        const r = await listarContasPagarPorVencimento({
+          de: desde, ate: hoje,
+          filtroExtra: { filtrar_apenas_alteracao: 'S' },
+          maxPaginas: 12
+        }, creds);
+        alteradas = r.contas;
+        bloco.alteradas = alteradas.length;
+      } catch (e) {
+        /* Nao derruba a unidade: sem este passo o quadro fica desatualizado nas
+           quitacoes, mas as contas em aberto ja entraram. */
+        diag.avisos.push(u + ': nao consegui ler as alteracoes (' + e.message + ').');
+      }
+
+      /* Uniao pelo codigo do lancamento. Uma conta que esta em aberto E foi
+         alterada aparece nas duas listas; a versao alterada e a mais recente. */
+      const porCodigo = {};
+      for (const c of abertas) porCodigo[String(c.codigo_lancamento_omie)] = c;
+      for (const c of alteradas) porCodigo[String(c.codigo_lancamento_omie)] = c;
+      const contas = Object.keys(porCodigo).map(function (k) { return porCodigo[k]; });
+      bloco.contas = contas.length;
+
+      if (dryRun) {
+        const st = {};
+        for (const c of contas) st[String(c.status_titulo || '?')] = (st[String(c.status_titulo || '?')] || 0) + 1;
+        bloco.statusTitulo = st;
+        bloco.comChaveNFe = contas.filter(function (c) { return soDigitos(c.chave_nfe).length === 44; }).length;
+        continue;
+      }
+
+      /* Uma leitura so do que ja existe, em vez de uma busca por conta. */
+      let indice;
+      try { indice = await indexarPorCodigoOmie(client, siteId, u); }
+      catch (e) { bloco.erro = 'indice: ' + e.message; continue; }
+
+      /* A conta a pagar traz so o CODIGO interno do fornecedor, e quem decide
+         unidade e diretoria e o CNPJ. Resolve apenas os codigos que ainda nao
+         temos gravados, com teto por execucao: o que sobrar resolve na proxima,
+         e o CNPJ ja descoberto fica na linha para sempre. */
+      const jaResolvido = {};
+      for (const k of Object.keys(indice)) {
+        const f = indice[k].fields || {};
+        if (f.CodigoClienteOmie && soDigitos(f.EmitenteCNPJ).length === 14) {
+          jaResolvido[String(f.CodigoClienteOmie)] = {
+            cnpj: soDigitos(f.EmitenteCNPJ), razao: f.EmitenteNome || ''
+          };
+        }
+      }
+      const codigosFaltando = [];
+      const vistos = {};
+      for (const c of contas) {
+        const cod = String(c.codigo_cliente_fornecedor || '');
+        if (!cod || vistos[cod] || jaResolvido[cod]) continue;
+        vistos[cod] = true;
+        codigosFaltando.push(cod);
+      }
+      let mapaForn = jaResolvido;
+      if (codigosFaltando.length) {
+        try {
+          const rf = await resolverFornecedoresPorCodigo(codigosFaltando, creds, 40);
+          mapaForn = Object.assign({}, jaResolvido, rf.mapa);
+          bloco.fornecedoresConsultados = rf.consultados;
+          bloco.fornecedoresPendentes = codigosFaltando.length - rf.consultados;
+          if (bloco.fornecedoresPendentes > 0) {
+            diag.avisos.push(u + ': ' + bloco.fornecedoresPendentes + ' fornecedor(es) ainda ' +
+              'sem CNPJ resolvido — a proxima sincronizacao continua de onde parou. ' +
+              'Ate la esses cards aparecem como "fornecedor sem cadastro".');
+          }
+        } catch (e) {
+          diag.avisos.push(u + ': falha ao resolver fornecedores (' + e.message + ')');
+        }
+      }
+
+      for (const c of contas) {
+        if (Date.now() - t0 > ORCAMENTO_MS) {
+          diag.avisos.push(u + ': parou por tempo apos ' + (bloco.novos + bloco.atualizados) +
+            ' gravacoes. A proxima execucao continua — nada se perde.');
+          break;
+        }
+        if (ehCancelada(c.status_titulo)) { bloco.canceladas++; continue; }
+
+        const cod = String(c.codigo_cliente_fornecedor || '');
+        const forn = mapaForn[cod] || {};
+        if (!forn.cnpj) bloco.semFornecedor++;
+
+        try {
+          const r = await gravarContaOmie(client, siteId, {
+            codigoLancamentoOmie: c.codigo_lancamento_omie,
+            codigoClienteOmie: cod,
+            chaveAcesso: c.chave_nfe,
+            numeroNF: c.numero_documento_fiscal || c.nota_fiscal || c.numero_documento || '',
+            numeroParcela: c.numero_parcela,
+            emitenteCNPJ: forn.cnpj || '',
+            emitenteNome: forn.razao || '',
+            valor: c.valor_documento,
+            dataEmissao: dataOmieParaISO(c.data_emissao),
+            dataVencimento: dataOmieParaISO(c.data_vencimento),
+            statusOmie: c.status_titulo || '',
+            unidade: u,
+            codigoBarras: c.codigo_barras_ficha_compensacao || ''
+          }, indice);
+          if (r.novo) bloco.novos++;
+          else if (r.mudou) bloco.atualizados++;
+          else bloco.semMudanca++;
+        } catch (eG) {
+          bloco.erro = 'gravacao ' + c.codigo_lancamento_omie + ': ' + eG.message;
+          break;
+        }
+      }
+    }
+
+    diag.step = 'done';
+    diag.timeMs = Date.now() - t0;
+    const novos = diag.unidades.reduce(function (s, u) { return s + u.novos; }, 0);
+    const atu = diag.unidades.reduce(function (s, u) { return s + u.atualizados; }, 0);
+    const comErro = diag.unidades.filter(function (u) { return u.erro; });
+
+    context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
+      body: Object.assign({
+        ok: comErro.length === 0,
+        mensagem: (dryRun ? '[SIMULACAO] ' : '') + novos + ' nova(s), ' + atu + ' atualizada(s)' +
+                  (comErro.length ? ' · ' + comErro.length + ' unidade(s) com erro' : '')
+      }, diag) };
+  } catch (err) {
+    diag.timeMs = Date.now() - t0;
+    context.res = { status: 500, headers: { 'Content-Type': 'application/json' },
+      body: Object.assign({ error: (err && err.message) || String(err) }, diag) };
+  }
+};

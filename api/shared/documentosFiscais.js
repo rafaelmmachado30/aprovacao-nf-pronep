@@ -42,7 +42,22 @@ const COLUNAS_DOCFIS = [
   { name: 'VinculadoEm',    def: { dateTime: { displayAs: 'standard', format: 'dateTime' } } },
   { name: 'VinculadoAuto',  def: { text: {} } },          // Sim | Nao
   { name: 'Descartado',     def: { text: {} } },          // Sim | Nao
-  { name: 'MotivoDescarte', def: { text: { allowMultipleLines: true } } }
+  { name: 'MotivoDescarte', def: { text: { allowMultipleLines: true } } },
+
+  /* --- origem OMIE ---------------------------------------------------------
+     O Omie e a fonte do quadro (a SEFAZ ficou como fallback: os dois consomem o
+     mesmo DFe e a cota e por CNPJ). Uma conta a pagar do Omie NAO e a mesma coisa
+     que um documento fiscal: uma NF parcelada vira N contas, cada uma com seu
+     vencimento e seu status. Por isso a chave natural aqui e o
+     CodigoLancamentoOmie — uma linha por PARCELA — e o agrupamento em um unico
+     card acontece na leitura, por ChaveAcesso. */
+  { name: 'CodigoLancamentoOmie', def: { text: {} } },    // chave natural da parcela
+  { name: 'CodigoClienteOmie',    def: { text: {} } },    // guarda o codigo p/ reconsultar o CNPJ que ficou pendente
+  { name: 'NumeroParcela',        def: { text: {} } },    // "001/003"
+  { name: 'StatusOmie',           def: { text: {} } },    // PAGO | A VENCER | ATRASADO | VENCE HOJE | CANCELADO
+  { name: 'UnidadeOmie',          def: { text: {} } },    // RJ | SP | ES (qual empresa Omie)
+  { name: 'CodigoBarras',         def: { text: {} } },    // ficha de compensacao — casa com a Conciliacao Bancaria
+  { name: 'SincronizadoEm',       def: { dateTime: { displayAs: 'standard', format: 'dateTime' } } }
 ];
 
 const COLUNAS_SEFAZ = [
@@ -162,6 +177,107 @@ async function gravarDocumento(client, siteId, doc) {
     }
   });
   return { novo: true, itemId: criado.id };
+}
+
+/* Indexa as contas do Omie ja gravadas, por CodigoLancamentoOmie.
+   Uma leitura so, em vez de uma consulta por conta: sincronizar 548 contas com
+   uma busca cada seriam 548 idas ao Graph e o estouro certo dos 45s da Function. */
+async function indexarPorCodigoOmie(client, siteId, unidade) {
+  const listId = await resolveListId(client, siteId, LIST_DOCFIS);
+  if (!listId) return {};
+  const idx = {};
+  let url = '/sites/' + siteId + '/lists/' + listId + '/items?expand=fields&$top=999';
+  let p = 0;
+  while (url && p < 20) {
+    const r = await client.api(url).get();
+    for (const it of (r.value || [])) {
+      const f = it.fields || {};
+      if (!f.CodigoLancamentoOmie) continue;
+      if (unidade && f.UnidadeOmie && f.UnidadeOmie !== unidade) continue;
+      idx[String(f.CodigoLancamentoOmie)] = { id: it.id, fields: f };
+    }
+    p++;
+    const nl = r['@odata.nextLink'];
+    url = nl ? nl.replace('https://graph.microsoft.com/v1.0', '') : null;
+  }
+  return idx;
+}
+
+/**
+ * Grava (ou atualiza) uma conta a pagar do Omie.
+ *
+ * DIFERENCA IMPORTANTE PARA O DOCUMENTO DA SEFAZ: la o documento e imutavel e a
+ * regra e "completar sem sobrescrever". Aqui o registro MUDA — o status vira PAGO,
+ * o vencimento pode ser renegociado — e e essa mudanca que move o card de coluna.
+ * Entao aqui a regra e o oposto: o Omie manda, e sobrescreve.
+ *
+ * O que NAO se sobrescreve e o vinculo com a nota lancada aqui (NotaItemId): esse
+ * dado e nosso, o Omie nao sabe dele, e apaga-lo desfaria o merge em silencio.
+ *
+ * @returns {{ novo: boolean, mudou: boolean, itemId: string }}
+ */
+async function gravarContaOmie(client, siteId, conta, indice) {
+  const listId = await resolveListId(client, siteId, LIST_DOCFIS);
+  if (!listId) throw new Error('Lista ' + LIST_DOCFIS + ' nao existe');
+
+  const cod = String(conta.codigoLancamentoOmie || '');
+  if (!cod) throw new Error('Conta do Omie sem codigo_lancamento_omie');
+
+  const campos = {
+    CodigoLancamentoOmie: cod,
+    CodigoClienteOmie: String(conta.codigoClienteOmie || ''),
+    Origem: 'omie',
+    NumeroNF: String(conta.numeroNF || ''),
+    NumeroParcela: String(conta.numeroParcela || ''),
+    EmitenteNome: conta.emitenteNome || '',
+    Valor: conta.valor != null ? Number(conta.valor) : null,
+    DataEmissao: conta.dataEmissao || null,
+    DataVencimento: conta.dataVencimento || null,
+    StatusOmie: conta.statusOmie || '',
+    UnidadeOmie: conta.unidade || '',
+    CodigoBarras: conta.codigoBarras || '',
+    SincronizadoEm: new Date().toISOString()
+  };
+  const ch = soDigitos(conta.chaveAcesso);
+  if (chaveValida(ch)) campos.ChaveAcesso = ch;
+
+  /* CNPJ so entra quando FOI resolvido. Gravar vazio apagaria o que uma execucao
+     anterior ja tinha descoberto — e sem CNPJ o card perde unidade e diretoria,
+     ou seja, deixa de ter aprovador. Ausencia aqui significa "ainda nao sei",
+     nunca "e vazio". */
+  const cnpjResolvido = soDigitos(conta.emitenteCNPJ);
+  if (cnpjResolvido.length === 14) campos.EmitenteCNPJ = cnpjResolvido;
+  if (!conta.emitenteNome) delete campos.EmitenteNome;
+
+  const existente = indice ? indice[cod] : null;
+  if (!existente) {
+    campos.Title = 'NF ' + (conta.numeroNF || '') + ' - ' + (conta.emitenteNome || '');
+    campos.Descartado = 'Nao';
+    campos.VinculadoAuto = 'Nao';
+    const criado = await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
+      .post({ fields: campos });
+    return { novo: true, mudou: true, itemId: criado.id };
+  }
+
+  /* So grava se algo REALMENTE mudou. Sem essa comparacao, cada sincronizacao
+     faria 548 PATCHes identicos — gasto de cota do Graph e ruido no historico da
+     lista, que e o que alguem vai consultar quando quiser entender um card. */
+  const antes = existente.fields || {};
+  const mudou = Object.keys(campos).some(function (k) {
+    if (k === 'SincronizadoEm') return false;   /* muda sempre; nao conta como mudanca */
+    const a = antes[k], b = campos[k];
+    if (a == null && (b == null || b === '')) return false;
+    if (k === 'Valor') return Number(a || 0) !== Number(b || 0);
+    if (k === 'DataEmissao' || k === 'DataVencimento') {
+      return String(a || '').substring(0, 10) !== String(b || '').substring(0, 10);
+    }
+    return String(a || '') !== String(b || '');
+  });
+  if (!mudou) return { novo: false, mudou: false, itemId: existente.id };
+
+  await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + existente.id + '/fields')
+    .patch(campos);
+  return { novo: false, mudou: true, itemId: existente.id };
 }
 
 async function vincularNota(client, siteId, docItemId, notaItemId, auto) {
@@ -456,6 +572,7 @@ module.exports = {
   COLUNAS_DOCFIS, COLUNAS_SEFAZ, COLUNAS_NOTAS_EXTRA,
   resolveListId, soDigitos, chaveValida, chaveFraca,
   buscarPorChave, gravarDocumento, vincularNota, casarNotaComDocumento,
+  gravarContaOmie, indexarPorCodigoOmie,
   lerPonteiro, garantirPonteiro, gravarPonteiro,
   lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, lerConfigSefaz
 };
