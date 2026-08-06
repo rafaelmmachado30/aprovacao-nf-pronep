@@ -4996,7 +4996,13 @@ async function carregarDocsDoCard() {
       + '</div>'
       + '<div class="small muted" style="margin-top:5px;line-height:1.45">'
       + 'A união gera um PDF só, na ordem em que aparecem, e o lançamento já abre com ele anexado.'
-      + '</div>';
+      + '</div>'
+      + '<div style="margin-top:10px;padding-top:10px;border-top:1px solid #F0F3F5">'
+      + '<button class="btn btn-secondary" id="np-btn-email" onclick="procurarNoEmail(false)">'
+      + 'Procurar nos e-mails</button>'
+      + '<span class="small muted" style="margin-left:8px">Busca nas caixas da unidade e do TI, '
+      + 'sem você baixar nada.</span>'
+      + '<div id="np-email-res" style="margin-top:8px"></div></div>';
     alvo.innerHTML = h;
     /* O rotulo acompanha a selecao: "Unir" com um arquivo so seria mentira, e
        conta a pagar de boleto avulso (Vivo, por exemplo) nao tem NF para unir. */
@@ -5101,6 +5107,95 @@ async function unirELancar() {
     };
     closeModal();
     lancarDaSefaz(d.id);
+  } catch (e) {
+    toast('Erro: ' + (e && e.message), 'error');
+  } finally { esconderSalvandoOverlay(); }
+}
+
+// Procura os anexos direto nas caixas de e-mail. O servidor pontua e devolve
+// candidatos; a decisao continua sendo do usuario.
+async function procurarNoEmail(amplo) {
+  var d = window._npDocAtual;
+  var alvo = document.getElementById('np-email-res');
+  var btn = document.getElementById('np-btn-email');
+  if (!d || !alvo) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Procurando...'; }
+  alvo.innerHTML = '<div class="small muted">Varrendo as caixas…</div>';
+  try {
+    var r = await fetch('/api/BuscarAnexosEmail?docId=' + encodeURIComponent(d.id)
+      + (amplo ? '&amplo=1' : ''), { credentials: 'include' });
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+
+    var cs = data.candidatos || [];
+    if (!cs.length) {
+      alvo.innerHTML = '<div class="small muted">' + _npEsc(data.dica || 'Nada encontrado.') + '</div>'
+        /* Sem este botao, "nao achei" parece veredito quando e so o filtro
+           restritivo fazendo o trabalho dele. */
+        + (amplo ? '' : '<button class="btn btn-secondary" style="margin-top:6px;font-size:11.5px;padding:4px 10px"'
+            + ' onclick="procurarNoEmail(true)">Procurar de forma mais ampla</button>');
+      return;
+    }
+    var h = '<div class="small" style="font-weight:600;margin-bottom:5px">'
+      + cs.length + ' anexo(s) encontrado(s) no e-mail</div>';
+    for (var i = 0; i < cs.length; i++) {
+      var c = cs[i];
+      var cor = c.confianca === 'alta' ? '#2E7D32' : (c.confianca === 'media' ? '#EF6C00' : '#5E6C77');
+      h += '<label style="display:flex;gap:8px;align-items:flex-start;padding:6px 8px;'
+        + 'border:1px solid var(--cinza-borda);border-left:3px solid ' + cor
+        + ';border-radius:5px;margin-bottom:4px;cursor:pointer">'
+        + '<input type="checkbox" class="np-mail-chk" style="width:auto;margin-top:2px"'
+        + " data-caixa='" + _npEsc(c.caixa) + "' data-msg='" + _npEsc(c.msgId)
+        + "' data-anexo='" + _npEsc(c.anexoId) + "'" + (c.confianca === 'alta' ? ' checked' : '') + '>'
+        + '<span style="flex:1">'
+        + '<span class="small" style="font-weight:600;word-break:break-all">' + _npEsc(c.nome) + '</span>'
+        + '<span class="small muted" style="display:block;font-size:10px">de ' + _npEsc(c.deNome || c.de)
+        + ' · ' + _npData(c.recebidoEm) + ' · ' + _npEsc(c.caixa.split('@')[0]) + '</span>'
+        /* Mostra POR QUE casou: quem confere precisa saber se foi a chave (prova)
+           ou so o remetente (indicio). */
+        + '<span class="small" style="display:block;font-size:10px;color:' + cor + '">'
+        + _npEsc(c.motivos.join(' · ')) + '</span>'
+        + '</span></label>';
+    }
+    h += '<button class="btn btn-primary" style="margin-top:6px" onclick="trazerDoEmail()">'
+      + 'Trazer selecionados para a caixa</button>';
+    if (!amplo) {
+      h += '<button class="btn btn-secondary" style="margin-top:6px;margin-left:6px;font-size:11.5px;padding:6px 10px"'
+        + ' onclick="procurarNoEmail(true)">Ampliar busca</button>';
+    }
+    alvo.innerHTML = h;
+  } catch (e) {
+    alvo.innerHTML = '<div class="small" style="color:#C62828">' + _npEsc(e.message) + '</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Procurar nos e-mails'; }
+  }
+}
+
+async function trazerDoEmail() {
+  var d = window._npDocAtual;
+  var chks = document.querySelectorAll('.np-mail-chk:checked');
+  if (!chks.length) { toast('Selecione ao menos um anexo.', 'error'); return; }
+  var escolhas = Array.prototype.map.call(chks, function (c) {
+    return { caixa: c.getAttribute('data-caixa'), msgId: c.getAttribute('data-msg'),
+             anexoId: c.getAttribute('data-anexo') };
+  });
+  mostrarSalvandoOverlay('Trazendo ' + escolhas.length + ' anexo(s) do e-mail...');
+  try {
+    var r = await fetch('/api/BuscarAnexosEmail', {
+      method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docId: d.id, escolhas: escolhas })
+    });
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    var n = (data.baixados || []).length;
+    if ((data.falhas || []).length) {
+      toast(n + ' trazido(s), ' + data.falhas.length + ' falharam.', 'error');
+    } else {
+      toast(n + ' anexo(s) na sua caixa. Agora é só unir e lançar.', 'success');
+    }
+    /* Recarrega a lista de documentos: os recem-baixados ja entram casando pelo
+       nome e aparecem pre-marcados no topo. */
+    carregarDocsDoCard();
   } catch (e) {
     toast('Erro: ' + (e && e.message), 'error');
   } finally { esconderSalvandoOverlay(); }
