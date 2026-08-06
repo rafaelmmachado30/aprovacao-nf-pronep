@@ -9,6 +9,8 @@
  *   ?dryRun=1              CONSULTA a SEFAZ mas NAO grava nem avanca o ponteiro
  *   ?lotes=3               quantos lotes por CNPJ nesta execucao (default 3)
  *   ?ambiente=homologacao  default producao
+ *   ?diagCert=1            checa so o certificado, sem tocar a SEFAZ
+ *   ?forcar=1              pula a quarentena de 1h apos cStat 656 (use com cuidado)
  *
  * ORDEM QUE NAO PODE MUDAR:
  *   consultar -> GRAVAR os documentos -> SO ENTAO avancar o ponteiro
@@ -64,6 +66,9 @@ module.exports = async function (context, req) {
   const dryRun = q.dryRun === '1' || q.dryRun === 'true';
   const maxLotes = Math.max(1, Math.min(20, parseInt(q.lotes, 10) || 3));
   const ambiente = q.ambiente === 'homologacao' ? 'homologacao' : 'producao';
+  /* Pula a quarentena do 656. So para quando a SEFAZ liberou antes do prazo —
+     usar por impaciencia renova o bloqueio. */
+  const forcar = q.forcar === '1' || q.forcar === 'true';
 
   const diag = {
     step: 'init', dryRun: dryRun, ambiente: ambiente,
@@ -241,6 +246,23 @@ module.exports = async function (context, req) {
       let nsuCorrente = ponteiro.ultimoNSU;
       let baixadosNesta = 0;
 
+      /* QUARENTENA DO 656. A penalidade de consumo indevido dura 1 hora, e tentar
+         de novo DENTRO da janela renova o bloqueio em vez de resolver — insistir
+         piora. O cron de 2 em 2 horas ja fica fora da janela; esta guarda existe
+         para a reexecucao manual, que e a que costuma acontecer justamente quando
+         alguem esta ansioso para ver funcionar.
+         ?forcar=1 pula a guarda, para o caso de a SEFAZ ter liberado antes. */
+      if (!forcar && String(ponteiro.cStat || '') === '656' && ponteiro.ultimaConsulta) {
+        const minutos = (Date.now() - new Date(ponteiro.ultimaConsulta).getTime()) / 60000;
+        if (minutos >= 0 && minutos < 65) {
+          bloco.parouPor = 'quarentena_656';
+          bloco.erro = 'Em quarentena: a SEFAZ bloqueou este CNPJ ha ' + Math.round(minutos) +
+            ' min por consumo indevido. Faltam ~' + Math.max(1, Math.ceil(65 - minutos)) +
+            ' min. Tentar antes disso renova o bloqueio.';
+          continue;
+        }
+      }
+
       for (let i = 0; i < maxLotes; i++) {
         if (Date.now() - t0 > ORCAMENTO_MS) { bloco.parouPor = 'tempo'; break; }
 
@@ -264,8 +286,23 @@ module.exports = async function (context, req) {
            Qualquer outro cStat e recusa (certificado, CNPJ, consumo indevido) e
            NAO pode virar avanco de ponteiro. */
         if (lote.cStat !== '138') {
-          if (lote.cStat === '137') bloco.parouPor = 'sem_novos';
-          else { bloco.erro = 'cStat ' + lote.cStat + ': ' + lote.xMotivo; }
+          if (lote.cStat === '137') {
+            bloco.parouPor = 'sem_novos';
+          } else {
+            bloco.erro = 'cStat ' + lote.cStat + ': ' + lote.xMotivo;
+            /* Sem isto, uma rejeicao com lotes == maxLotes era rotulada
+               'limite_de_lotes' pelo fecho do laco — como se tivesse parado por
+               ter cumprido a cota, e nao por ter sido recusada. O rotulo errado
+               esconde justamente o caso que precisa de atencao. */
+            bloco.parouPor = (lote.cStat === '656') ? 'consumo_indevido' : 'rejeitado';
+            if (lote.cStat === '656') {
+              /* Penalidade de 1 hora, por CNPJ. Insistir dentro da janela renova o
+                 bloqueio — a saida e esperar, nunca tentar de novo mais rapido. */
+              diag.avisos.push(alvo.apelido + ': a SEFAZ bloqueou este CNPJ por 1 hora ' +
+                '(consumo indevido). O cron de 2 em 2 horas respeita a janela; nao ' +
+                'adianta reexecutar antes disso.');
+            }
+          }
           break;
         }
 

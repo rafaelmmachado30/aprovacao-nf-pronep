@@ -256,7 +256,11 @@ async function lerPonteiro(client, siteId, cnpj) {
     cnpj: doc,
     apelido: f.Apelido || '',
     ultimoNSU: Number(f.UltimoNSU || 0),
-    maxNSU: f.MaxNSU == null ? null : Number(f.MaxNSU)
+    maxNSU: f.MaxNSU == null ? null : Number(f.MaxNSU),
+    /* Necessarios para a quarentena do cStat 656 em BuscarNFeSefaz: sem eles a
+       guarda nunca dispara e uma reexecucao manual renova o bloqueio da SEFAZ. */
+    cStat: f.UltimoCStat || '',
+    ultimaConsulta: f.UltimaConsulta || null
   };
 }
 
