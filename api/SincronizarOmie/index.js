@@ -13,6 +13,7 @@
  *   ?unidade=RJ     RJ | SP | ES | TODAS  (default TODAS)
  *   ?dias=10        alem das em aberto, traz o que foi ALTERADO nos ultimos N dias
  *   ?dryRun=1       consulta o Omie mas nao grava no SharePoint
+ *   ?apenasFornecedores=1  so resolve os CNPJs pendentes (nao le contas)
  *
  * DUAS CONSULTAS, POR MOTIVOS DIFERENTES:
  *   1. filtrar_por_status=EMABERTO  -> tudo que esta em aberto agora (RJ: ~548)
@@ -81,6 +82,8 @@ module.exports = async function (context, req) {
      com folga qualquer execucao perdida. Cada dia extra e uma pagina a mais de
      leitura, e a leitura ja custa ~20s por unidade. */
   const dias = Math.max(1, Math.min(90, parseInt(q.dias, 10) || 3));
+  /* So resolve CNPJ de fornecedor, sem ler contas do Omie. Ver o bloco no laco. */
+  const apenasFornecedores = q.apenasFornecedores === '1' || q.apenasFornecedores === 'true';
   const pedido = String(q.unidade || 'TODAS').toUpperCase();
   const unidades = pedido === 'TODAS' ? ['RJ', 'SP', 'ES'] : [pedido];
 
@@ -130,6 +133,57 @@ module.exports = async function (context, req) {
       try { creds = getCredentials(u); }
       catch (e) { bloco.erro = e.message; continue; }
       bloco.empresa = creds.empresa;
+
+      /* MODO SO-FORNECEDORES. Resolver CNPJ competia por tempo com a leitura das
+         contas, que sozinha come 20s: sobravam ~12 consultas por execucao, e 58
+         pendentes levariam 5 dias. Sem ler contas, cabem ~50 por execucao e o
+         cadastro fecha numa ou duas rodadas.
+         Nao e atalho: e reconhecer que sao dois trabalhos com custos diferentes
+         disputando o mesmo orcamento. */
+      if (apenasFornecedores) {
+        let idx;
+        try { idx = await indexarPorCodigoOmie(client, siteId, u); }
+        catch (e) { bloco.erro = 'indice: ' + e.message; continue; }
+
+        const pendentes = [];
+        const linhasPorCodigo = {};
+        for (const k of Object.keys(idx)) {
+          const f = idx[k].fields || {};
+          const cod = String(f.CodigoClienteOmie || '');
+          if (!cod) continue;
+          if (soDigitos(f.EmitenteCNPJ).length === 14) continue;   /* ja resolvido */
+          if (!linhasPorCodigo[cod]) { linhasPorCodigo[cod] = []; pendentes.push(cod); }
+          linhasPorCodigo[cod].push(idx[k]);
+        }
+        bloco.fornecedoresPendentes = pendentes.length;
+        if (!pendentes.length) { bloco.mensagem = 'Nada pendente.'; continue; }
+
+        const sobra = ORCAMENTO_MS - (Date.now() - t0);
+        const teto = Math.max(0, Math.min(80, Math.floor((sobra - 8000) / 600)));
+        const rf = await resolverFornecedoresPorCodigo(pendentes, creds, teto);
+        bloco.fornecedoresConsultados = rf.consultados;
+
+        /* Uma linha pode repetir o mesmo fornecedor (parcelas): atualiza TODAS. */
+        const listaId = await resolveListId(client, siteId, LIST_DOCFIS);
+        const ops = [];
+        for (const cod of Object.keys(rf.mapa)) {
+          const info = rf.mapa[cod];
+          if (!info.cnpj) continue;
+          for (const linha of (linhasPorCodigo[cod] || [])) {
+            ops.push({ tipo: 'patch', itemId: linha.id,
+              fields: { EmitenteCNPJ: info.cnpj, EmitenteNome: info.razao || '' } });
+          }
+        }
+        const rr = await gravarEmLote(client, siteId, listaId, ops, t0 + ORCAMENTO_MS);
+        bloco.linhasAtualizadas = rr.ok;
+        bloco.restantes = rr.restantes;
+        bloco.fornecedoresAindaPendentes = pendentes.length - rf.consultados;
+        if (bloco.fornecedoresAindaPendentes > 0) {
+          diag.avisos.push(u + ': ainda faltam ' + bloco.fornecedoresAindaPendentes +
+            ' fornecedor(es). Rode de novo com ?apenasFornecedores=1.');
+        }
+        continue;
+      }
 
       /* O INDICE VEM PRIMEIRO, de proposito. Ele decide se a consulta de
          alteracoes vale a pena: na primeira carga a lista esta vazia, entao nao
