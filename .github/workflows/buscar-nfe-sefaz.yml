@@ -21,9 +21,17 @@ name: Buscar NF-e na SEFAZ (cron)
 # O ponteiro de NSU fica no SharePoint: cada execucao continua de onde a anterior
 # parou. Perder uma execucao nao perde nota (a janela da SEFAZ e de 90 dias).
 
+# AGENDAMENTO DESATIVADO em 05/08/2026.
+# O Omie ja consome o DFe destes mesmos CNPJs, e a SEFAZ conta as consultas POR
+# CNPJ: com os dois puxando, veio cStat 656 (consumo indevido) nas tres filiais.
+# Manter este cron ligado gastaria cota que o Omie precisa para baixar os XMLs da
+# contabilidade — quebraria producao para alimentar um quadro que vai passar a ler
+# do proprio Omie.
+# O endpoint continua funcional e o disparo manual segue disponivel abaixo.
+# Para religar, basta descomentar o bloco schedule.
 on:
-  schedule:
-    - cron: '0 10-22/2 * * 1-5'
+  # schedule:
+  #   - cron: '0 10-22/2 * * 1-5'
   workflow_dispatch:
     inputs:
       cnpj:
