@@ -4875,6 +4875,10 @@ function abrirDetalheNF(docId) {
     + (d.vinculadoAuto ? _npLinha('Vínculo', 'Unificada automaticamente com a NF lançada') : '')
     + '</div>';
 
+  /* Documentos: carregado depois, para o modal abrir na hora. */
+  h += '<h3 style="margin:16px 0 4px;font-size:14px">Documentos</h3>'
+    + '<div id="np-docs"><div class="small muted">Procurando na sua caixa de entrada…</div></div>';
+
   h += '<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">';
   if (!d.notaItemId) {
     var pode = d.fornecedorCadastrado && !d.cadastroIncompleto;
@@ -4890,6 +4894,216 @@ function abrirDetalheNF(docId) {
   h += '</div>';
 
   openModal(h);
+  window._npDocAtual = d;
+  setTimeout(carregarDocsDoCard, 30);
+}
+
+// CASAMENTO POR NOME DE ARQUIVO — E SUGESTAO, NUNCA DECISAO.
+//
+// A regra principal e a que o Rafael ja usa a mao: o arquivo da NF chama-se pelo
+// numero dela (1440963.pdf) e o boleto COMECA com o mesmo numero
+// (1440963_PRONEP_6138879_1_ejgj5005.pdf). Como o Omie tambem da esse numero no
+// card, da para ligar arquivo <-> card sem heuristica de valor ou data, que erram
+// quando o fornecedor repete valor todo mes.
+//
+// MAS NEM TODO FORNECEDOR SEGUE ISSO. Na propria pasta dele convivem
+// nfe_6477bd84-a82f-...pdf, boleto_d516b2e3-...pdf e "Boleto Pronep.pdf" — nomes
+// sem numero nenhum. Por isso o que casa aparece pre-marcado no topo e TODO o
+// resto continua a um clique: a sugestao adianta o caso comum e nunca esconde
+// nada. Errar para menos aqui custa um clique; errar para mais anexa o boleto de
+// outra nota.
+//
+// Devolve o MOTIVO do casamento, nao so um booleano: "casou pela chave de acesso"
+// merece mais confianca do que "casou pelo numero", e quem confere precisa saber
+// qual dos dois foi.
+function _npCasaArquivo(nomeArquivo, card) {
+  var nome = String(nomeArquivo || '');
+  var digitos = nome.replace(/\D/g, '');
+
+  /* 1) Chave de acesso no nome (padrao ...-danfe.pdf). 44 digitos sao unicos no
+        Brasil inteiro — nao ha casamento mais forte que este. */
+  var ch = String((card && card.chaveAcesso) || '').replace(/\D/g, '');
+  if (ch.length === 44 && digitos.indexOf(ch) >= 0) return 'chave de acesso';
+
+  /* 2) Numero da NF como bloco INTEIRO de digitos. Nao usa "contem": procurar
+        "1440963" solto acharia 21440963 e 14409631, de notas diferentes. */
+  var num = String((card && card.numeroNF) || '').replace(/^0+/, '');
+  if (num && num.length >= 3) {
+    var blocos = nome.match(/\d+/g) || [];
+    for (var i = 0; i < blocos.length; i++) {
+      if (blocos[i].replace(/^0+/, '') === num) return 'número da NF';
+    }
+  }
+  return null;
+}
+
+async function carregarDocsDoCard() {
+  var alvo = document.getElementById('np-docs');
+  var d = window._npDocAtual;
+  if (!alvo || !d) return;
+  try {
+    var r = await fetch('/api/CaixaEntrada', { credentials: 'include' });
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    var itens = (data.itens || data.arquivos || data.value || []).filter(function (x) {
+      /* Ja lancado nao entra: seria oferecer de novo o que ja foi usado, que e
+         justamente a duplicidade que o controle manual dele evita. */
+      return !/__LANCADA__/i.test(String(x.nome || ''));
+    });
+
+    var casam = [], outros = [];
+    for (var i = 0; i < itens.length; i++) {
+      var motivo = _npCasaArquivo(itens[i].nome, d);
+      if (motivo) { itens[i]._motivo = motivo; casam.push(itens[i]); }
+      else outros.push(itens[i]);
+    }
+
+    var h = '';
+    if (casam.length) {
+      h += '<div class="small" style="color:#1B5E20;font-weight:600;margin-bottom:5px">'
+        + casam.length + ' arquivo(s) provavelmente desta NF</div>'
+        + '<div class="small muted" style="margin-bottom:5px;font-size:10.5px">'
+        + 'Sugestão pelo nome do arquivo — confira antes de unir.</div>';
+      /* Ja vem marcados: se o nome bate com o numero da nota, a aposta segura e
+         que sao esses mesmos. O usuario desmarca se estiver errado. */
+      h += casam.map(function (x) { return _npItemDoc(x, true); }).join('');
+    } else {
+      h += '<div class="small muted" style="margin-bottom:6px">'
+        + 'Nenhum arquivo com o número ' + _npEsc(d.numeroNF || '—')
+        + ' no nome. Nem todo fornecedor nomeia assim, e há contas que vêm só com boleto '
+        + '— selecione abaixo ou envie os arquivos.</div>';
+    }
+
+    if (outros.length) {
+      /* Mais recentes primeiro: ele baixa os arquivos pouco antes de lancar, entao
+         o que acabou de chegar e quase sempre o que ele procura. */
+      outros.sort(function (a, b) {
+        return String(b.criadoEm || b.createdDateTime || '')
+             .localeCompare(String(a.criadoEm || a.createdDateTime || ''));
+      });
+      h += '<details style="margin-top:8px" open><summary class="small muted" style="cursor:pointer">'
+        + 'Outros ' + outros.length + ' arquivo(s) na caixa</summary><div style="margin-top:6px">'
+        + outros.map(function (x) { return _npItemDoc(x, false); }).join('') + '</div></details>';
+    }
+
+    h += '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;align-items:center">'
+      + '<input type="file" id="np-upload" accept="application/pdf" multiple'
+      + ' onchange="subirDocsDoCard(this)" style="font-size:12px">'
+      + (itens.length
+          ? '<button class="btn btn-success" id="np-btn-unir" onclick="unirELancar()">'
+            + 'Anexar e lançar</button>'
+          : '')
+      + '</div>'
+      + '<div class="small muted" style="margin-top:5px;line-height:1.45">'
+      + 'A união gera um PDF só, na ordem em que aparecem, e o lançamento já abre com ele anexado.'
+      + '</div>';
+    alvo.innerHTML = h;
+    /* O rotulo acompanha a selecao: "Unir" com um arquivo so seria mentira, e
+       conta a pagar de boleto avulso (Vivo, por exemplo) nao tem NF para unir. */
+    var chks = alvo.querySelectorAll('.np-doc-chk');
+    for (var c = 0; c < chks.length; c++) chks[c].addEventListener('change', _npAtualizarBotaoUnir);
+    _npAtualizarBotaoUnir();
+  } catch (e) {
+    alvo.innerHTML = '<div class="small" style="color:#C62828">Não consegui ler a caixa de entrada: '
+      + _npEsc(e.message) + '</div>';
+  }
+}
+
+function _npAtualizarBotaoUnir() {
+  var btn = document.getElementById('np-btn-unir');
+  if (!btn) return;
+  var n = document.querySelectorAll('.np-doc-chk:checked').length;
+  btn.disabled = (n === 0);
+  btn.style.opacity = n ? '' : '.45';
+  btn.textContent = n === 0 ? 'Selecione um arquivo'
+    : (n === 1 ? 'Anexar e lançar' : 'Unir ' + n + ' arquivos e lançar');
+}
+
+function _npItemDoc(x, marcado) {
+  var kb = Math.round((x.tamanho || 0) / 1024);
+  return '<label style="display:flex;align-items:center;gap:8px;padding:5px 7px;border:1px solid var(--cinza-borda);'
+    + 'border-radius:5px;margin-bottom:4px;cursor:pointer;background:' + (marcado ? '#F1F8F2' : '#fff') + '">'
+    + '<input type="checkbox" class="np-doc-chk" value="' + _npEsc(x.id) + '"'
+    + (marcado ? ' checked' : '') + ' style="width:auto">'
+    + '<span class="small" style="flex:1;word-break:break-all">' + _npEsc(x.nome)
+    + (x._motivo ? '<span class="small muted" style="font-size:9.5px;display:block">casou pel'
+        + (x._motivo === 'chave de acesso' ? 'a ' : 'o ') + x._motivo + '</span>' : '') + '</span>'
+    + '<span class="small muted" style="font-size:10px;flex-shrink:0">' + kb + ' KB</span></label>';
+}
+
+async function subirDocsDoCard(input) {
+  var arquivos = Array.prototype.slice.call(input.files || []);
+  if (!arquivos.length) return;
+  mostrarSalvandoOverlay('Enviando ' + arquivos.length + ' arquivo(s)...');
+  try {
+    for (var i = 0; i < arquivos.length; i++) {
+      var f = arquivos[i];
+      var b64 = await new Promise(function (res, rej) {
+        var fr = new FileReader();
+        fr.onload = function () { res(String(fr.result).split(',')[1]); };
+        fr.onerror = rej;
+        fr.readAsDataURL(f);
+      });
+      var r = await fetch('/api/CaixaEntrada', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'upload', fileBase64: b64, fileName: f.name })
+      });
+      if (!r.ok) {
+        var e = await r.json().catch(function () { return {}; });
+        toast('Falha em ' + f.name + ': ' + (e.error || r.status), 'error');
+      }
+    }
+    toast('Arquivo(s) enviado(s).', 'success');
+    carregarDocsDoCard();
+  } catch (e) {
+    toast('Erro ao enviar: ' + (e && e.message), 'error');
+  } finally { esconderSalvandoOverlay(); }
+}
+
+async function unirELancar() {
+  var chks = document.querySelectorAll('.np-doc-chk:checked');
+  var ids = Array.prototype.map.call(chks, function (c) { return c.value; });
+  var d = window._npDocAtual;
+  if (!ids.length) { toast('Selecione ao menos um arquivo.', 'error'); return; }
+  if (!d) return;
+
+  mostrarSalvandoOverlay(ids.length > 1
+    ? 'Unindo ' + ids.length + ' arquivos...' : 'Preparando o arquivo...');
+  try {
+    var idFinal = ids[0];
+    /* Um arquivo so nao precisa passar pelo combinar: evita gerar um "combinado
+       de 1" na caixa, que so polui o controle visual dele. */
+    if (ids.length > 1) {
+      var rc = await fetch('/api/CaixaEntrada', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'combinar', ids: ids })
+      });
+      var dc = await rc.json().catch(function () { return {}; });
+      if (!rc.ok || !dc.ok) { toast('Falha ao unir: ' + (dc.error || rc.status), 'error'); return; }
+      idFinal = dc.id;
+    }
+
+    var rb = await fetch('/api/CaixaEntrada?raw=1&id=' + encodeURIComponent(idFinal),
+      { credentials: 'include' });
+    if (!rb.ok) { toast('Não consegui baixar o PDF unido.', 'error'); return; }
+    var cd = rb.headers.get('Content-Disposition') || '';
+    var mFn = /filename="?([^"]+)"?/i.exec(cd);
+    var buf = await rb.arrayBuffer();
+
+    /* Leva o PDF junto do prefill: o lancamento abre com fornecedor, numero,
+       valor, vencimento E o arquivo, sem o usuario repetir nada. */
+    d.arquivoUnificado = {
+      nome: (mFn && mFn[1]) || ('NF-' + (d.numeroNF || '') + '.pdf'),
+      bytes: buf,
+      itemCaixaId: idFinal
+    };
+    closeModal();
+    lancarDaSefaz(d.id);
+  } catch (e) {
+    toast('Erro: ' + (e && e.message), 'error');
+  } finally { esconderSalvandoOverlay(); }
 }
 
 function copiarTexto(t) {
