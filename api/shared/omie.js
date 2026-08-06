@@ -554,9 +554,55 @@ async function anexarPDF(opts, creds) {
   return resp;
 }
 
+/**
+ * Lista contas a pagar por janela de VENCIMENTO, paginando ate o fim.
+ *
+ * Este e o caminho que alimenta o quadro "NFs a Pagar". Nasceu porque consumir a
+ * SEFAZ direto colidia com o proprio Omie: a SEFAZ conta as consultas por CNPJ, e
+ * com os dois puxando o mesmo canal veio cStat 656 (consumo indevido) nas tres
+ * filiais. Lendo do Omie, cada sistema fica com a sua fonte e ninguem atrapalha
+ * ninguem.
+ *
+ * O ListarContasPagar NAO aceita filtro de fornecedor — so janela de data (ver o
+ * comentario no topo deste arquivo). Para um quadro de contas a pagar isso serve:
+ * a janela de vencimento e exatamente o recorte que interessa.
+ *
+ * @param {{de:Date, ate:Date, maxPaginas?:number}} opts
+ * @returns {{contas:Array, paginas:number, totalRegistros:number, truncado:boolean}}
+ */
+async function listarContasPagarPorVencimento(opts, creds) {
+  const maxPag = Math.min(opts.maxPaginas || 20, MAX_PAGINAS);
+  const contas = [];
+  let paginas = 0, totalRegistros = 0, totalPags = 1;
+
+  for (let pagina = 1; pagina <= maxPag; pagina++) {
+    const resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', {
+      pagina: pagina,
+      registros_por_pagina: 50,
+      apenas_importado_api: 'N',
+      filtrar_por_data_de: fmtDataOmie(opts.de),
+      filtrar_por_data_ate: fmtDataOmie(opts.ate)
+    }, creds);
+
+    paginas++;
+    totalRegistros = (resp && resp.total_de_registros) || totalRegistros;
+    totalPags = (resp && resp.total_de_paginas) || pagina;
+    const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
+    if (!items.length) break;
+    contas.push.apply(contas, items);
+    if (pagina >= totalPags) break;
+  }
+
+  /* truncado avisa que a janela tem mais paginas do que lemos. Sem esse sinal, um
+     quadro incompleto passa por completo — que e o pior tipo de erro num painel
+     de contas a pagar. */
+  return { contas, paginas, totalRegistros, truncado: paginas < totalPags };
+}
+
 module.exports = {
   getCredentials,
   buscarCliente,
+  listarContasPagarPorVencimento,
   buscarContaPagar,
   buscarContaPagarPF,
   anexarPDF,
