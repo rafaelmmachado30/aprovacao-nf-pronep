@@ -24,7 +24,7 @@
 require('isomorphic-fetch');
 const { getGraphClient, resolveSiteId } = require('../shared/graph');
 const {
-  lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, garantirPonteiro, gravarPonteiro,
+  lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, lerConfigSefaz, garantirPonteiro, gravarPonteiro,
   gravarDocumento, soDigitos
 } = require('../shared/documentosFiscais');
 const { consultarLote, extrairNFe } = require('../shared/sefaz');
@@ -105,11 +105,22 @@ module.exports = async function (context, req) {
         } catch (eSeq) {
           bloco.veredito = eSeq.message; diag.cnpjs.push(bloco); continue;
         }
-        bloco.base64Chars = b64.length;
         bloco.senhaDefinida = !!process.env['SEFAZ_CERT_' + alvo.cnpj + '_SENHA'];
-        if (!b64) { bloco.veredito = 'App Setting _PFX ausente ou vazia'; diag.cnpjs.push(bloco); continue; }
 
-        const buf = Buffer.from(b64, 'base64');
+        /* O arquivo vem do Blob Storage; App Setting so como fallback de teste. */
+        let buf;
+        if (b64) {
+          bloco.origem = 'appsetting';
+          bloco.base64Chars = b64.length;
+          buf = Buffer.from(b64, 'base64');
+        } else {
+          bloco.origem = 'blob';
+          try {
+            buf = await require('../shared/blobCert').lerPfx(alvo.cnpj);
+          } catch (eBlob) {
+            bloco.veredito = eBlob.message; diag.cnpjs.push(bloco); continue;
+          }
+        }
         bloco.bytes = buf.length;
         /* PKCS#12 e um SEQUENCE ASN.1: sempre comeca com 0x30 0x82. Se nao comecar,
            o que esta na App Setting nao e um .pfx — nem adianta olhar a senha. */
@@ -149,6 +160,30 @@ module.exports = async function (context, req) {
     const client = await getGraphClient();
     const siteId = await resolveSiteId(client);
 
+    /* FREIO DE MAO. Desligado pela tela de Configuracoes, vale a partir da proxima
+       execucao do cron. Sai ANTES de qualquer consulta: nao toca a SEFAZ, nao move
+       o ponteiro. Devolve 200 porque desligar e uma decisao, nao uma falha — o cron
+       nao deve acender alarme vermelho todo dia por causa disso.
+       dryRun e diagCert IGNORAM o freio de proposito: sao ferramentas de
+       diagnostico, e precisar religar a integracao so para investigar um problema
+       seria exatamente o contrario do que o freio serve. */
+    diag.step = 'chave_liga_desliga';
+    const cfgSefaz = await lerConfigSefaz(client, siteId);
+    diag.integracao = cfgSefaz;
+    if (!cfgSefaz.habilitado && !dryRun) {
+      diag.step = 'done';
+      diag.timeMs = Date.now() - t0;
+      context.res = {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+        body: Object.assign({
+          ok: true, desligada: true,
+          mensagem: 'Integracao com a SEFAZ esta DESLIGADA em Configuracoes' +
+                    (cfgSefaz.motivo ? ' — ' + cfgSefaz.motivo : '') + '. Nada foi consultado.'
+        }, diag)
+      };
+      return;
+    }
+
     for (const alvo of alvos) {
       const bloco = {
         cnpj: alvo.cnpj, apelido: alvo.apelido,
@@ -159,7 +194,7 @@ module.exports = async function (context, req) {
       diag.cnpjs.push(bloco);
 
       let cert;
-      try { cert = lerCertificado(alvo.cnpj); }
+      try { cert = await lerCertificado(alvo.cnpj); }
       catch (eCert) { bloco.erro = eCert.message; continue; }
 
       let ponteiro;

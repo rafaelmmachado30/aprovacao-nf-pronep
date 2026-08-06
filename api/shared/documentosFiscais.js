@@ -369,13 +369,82 @@ function lerBase64Certificado(doc) {
   };
 }
 
-function lerCertificado(cnpj) {
+/**
+ * Chave de desligamento da busca automatica, gravada na config global (SharePoint)
+ * e nao em App Setting: precisa ser desligavel pela TELA, em segundos, quando o
+ * volume de NF-e virar gargalo. Mexer em App Setting reinicia as Functions e exige
+ * acesso ao Azure — nao serve como freio de mao.
+ *
+ * AUSENCIA SIGNIFICA LIGADO. Config gravada antes desta funcionalidade nao tem a
+ * chave, e o padrao seguro aqui e continuar funcionando, nao parar em silencio.
+ * Falha de leitura tambem devolve ligado, pelo mesmo motivo — mas informa o erro,
+ * para nao esconder que a consulta nao foi conclusiva.
+ */
+async function lerConfigSefaz(client, siteId) {
+  try {
+    const listId = await resolveListId(client, siteId, 'PRONEP-NF-Config');
+    if (!listId) return { habilitado: true, origem: 'padrao' };
+    const r = await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
+      .expand('fields').top(20).get();
+    const item = ((r && r.value) || []).find(function (x) {
+      return x.fields && x.fields.Title === 'global';
+    });
+    if (!item || !item.fields || !item.fields.ConfigJson) {
+      return { habilitado: true, origem: 'padrao' };
+    }
+    const cfg = JSON.parse(item.fields.ConfigJson);
+    if (!cfg.sefaz || typeof cfg.sefaz.habilitado !== 'boolean') {
+      return { habilitado: true, origem: 'padrao' };
+    }
+    return {
+      habilitado: cfg.sefaz.habilitado,
+      motivo: cfg.sefaz.motivoDesligamento || '',
+      desligadoPor: cfg.sefaz.desligadoPor || '',
+      desligadoEm: cfg.sefaz.desligadoEm || '',
+      origem: 'config'
+    };
+  } catch (e) {
+    return { habilitado: true, origem: 'erro', erroLeitura: e.message };
+  }
+}
+
+/**
+ * Monta o material TLS do CNPJ.
+ *
+ * O ARQUIVO vem do Blob Storage privado; a SENHA continua em App Setting.
+ * Essa separacao nao e capricho: o .pfx de ~9 KB nao cabe nas App Settings (teto
+ * de 10 KB para o total), e a senha e pequena e nao tem por que sair de la.
+ *
+ * Fallback para App Setting: se SEFAZ_CERT_<cnpj>_PFX existir, ela vence. Serve
+ * para um certificado de teste pequeno, e evita que este modulo dependa do Blob
+ * Storage para sempre.
+ */
+async function lerCertificado(cnpj) {
   const doc = soDigitos(cnpj);
-  const { b64 } = lerBase64Certificado(doc);
   const senha = process.env['SEFAZ_CERT_' + doc + '_SENHA'];
-  if (!b64) throw new Error('Certificado nao configurado para o CNPJ ' + doc +
-                            ' (App Setting SEFAZ_CERT_' + doc + '_PFX, ou _PFX1/_PFX2/...)');
-  return { pfx: Buffer.from(b64, 'base64'), passphrase: senha || '' };
+
+  /* O fallback de App Setting so vence o blob se REALMENTE for um PKCS#12
+     (SEQUENCE ASN.1: 0x30 0x82). Sem essa checagem, um valor residual — foi
+     exatamente o que aconteceu na primeira configuracao, com a contagem de
+     caracteres gravada no lugar do arquivo — se sobrepoe ao certificado bom e
+     derruba a integracao com um erro que nao aponta para a causa. */
+  const { b64 } = lerBase64Certificado(doc);
+  if (b64) {
+    const buf = Buffer.from(b64, 'base64');
+    if (buf.length > 2 && buf[0] === 0x30 && buf[1] === 0x82) {
+      return { pfx: buf, passphrase: senha || '', origem: 'appsetting' };
+    }
+    /* Nao explode: cai para o blob, que e a fonte principal. */
+  }
+
+  const { lerPfx } = require('./blobCert');
+  let pfx;
+  try {
+    pfx = await lerPfx(doc);
+  } catch (e) {
+    throw new Error('Certificado do CNPJ ' + doc + ' indisponivel: ' + e.message);
+  }
+  return { pfx: pfx, passphrase: senha || '', origem: 'blob' };
 }
 
 module.exports = {
@@ -384,5 +453,5 @@ module.exports = {
   resolveListId, soDigitos, chaveValida, chaveFraca,
   buscarPorChave, gravarDocumento, vincularNota, casarNotaComDocumento,
   lerPonteiro, garantirPonteiro, gravarPonteiro,
-  lerCnpjsConfigurados, lerCertificado, lerBase64Certificado
+  lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, lerConfigSefaz
 };

@@ -2560,8 +2560,14 @@ function renderConfiguracoesView() {
   // Guarda: Configurações do Sistema é só Admin; Aprovadores é Admin ou TI.
   if (sub === 'sistema' && !_configEhAdmin()) sub = null;
   if (sub === 'aprovadores' && !_configPodeAprovadores()) sub = null;
+  if (sub === 'integracoes' && !_configEhAdmin()) sub = null;
   if (sub === 'sistema') return _voltarConfigHtml() + renderConfigSistema();
   if (sub === 'aprovadores') return _voltarConfigHtml() + renderConfigAprovadores();
+  if (sub === 'integracoes') {
+    setTimeout(carregarConfigIntegracoes, 30);
+    return _voltarConfigHtml() + '<div id="cfg-integracoes"><div class="card" style="text-align:center;padding:34px">'
+      + '<div class="small muted">Consultando o estado da integração…</div></div></div>';
+  }
   return renderConfigLanding();
 }
 
@@ -2588,6 +2594,11 @@ function renderConfigLanding() {
       <div class="card" onclick="showView('controle-acessos')" style="cursor:pointer;flex:1;min-width:280px;transition:box-shadow .15s,transform .15s" onmouseover="this.style.boxShadow='0 6px 18px rgba(31,78,121,0.18)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">
         <h3 style="margin-top:0">🔐 Controle de Acessos</h3>
         <p class="small muted" style="line-height:1.55">Defina quem enxerga cada tela do sistema e cada pasta de contratos — liberando por grupo inteiro ou por pessoa específica.</p>
+      </div>` : ''}
+      ${_configEhAdmin() ? `
+      <div class="card" onclick="abrirConfigSub('integracoes')" style="cursor:pointer;flex:1;min-width:280px;transition:box-shadow .15s,transform .15s" onmouseover="this.style.boxShadow='0 6px 18px rgba(31,78,121,0.18)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">
+        <h3 style="margin-top:0">🔌 Integrações</h3>
+        <p class="small muted" style="line-height:1.55">Liga e desliga a busca automática de NF-e na SEFAZ, e mostra o estado de cada CNPJ. Use para frear a entrada de notas quando o volume virar gargalo.</p>
       </div>` : ''}
     </div>
   `;
@@ -4080,6 +4091,153 @@ const views = {
   }
 };
 
+// ===== Configurações › Integrações — freio de mão da busca na SEFAZ =====
+// O estado mora na config global (SharePoint), nao em App Setting: precisa ser
+// desligavel pela tela, em segundos, quando o volume de NF-e virar gargalo.
+// Mexer em App Setting reinicia as Functions e exige acesso ao Azure.
+
+async function carregarConfigIntegracoes() {
+  var alvo = document.getElementById('cfg-integracoes');
+  if (!alvo) return;
+  try {
+    var r = await fetch('/api/ListarDocumentosFiscais', { credentials: 'include' });
+    var d = await r.json();
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    if (!window._sistemConfig) await carregarConfigSistema();
+    alvo.innerHTML = renderConfigIntegracoes(d);
+  } catch (e) {
+    alvo.innerHTML = '<div class="card"><div class="alert alert-error"><span class="ico">x</span><div>'
+      + '<b>Não foi possível ler o estado da integração.</b><br>' + _npEsc(e.message) + '</div></div></div>';
+  }
+}
+
+function renderConfigIntegracoes(d) {
+  var integ = d.integracao || { habilitado: true };
+  var ligada = integ.habilitado !== false;
+  var t = d.totais || {};
+
+  var h = '<h2 style="margin-top:0">Integrações</h2>'
+    + '<div class="view-sub">Controle das automações que trazem dados de fora para dentro do sistema.</div>';
+
+  h += '<div class="card" style="border-left:4px solid ' + (ligada ? '#2E7D32' : '#C62828') + '">'
+    + '<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:space-between">'
+    + '<div style="flex:1;min-width:260px">'
+    + '<h3 style="margin:0 0 2px">Busca automática de NF-e na SEFAZ</h3>'
+    + '<div class="small muted" style="line-height:1.55">Baixa as notas emitidas contra os CNPJs da Pronep e alimenta o quadro '
+    + '<b>NFs a Pagar</b>. Roda de 2 em 2 horas, em dias úteis.</div>'
+    + '<div style="margin-top:9px;display:inline-flex;align-items:center;gap:7px;padding:5px 11px;border-radius:20px;'
+    + 'background:' + (ligada ? '#E8F5E9' : '#FFEBEE') + '">'
+    + '<span style="width:8px;height:8px;border-radius:50%;background:' + (ligada ? '#2E7D32' : '#C62828') + '"></span>'
+    + '<b style="font-size:12.5px;color:' + (ligada ? '#1B5E20' : '#B71C1C') + '">'
+    + (ligada ? 'LIGADA' : 'DESLIGADA') + '</b></div>';
+
+  if (!ligada && integ.motivo) {
+    h += '<div class="small muted" style="margin-top:7px">Motivo registrado: <i>' + _npEsc(integ.motivo) + '</i>'
+      + (integ.desligadoPor ? '<br>Por ' + _npEsc(integ.desligadoPor) : '')
+      + (integ.desligadoEm ? ' em ' + _npData(integ.desligadoEm) : '') + '</div>';
+  }
+  h += '</div>'
+    + '<button class="btn ' + (ligada ? 'btn-secondary' : 'btn-primary') + '" style="min-width:150px"'
+    + ' onclick="alternarIntegracaoSefaz(' + (ligada ? 'false' : 'true') + ')">'
+    + (ligada ? 'Desligar integração' : 'Ligar integração') + '</button>'
+    + '</div>';
+
+  /* O que desligar faz e o que NAO faz. Sem isso o botao vira aposta: e facil
+     imaginar que desligar apaga o que ja entrou, ou que perde as notas do periodo. */
+  h += '<div style="margin-top:14px;padding:11px 13px;background:#F7F9FB;border-radius:6px">'
+    + '<div class="small" style="font-weight:600;margin-bottom:5px">O que acontece ao desligar</div>'
+    + '<ul class="small muted" style="margin:0;padding-left:17px;line-height:1.65">'
+    + '<li>O cron para de consultar a SEFAZ a partir da próxima execução.</li>'
+    + '<li>O quadro <b>NFs a Pagar</b> continua no ar com tudo que já entrou — nada é apagado.</li>'
+    + '<li>O lançamento manual de notas segue funcionando normalmente.</li>'
+    + '<li><b>Nenhuma nota é perdida.</b> O ponteiro de leitura fica parado onde está, e ao religar '
+    + 'a busca continua exatamente do mesmo ponto. A SEFAZ guarda os documentos por 90 dias — '
+    + 'desligar por mais que isso, aí sim, perde o que passou da janela.</li>'
+    + '</ul></div>';
+  h += '</div>';
+
+  /* Estado por CNPJ: um certificado vencido derruba uma filial e nao as outras,
+     e sem isso a falha so apareceria como "sumiram as notas de SP". */
+  var sefaz = d.sefaz || [];
+  h += '<div class="card"><h3 style="margin-top:0">Situação por CNPJ</h3>';
+  if (!sefaz.length) {
+    h += '<div class="small muted">Nenhum CNPJ configurado ainda.</div>';
+  } else {
+    h += '<div style="display:flex;flex-wrap:wrap;gap:10px">';
+    for (var i = 0; i < sefaz.length; i++) {
+      var s = sefaz[i];
+      var cor = s.saudavel ? '#2E7D32' : '#C62828';
+      h += '<div style="border:1px solid var(--cinza-borda);border-left:3px solid ' + cor
+        + ';border-radius:6px;padding:10px 12px;min-width:210px">'
+        + '<div style="font-weight:600;font-size:13px">' + _npEsc(s.apelido || s.cnpj) + '</div>'
+        + '<div class="small muted mono" style="font-size:10px">' + _npCnpj(s.cnpj) + '</div>'
+        + '<div class="small muted" style="margin-top:4px">Última consulta: '
+        + (s.ultimaConsulta ? _npData(s.ultimaConsulta) : 'nunca') + '</div>'
+        + '<div class="small muted" style="font-size:10.5px">NSU ' + s.ultimoNSU
+        + (s.maxNSU ? ' de ' + s.maxNSU : '') + ' · ' + s.baixados + ' baixados</div>'
+        + (s.saudavel ? '' : '<div class="small" style="color:#C62828;font-size:10.5px;margin-top:4px">'
+            + _npEsc(s.cStat + ' ' + (s.motivo || '')) + '</div>')
+        + '</div>';
+    }
+    h += '</div>';
+  }
+  h += '</div>';
+
+  if (t.semCadastro || t.cadastroIncompleto) {
+    h += '<div class="card"><div class="alert alert-warn"><span class="ico">!</span><div>'
+      + '<b>' + ((t.semCadastro || 0) + (t.cadastroIncompleto || 0)) + ' nota(s) sem roteamento definido.</b><br>'
+      + (t.semCadastro ? t.semCadastro + ' de fornecedor não cadastrado' : '')
+      + (t.semCadastro && t.cadastroIncompleto ? ' e ' : '')
+      + (t.cadastroIncompleto ? t.cadastroIncompleto + ' com cadastro incompleto' : '')
+      + '. Sem unidade e diretoria não há aprovador — elas ficam paradas na primeira coluna do quadro.'
+      + '<br><a onclick="showView(\'nfs-a-pagar\')" style="cursor:pointer;color:var(--azul-claro);font-weight:600">Ver em NFs a Pagar →</a>'
+      + '</div></div></div>';
+  }
+  return h;
+}
+
+async function alternarIntegracaoSefaz(ligar) {
+  var motivo = '';
+  if (!ligar) {
+    motivo = prompt('Por que está desligando? (fica registrado para quem for religar depois)') || '';
+    if (motivo === null) return;
+  }
+  if (!window._sistemConfig) await carregarConfigSistema();
+  /* A config e um blob unico: precisa reenviar tudo, senao o ConfigUpdate grava
+     um objeto sem multiNivel e a validacao recusa. */
+  var cfg = window._sistemConfig ? JSON.parse(JSON.stringify(window._sistemConfig)) : null;
+  if (!cfg || !cfg.multiNivel) {
+    toast('Não consegui ler a configuração atual. Recarregue a página e tente de novo.', 'error');
+    return;
+  }
+  cfg.sefaz = {
+    habilitado: !!ligar,
+    motivoDesligamento: ligar ? '' : motivo,
+    desligadoPor: ligar ? '' : ((currentPersona && currentPersona.email) || ''),
+    desligadoEm: ligar ? '' : new Date().toISOString()
+  };
+
+  mostrarSalvandoOverlay(ligar ? 'Ligando a integração...' : 'Desligando a integração...');
+  try {
+    var r = await fetch('/api/ConfigUpdate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ config: cfg })
+    });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) { toast('Erro ao salvar: ' + (data.error || 'HTTP ' + r.status), 'error'); return; }
+    window._sistemConfig = cfg;
+    toast(ligar ? 'Integração LIGADA. A próxima execução do cron já busca notas.'
+                : 'Integração DESLIGADA. Nada será consultado até religar.', 'success');
+    carregarConfigIntegracoes();
+  } catch (e) {
+    toast('Falha de comunicação: ' + (e && e.message), 'error');
+  } finally {
+    esconderSalvandoOverlay();
+  }
+}
+
 // ===== NFs a Pagar — quadro alimentado pela SEFAZ =====
 // A coluna de cada card NAO e um campo gravado: vem do status da nota vinculada
 // (ver /api/ListarDocumentosFiscais). Por isso o quadro nunca discorda da fila de
@@ -4117,6 +4275,12 @@ async function carregarNFsAPagar() {
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
     _nfsAPagarCache = data;
     area.innerHTML = renderNFsAPagar(data);
+    /* Preserva a busca ao dar Atualizar: quem estava filtrando um fornecedor nao
+       quer voltar para a lista inteira so porque recarregou. */
+    if ((window._nfsAPagarBusca || '').trim()) {
+      var b = document.getElementById('np-busca');
+      if (b) { b.value = window._nfsAPagarBusca; filtrarNFsAPagar(); }
+    }
   } catch (e) {
     area.innerHTML = '<div class="card"><div class="alert alert-error"><span class="ico">x</span><div>'
       + '<b>Nao foi possivel carregar o quadro.</b><br>' + _npEsc(e.message) + '</div></div></div>';
@@ -4134,44 +4298,163 @@ function renderNFsAPagar(data) {
       + '</div></div></div>';
   }
 
-  var cols = [
-    { k: 'novas',     titulo: 'Novas na SEFAZ', cor: '#1565C0', ajuda: 'Emitidas contra nossos CNPJs e ainda nao lancadas.' },
-    { k: 'lancadas',  titulo: 'Lançadas',       cor: '#EF6C00', ajuda: 'Ja viraram NF e estao aguardando aprovacao.' },
-    { k: 'aprovadas', titulo: 'Aprovadas',      cor: '#2E7D32', ajuda: 'Aprovadas, aguardando pagamento.' },
-    { k: 'quitadas',  titulo: 'Quitadas',       cor: '#5E6C77', ajuda: 'Processadas no financeiro.' }
-  ];
-
   var html = '<div class="card" style="margin-bottom:14px">'
     + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">'
     + '<div><h2 style="margin:0">NFs a Pagar</h2>'
     + '<div class="small muted">O que a SEFAZ diz que temos a pagar, cruzado com o que ja entrou no sistema.</div></div>'
     + '<button class="btn btn-secondary" onclick="carregarNFsAPagar()">Atualizar</button>'
     + '</div>'
+    + renderAvisoDesligada(data.integracao)
+    + renderAvisoCadastro(data.totais || {})
     + renderPainelSefaz(data.sefaz || [])
+    + '<div style="margin-top:12px;position:relative;max-width:460px">'
+    + '<input id="np-busca" type="text" autocomplete="off"'
+    + ' placeholder="Buscar por fornecedor, CNPJ ou número da NF..."'
+    + ' oninput="filtrarNFsAPagar()"'
+    + ' style="width:100%;padding:8px 30px 8px 12px;border:1.5px solid var(--cinza-borda);'
+    + 'border-radius:6px;font-size:13px;background:#fff">'
+    + '<span id="np-busca-limpar" onclick="limparBuscaNFsAPagar()"'
+    + ' style="display:none;position:absolute;right:9px;top:50%;transform:translateY(-50%);'
+    + 'cursor:pointer;color:var(--cinza-medio);font-size:15px;line-height:1">×</span>'
+    + '<div id="np-busca-resumo" class="small muted" style="margin-top:5px;min-height:15px"></div>'
+    + '</div>'
     + '</div>';
+
+  html += '<div id="np-colunas">' + renderColunasNFPagar(data) + '</div>';
+  return html;
+}
+
+// Colunas separadas do cabecalho porque o filtro redesenha SO isto. Redesenhar a
+// tela inteira faria o campo de busca perder o foco a cada tecla.
+function renderColunasNFPagar(data) {
+  var cols = [
+    { k: 'novas',     titulo: 'Novas na SEFAZ', cor: '#1565C0', ajuda: 'Emitidas contra nossos CNPJs e ainda nao lancadas.' },
+    { k: 'lancadas',  titulo: 'Lançadas',       cor: '#EF6C00', ajuda: 'Ja viraram NF e estao aguardando aprovacao.' },
+    { k: 'aprovadas', titulo: 'Aprovadas',      cor: '#2E7D32', ajuda: 'Aprovadas, aguardando pagamento.' },
+    { k: 'quitadas',  titulo: 'Quitadas',       cor: '#5E6C77', ajuda: 'Processadas no financeiro.' }
+  ];
+  var termo = (window._nfsAPagarBusca || '').trim();
 
   /* 200px de piso: com 4 colunas abaixo disso o card fica ilegivel e a linha
      estoura na horizontal em telas de 13". */
-  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;align-items:start">';
+  var html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;align-items:start">';
   for (var i = 0; i < cols.length; i++) {
     var c = cols[i];
-    var itens = (data.colunas && data.colunas[c.k]) || [];
+    var todos = (data.colunas && data.colunas[c.k]) || [];
+    var itens = termo ? todos.filter(function (x) { return _npCasaBusca(x, termo); }) : todos;
     var soma = itens.reduce(function (s, x) { return s + (Number(x.valor) || 0); }, 0);
     html += '<div class="card" style="padding:12px;border-top:3px solid ' + c.cor + '">'
       + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">'
       + '<b style="color:' + c.cor + '">' + c.titulo + '</b>'
-      + '<span class="tag" style="background:#EEF2F5;color:#42525E">' + itens.length + '</span>'
+      + '<span class="tag" style="background:#EEF2F5;color:#42525E">' + itens.length
+      /* Com filtro, mostra "3 de 41": some o total e a coluna parece ter esvaziado. */
+      + (termo && todos.length !== itens.length ? ' de ' + todos.length : '') + '</span>'
       + '</div>'
       + '<div class="small muted" style="margin:2px 0 8px">' + _npFmtBRL(soma) + '</div>';
     if (!itens.length) {
-      html += '<div class="small muted" style="padding:14px 4px;text-align:center">' + c.ajuda + '</div>';
+      html += '<div class="small muted" style="padding:14px 4px;text-align:center">'
+        + (termo ? 'Nada nesta coluna para “' + _npEsc(termo) + '”.' : c.ajuda) + '</div>';
     } else {
       for (var j = 0; j < itens.length; j++) html += renderCardNFPagar(itens[j], c.k);
     }
     html += '</div>';
   }
-  html += '</div>';
-  return html;
+  return html + '</div>';
+}
+
+// Casa fornecedor (razao), CNPJ ou numero da NF.
+// O CNPJ e comparado SO POR DIGITOS: o usuario digita "12.345" e o dado guardado
+// nao tem pontuacao — sem normalizar, buscar CNPJ formatado nunca acharia nada.
+// O numero da NF casa por prefixo, nao por "contem": procurar "45" traria 1450,
+// 2456 e 3345, e o numero da nota e uma busca exata na cabeca de quem digita.
+function _npCasaBusca(d, termo) {
+  var t = termo.toLowerCase();
+  var nome = String(d.emitenteNome || '').toLowerCase();
+  if (nome.indexOf(t) >= 0) return true;
+
+  var digitos = termo.replace(/\D/g, '');
+  if (digitos) {
+    /* Numero da NF casa por PREFIXO: digitar "25" vai estreitando ate "2545".
+       Nao usa "contem" porque procurar "45" traria 1450, 2456 e 3345 — e numero
+       de nota, na cabeca de quem digita, e busca exata. */
+    var num = String(d.numeroNF || '').replace(/^0+/, '');
+    var alvo = digitos.replace(/^0+/, '');
+    if (num && alvo && num.indexOf(alvo) === 0) return true;
+
+    /* CNPJ so a partir de 4 digitos. Com 2 ou 3, qualquer sequencia aparece no
+       meio de quase todo CNPJ e o filtro devolve a lista inteira — foi o que
+       aconteceu no teste: "45" trazia a nota 2545 por causa do CNPJ, nao do
+       numero. Ninguem busca CNPJ com tres digitos. */
+    var cnpj = String(d.emitenteCNPJ || '').replace(/\D/g, '');
+    if (cnpj && digitos.length >= 4 && cnpj.indexOf(digitos) >= 0) return true;
+
+    /* Chave de acesso: 44 digitos. Colar a chave inteira tem de achar a nota. */
+    var chave = String(d.chaveAcesso || '').replace(/\D/g, '');
+    if (chave && digitos.length >= 8 && chave.indexOf(digitos) >= 0) return true;
+  }
+  return false;
+}
+
+function filtrarNFsAPagar() {
+  var input = document.getElementById('np-busca');
+  if (!input || !_nfsAPagarCache) return;
+  window._nfsAPagarBusca = input.value || '';
+  var termo = window._nfsAPagarBusca.trim();
+
+  var alvo = document.getElementById('np-colunas');
+  if (alvo) alvo.innerHTML = renderColunasNFPagar(_nfsAPagarCache);
+
+  var limpar = document.getElementById('np-busca-limpar');
+  if (limpar) limpar.style.display = termo ? 'block' : 'none';
+
+  var resumo = document.getElementById('np-busca-resumo');
+  if (resumo) {
+    if (!termo) { resumo.textContent = ''; return; }
+    var achou = 0, total = 0;
+    var cols = _nfsAPagarCache.colunas || {};
+    for (var k in cols) {
+      total += cols[k].length;
+      achou += cols[k].filter(function (x) { return _npCasaBusca(x, termo); }).length;
+    }
+    resumo.textContent = achou
+      ? achou + ' de ' + total + ' nota(s) encontrada(s).'
+      : 'Nenhuma nota encontrada para “' + termo + '”.';
+  }
+}
+
+function limparBuscaNFsAPagar() {
+  var input = document.getElementById('np-busca');
+  if (input) { input.value = ''; input.focus(); }
+  filtrarNFsAPagar();
+}
+
+// Integracao desligada e um estado NORMAL, escolhido por alguem. Mostrar como
+// aviso e nao como erro — mas mostrar sempre, senao o quadro parece congelado
+// sem explicacao e alguem vai reportar como bug.
+function renderAvisoDesligada(integ) {
+  if (!integ || integ.habilitado !== false) return '';
+  return '<div class="alert alert-warn" style="margin-top:12px"><span class="ico">!</span><div>'
+    + '<b>A busca automática está DESLIGADA.</b> O quadro mostra o que já entrou, mas não '
+    + 'recebe notas novas da SEFAZ.'
+    + (integ.motivo ? '<br>Motivo: <i>' + _npEsc(integ.motivo) + '</i>' : '')
+    + (integ.desligadoPor ? ' — ' + _npEsc(integ.desligadoPor) : '')
+    + (_configEhAdmin()
+        ? '<br><a onclick="window._configSubForce=\'integracoes\';showView(\'configuracoes\')" '
+          + 'style="cursor:pointer;color:var(--azul-claro);font-weight:600">Religar em Configurações › Integrações →</a>'
+        : '<br>Fale com um administrador para religar.')
+    + '</div></div>';
+}
+
+// Cadastro faltando nao e detalhe: sem diretoria a NF nao tem aprovador e trava
+// na primeira coluna. Some no topo para virar tarefa, nao surpresa.
+function renderAvisoCadastro(t) {
+  var n = (t.semCadastro || 0) + (t.cadastroIncompleto || 0);
+  if (!n) return '';
+  return '<div class="alert alert-warn" style="margin-top:12px"><span class="ico">!</span><div>'
+    + '<b>' + n + ' nota(s) esperando cadastro de fornecedor.</b> '
+    + 'Sem unidade e diretoria não há aprovador, então elas não podem ser lançadas. '
+    + 'Estão marcadas em laranja na coluna <b>Novas na SEFAZ</b>.'
+    + '</div></div>';
 }
 
 function renderPainelSefaz(sefaz) {
@@ -4200,14 +4483,62 @@ function renderPainelSefaz(sefaz) {
   return html + '</div>';
 }
 
+// Unidade e diretoria em DUAS LINHAS, nao lado a lado: sao perguntas diferentes
+// ("onde" e "quem aprova") e juntas viravam uma etiqueta so, que o olho le como
+// um dado unico. A unidade vem primeiro por ser a que o financeiro filtra.
+function _npRoteamento(d) {
+  if (!d.fornecedorCadastrado) {
+    return '<div style="margin-top:6px;padding:6px 7px;border-radius:5px;background:#FFF4E5;'
+      + 'border-left:3px solid #EF6C00">'
+      + '<div class="small" style="font-size:10.5px;color:#8A4B00;font-weight:600">Fornecedor sem cadastro</div>'
+      + '<div class="small" style="font-size:9.5px;color:#8A4B00;line-height:1.35">'
+      + 'Sem cadastro nao da para saber a unidade nem a diretoria — e sem diretoria '
+      + 'nao ha aprovador.</div>'
+      + '<button class="btn btn-secondary" style="width:100%;margin-top:5px;padding:4px;font-size:10.5px"'
+      + ' onclick="cadastrarFornecedorDaSefaz(\'' + _npEsc(d.id) + '\')">Cadastrar fornecedor</button>'
+      + '</div>';
+  }
+  if (d.cadastroIncompleto) {
+    return '<div style="margin-top:6px;padding:6px 7px;border-radius:5px;background:#FFF8E1;'
+      + 'border-left:3px solid #C79100">'
+      + '<div class="small" style="font-size:10.5px;color:#7A5C00;font-weight:600">Cadastro incompleto</div>'
+      + '<div class="small" style="font-size:9.5px;color:#7A5C00">Falta '
+      + (!d.unidade && !d.diretoria ? 'unidade e diretoria' : (!d.unidade ? 'a unidade' : 'a diretoria'))
+      + ' no cadastro do fornecedor.</div>'
+      + '<button class="btn btn-secondary" style="width:100%;margin-top:5px;padding:4px;font-size:10.5px"'
+      + ' onclick="cadastrarFornecedorDaSefaz(\'' + _npEsc(d.id) + '\')">Completar cadastro</button>'
+      + '</div>';
+  }
+  return '<div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">'
+    + '<div style="display:flex;align-items:center;gap:5px">'
+    + '<span class="small muted" style="font-size:9px;text-transform:uppercase;letter-spacing:.04em;'
+    + 'min-width:52px;flex-shrink:0">Unidade</span>'
+    + '<span class="tag" style="background:#E3F0FB;color:#1565C0;font-size:10px;font-weight:600">'
+    + _npEsc(d.unidade) + '</span></div>'
+    + '<div style="display:flex;align-items:center;gap:5px">'
+    + '<span class="small muted" style="font-size:9px;text-transform:uppercase;letter-spacing:.04em;'
+    + 'min-width:52px;flex-shrink:0">Diretoria</span>'
+    + '<span class="tag" style="background:#EDE7F6;color:#4527A0;font-size:10px;font-weight:600">'
+    + _npEsc(d.diretoria) + '</span></div>'
+    + (d.divergeDoCadastro
+        ? '<div class="small" style="font-size:9px;color:#8A4B00;margin-top:1px">'
+          + '⚠ diretoria diferente da do cadastro do fornecedor</div>' : '')
+    + '</div>';
+}
+
 function renderCardNFPagar(d, coluna) {
   var hoje = new Date().toISOString().substring(0, 10);
   var venc = d.dataVencimento ? String(d.dataVencimento).substring(0, 10) : '';
   /* So alerta em coluna que ainda exige acao. Quitada vencida nao e problema. */
   var atrasada = venc && venc < hoje && (coluna === 'novas' || coluna === 'lancadas');
   var cinza = (coluna === 'quitadas');
+  /* Barra lateral laranja: da para varrer a coluna e achar o que precisa de
+     cadastro sem ler card por card. */
+  var pendencia = (coluna === 'novas') && (!d.fornecedorCadastrado || d.cadastroIncompleto);
 
-  var h = '<div style="border:1px solid var(--cinza-borda);border-radius:6px;padding:9px;margin-bottom:8px;'
+  var h = '<div style="border:1px solid ' + (pendencia ? '#EF6C00' : 'var(--cinza-borda)')
+    + ';border-left-width:' + (pendencia ? '3px' : '1px')
+    + ';border-radius:6px;padding:9px;margin-bottom:8px;'
     + 'background:' + (cinza ? '#F7F8F9' : '#fff') + (cinza ? ';opacity:.75' : '') + '">'
     + '<div style="font-weight:600;font-size:12.5px;line-height:1.3">' + _npEsc(d.emitenteNome || 'Emitente nao identificado') + '</div>'
     + '<div class="small muted mono" style="font-size:10px">' + _npCnpj(d.emitenteCNPJ) + '</div>'
@@ -4217,16 +4548,38 @@ function renderCardNFPagar(d, coluna) {
     + (d.serie ? '/' + _npEsc(d.serie) : '') + '</span>'
     + '</div>'
     + '<div class="small" style="font-size:10.5px;margin-top:3px;color:' + (atrasada ? '#C62828' : 'var(--cinza-medio)') + '">'
-    + 'Vence ' + _npData(d.dataVencimento) + (atrasada ? ' · vencida' : '') + '</div>';
+    + 'Vence ' + _npData(d.dataVencimento) + (atrasada ? ' · vencida' : '') + '</div>'
+    + _npRoteamento(d);
 
   if (coluna === 'novas') {
-    h += '<button class="btn btn-primary" style="width:100%;margin-top:7px;padding:5px;font-size:11.5px"'
-      + ' onclick="lancarDaSefaz(\'' + _npEsc(d.id) + '\')">Lançar</button>';
+    /* Sem diretoria nao ha aprovador, entao lancar so levaria a um erro no fim do
+       formulario. Melhor bloquear aqui, dizendo o porque. */
+    var podeLancar = d.fornecedorCadastrado && !d.cadastroIncompleto;
+    h += '<button class="btn btn-primary" style="width:100%;margin-top:7px;padding:5px;font-size:11.5px'
+      + (podeLancar ? '' : ';opacity:.45;cursor:not-allowed') + '"'
+      + (podeLancar ? ' onclick="lancarDaSefaz(\'' + _npEsc(d.id) + '\')"' : ' disabled')
+      + '>Lançar</button>';
   } else if (d.vinculadoAuto) {
     /* Sinaliza o merge: o card e a nota eram a mesma coisa e o sistema juntou. */
     h += '<div class="small muted" style="font-size:10px;margin-top:5px">↔ unificada com a NF lançada</div>';
   }
   return h + '</div>';
+}
+
+// Leva para o cadastro de fornecedores com o CNPJ e a razao social ja em mao —
+// o cadastro e o que destrava o roteamento deste card e de todos os outros do
+// mesmo emitente.
+function cadastrarFornecedorDaSefaz(docId) {
+  var d = null;
+  var novas = (_nfsAPagarCache && _nfsAPagarCache.colunas && _nfsAPagarCache.colunas.novas) || [];
+  for (var i = 0; i < novas.length; i++) if (String(novas[i].id) === String(docId)) d = novas[i];
+  if (!d) return;
+  window._prefillFornecedor = {
+    documento: String(d.emitenteCNPJ || '').replace(/\D/g, ''),
+    razao: d.emitenteNome || '',
+    voltarPara: 'nfs-a-pagar'
+  };
+  showView('fornecedores');
 }
 
 // Abre o lancamento ja preenchido com o que veio da SEFAZ. O PDF continua sendo

@@ -50,6 +50,17 @@ function validarConfig(c) {
       }
     }
   }
+  /* Chave de desligamento da busca automatica na SEFAZ. OPCIONAL: config salva
+     antes desta funcionalidade nao tem a chave, e ausencia significa LIGADO —
+     assim uma config antiga nao desliga a integracao por acidente. */
+  if (c.sefaz !== undefined) {
+    if (typeof c.sefaz !== 'object' || c.sefaz === null) return 'config.sefaz deve ser um objeto';
+    if (typeof c.sefaz.habilitado !== 'boolean') return 'sefaz.habilitado deve ser boolean';
+    if (c.sefaz.motivoDesligamento !== undefined &&
+        typeof c.sefaz.motivoDesligamento !== 'string') {
+      return 'sefaz.motivoDesligamento deve ser texto';
+    }
+  }
   return null;
 }
 

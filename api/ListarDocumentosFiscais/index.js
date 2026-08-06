@@ -20,7 +20,7 @@
 require('isomorphic-fetch');
 const { getGraphClient } = require('../shared/graph');
 const {
-  LIST_DOCFIS, LIST_SEFAZ, LIST_NOTAS, resolveListId, soDigitos
+  LIST_DOCFIS, LIST_SEFAZ, LIST_NOTAS, resolveListId, soDigitos, lerConfigSefaz
 } = require('../shared/documentosFiscais');
 
 async function todosItens(client, siteId, listId, maxPaginas) {
@@ -78,6 +78,33 @@ module.exports = async function (context, req) {
     const notas = idNotas ? await todosItens(client, siteId, idNotas) : [];
     const ponteiros = idSefaz ? await todosItens(client, siteId, idSefaz, 2) : [];
 
+    /* Unidade e diretoria vem do CADASTRO DE FORNECEDOR, pelo CNPJ do emitente.
+       A SEFAZ nao tem essa informacao — ela e nossa, e e o que decide quem aprova.
+       Documento cujo emitente nao esta cadastrado fica marcado (semCadastro) em vez
+       de receber um palpite: atribuir diretoria errada mandaria a NF para o
+       aprovador errado, que e pior do que admitir que falta cadastro. */
+    const idForn = await resolveListId(client, siteId, 'PRONEP-NF-Fornecedores');
+    const fornecedorPorCnpj = {};
+    if (idForn) {
+      for (const it of await todosItens(client, siteId, idForn)) {
+        const f = it.fields || {};
+        /* O SharePoint renomeou as colunas importadas do XLSX: field_2=documento,
+           field_4=unidade, field_5=diretoria, field_7=ativo (mesmo mapa de
+           ListarFornecedores — se um mudar, os dois mudam). */
+        const doc = soDigitos(f.field_2);
+        if (doc.length !== 14) continue;
+        if (fornecedorPorCnpj[doc]) continue;   /* primeiro vence; duplicata e problema do cadastro */
+        fornecedorPorCnpj[doc] = {
+          razao: f.Title || '',
+          fantasia: f.field_3 || '',
+          unidade: f.field_4 || '',
+          diretoria: f.field_5 || '',
+          ativo: String(f.field_7 || '').toLowerCase() === 'sim'
+        };
+      }
+    }
+    diag.fornecedoresIndexados = Object.keys(fornecedorPorCnpj).length;
+
     /* Indexa notas por id e por chave de acesso. A chave permite reconhecer uma
        nota lancada ANTES de a coluna ChaveAcesso existir no documento. */
     const notaPorId = {};
@@ -118,6 +145,22 @@ module.exports = async function (context, req) {
         vinculadoAuto: String(f.VinculadoAuto || '') === 'Sim'
       };
 
+      const forn = fornecedorPorCnpj[soDigitos(f.EmitenteCNPJ)] || null;
+      if (forn) {
+        card.unidade = forn.unidade || '';
+        card.diretoria = forn.diretoria || '';
+        card.fornecedorCadastrado = true;
+        card.fornecedorAtivo = forn.ativo;
+        /* Cadastro existe mas esta incompleto: nao da para rotear a NF assim, e o
+           sintoma e diferente de "fornecedor desconhecido" — a acao tambem e. */
+        card.cadastroIncompleto = !forn.unidade || !forn.diretoria;
+        if (forn.razao && !card.emitenteNome) card.emitenteNome = forn.razao;
+      } else {
+        card.fornecedorCadastrado = false;
+        card.unidade = '';
+        card.diretoria = '';
+      }
+
       if (!nota) { colunas.novas.push(card); continue; }
 
       const nf = nota.fields || {};
@@ -127,8 +170,16 @@ module.exports = async function (context, req) {
       card.notaItemId = String(nota.id);
       card.statusNota = nf.Status || '';
       card.aprovador = nf.AprovadorEmail || nf.Aprovador || '';
-      card.unidade = nf.Unidade || '';
-      card.diretoria = nf.Diretoria || '';
+      /* Depois de lancada, a NOTA manda: alguem pode ter corrigido a unidade ou a
+         diretoria no lancamento, e essa correcao e mais recente que o cadastro.
+         Mas so sobrescreve o que a nota realmente tem — nota sem o campo nao apaga
+         o que veio do fornecedor. */
+      if (nf.Unidade) card.unidade = nf.Unidade;
+      if (nf.Diretoria) card.diretoria = nf.Diretoria;
+      /* Divergencia entre o cadastro e o que foi lancado: nao e erro, mas e o tipo
+         de coisa que explica NF na fila do aprovador errado. */
+      card.divergeDoCadastro = !!(forn && nf.Diretoria && forn.diretoria &&
+                                  nf.Diretoria !== forn.diretoria);
       colunas[alvo].push(card);
     }
 
@@ -162,10 +213,15 @@ module.exports = async function (context, req) {
         ok: true,
         colunas: colunas,
         sefaz: sefaz,
+        integracao: await lerConfigSefaz(client, siteId),
         totais: {
           novas: colunas.novas.length, lancadas: colunas.lancadas.length,
           aprovadas: colunas.aprovadas.length, quitadas: colunas.quitadas.length,
-          descartados: descartados
+          descartados: descartados,
+          /* Contagem so das NOVAS: em coluna posterior o cadastro ja nao bloqueia
+             nada, e somar tudo inflaria um numero que serve para acao. */
+          semCadastro: colunas.novas.filter(function (c) { return !c.fornecedorCadastrado; }).length,
+          cadastroIncompleto: colunas.novas.filter(function (c) { return c.cadastroIncompleto; }).length
         },
         timeMs: diag.timeMs
       }
