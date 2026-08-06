@@ -105,7 +105,17 @@ module.exports = async function (context, req) {
         } catch (eSeq) {
           bloco.veredito = eSeq.message; diag.cnpjs.push(bloco); continue;
         }
-        bloco.senhaDefinida = !!process.env['SEFAZ_CERT_' + alvo.cnpj + '_SENHA'];
+        /* Sobre a senha reportamos FORMA, nunca conteudo: se existe, quantos
+           caracteres tem e se veio com espaco nas pontas. Espaco invisivel colado
+           junto da senha e erro classico de portal, e sozinho ele produz o mesmo
+           "mac verify failure" de uma senha simplesmente errada — sem distinguir
+           os dois, a investigacao vira tentativa e erro. */
+        const _senha = process.env['SEFAZ_CERT_' + alvo.cnpj + '_SENHA'];
+        bloco.senhaDefinida = !!_senha;
+        if (_senha) {
+          bloco.senhaTamanho = _senha.length;
+          bloco.senhaComEspacoNasPontas = _senha !== _senha.trim();
+        }
 
         /* O arquivo vem do Blob Storage; App Setting so como fallback de teste. */
         let buf;
@@ -142,10 +152,23 @@ module.exports = async function (context, req) {
         } catch (eTls) {
           bloco.erroOpenSSL = eTls.message;
           bloco.codigo = eTls.code || null;
-          bloco.veredito = /mac verify|invalid password|wrong password/i.test(eTls.message)
+          const _senhaErrada = /mac verify|invalid password|wrong password/i.test(eTls.message);
+          bloco.veredito = _senhaErrada
             ? 'Arquivo valido, SENHA errada'
             : (bloco.truncado ? 'Arquivo TRUNCADO na App Setting'
                               : 'Arquivo nao e um PKCS#12 valido');
+          /* Se a senha sem espaco nas pontas abre, o problema e a colagem e nao a
+             senha. Vale MUITO a pena separar: sao acoes completamente diferentes.
+             So testa aqui no diagnostico — em producao a senha e usada como esta,
+             porque senha pode legitimamente conter espaco e aparar por conta
+             propria quebraria quem tem uma assim. */
+          if (_senhaErrada && bloco.senhaComEspacoNasPontas) {
+            try {
+              tls.createSecureContext({ pfx: buf, passphrase: (_senha || '').trim() });
+              bloco.veredito = 'A SENHA ESTA CERTA, mas foi gravada com espaco nas pontas — ' +
+                               'regrave a App Setting _SENHA sem o espaco';
+            } catch (e2) { /* segue: senha errada mesmo */ }
+          }
         }
         diag.cnpjs.push(bloco);
       }
