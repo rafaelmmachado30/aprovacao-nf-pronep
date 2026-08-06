@@ -107,20 +107,32 @@ module.exports = async function (context, req) {
     };
     const de = f(new Date(hoje.getTime() - 5 * 86400000));
     const ate = f(new Date(hoje.getTime() + 60 * 86400000));
+    /* Janela de 7 dias para medir o fluxo diario: e ela que define a cadencia do
+       cron incremental. */
+    const de7 = f(new Date(hoje.getTime() - 7 * 86400000));
+    const ate0 = f(hoje);
     diag.janelaTeste = { de: de, ate: ate };
+    diag.janela7dias = { de: de7, ate: ate0 };
 
     /* Candidatos, do mais util para o quadro ao menos util. Nomes conforme o
        padrao do lcpListarRequest; o que nao existir volta como faultstring. */
+    /* Rodada 2. A rodada 1 estabeleceu que filtrar_por_vencimento e
+       filtrar_por_pagamento NAO existem, que ordem_decrescente nao existe, e —
+       pela propria mensagem de recusa do Omie — o vocabulario valido de
+       filtrar_por_status. Agora falta a MEDIDA: quantas contas cada status
+       devolve. E ela que decide se a sincronizacao do quadro cabe numa execucao
+       da Function (~45s, ~60 req/min no Omie) ou precisa de ponteiro.
+       'EMABERTO' e o candidato a consulta principal do quadro. */
     const candidatos = [
-      ['sem_filtro',                {}],
-      ['filtrar_por_vencimento',    { filtrar_por_vencimento_de: de, filtrar_por_vencimento_ate: ate }],
-      ['filtrar_por_status_ABERTO', { filtrar_por_status: 'ABERTO' }],
-      ['filtrar_por_status_AVENCER',{ filtrar_por_status: 'A VENCER' }],
-      ['filtrar_por_emissao',       { filtrar_por_emissao_de: de, filtrar_por_emissao_ate: ate }],
-      ['filtrar_por_pagamento',     { filtrar_por_pagamento_de: de, filtrar_por_pagamento_ate: ate }],
-      ['filtrar_apenas_alteracao',  { filtrar_por_data_de: de, filtrar_por_data_ate: ate, filtrar_apenas_alteracao: 'S' }],
-      ['filtrar_apenas_inclusao',   { filtrar_por_data_de: de, filtrar_por_data_ate: ate, filtrar_apenas_inclusao: 'S' }],
-      ['ordenar_por_vencimento',    { ordenar_por: 'DATA_VENCIMENTO', ordem_decrescente: 'N' }]
+      ['status_EMABERTO',      { filtrar_por_status: 'EMABERTO' }],
+      ['status_AVENCER',       { filtrar_por_status: 'AVENCER' }],
+      ['status_ATRASADO',      { filtrar_por_status: 'ATRASADO' }],
+      ['status_VENCEHOJE',     { filtrar_por_status: 'VENCEHOJE' }],
+      ['status_PAGTO_PARCIAL', { filtrar_por_status: 'PAGTO_PARCIAL' }],
+      ['status_PAGO',          { filtrar_por_status: 'PAGO' }],
+      ['ordenar_por_sozinho',  { ordenar_por: 'DATA_VENCIMENTO' }],
+      ['inclusao_7dias',       { filtrar_por_data_de: de7, filtrar_por_data_ate: ate0, filtrar_apenas_inclusao: 'S' }],
+      ['alteracao_7dias',      { filtrar_por_data_de: de7, filtrar_por_data_ate: ate0, filtrar_apenas_alteracao: 'S' }]
     ];
 
     for (const [nome, param] of candidatos) {
