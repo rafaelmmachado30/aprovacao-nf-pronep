@@ -20,7 +20,7 @@
 require('isomorphic-fetch');
 const { getGraphClient } = require('../shared/graph');
 const {
-  LIST_DOCFIS, LIST_SEFAZ, LIST_NOTAS, resolveListId, soDigitos, lerConfigSefaz
+  LIST_DOCFIS, LIST_SEFAZ, LIST_NOTAS, resolveListId, soDigitos, lerConfigSefaz, lerCorteVencimento
 } = require('../shared/documentosFiscais');
 
 async function todosItens(client, siteId, listId, maxPaginas) {
@@ -296,6 +296,7 @@ module.exports = async function (context, req) {
         colunas: colunas,
         sefaz: sefaz,
         integracao: await lerConfigSefaz(client, siteId),
+        corteVencimento: await lerCorteVencimento(client, siteId),
         totais: {
           novas: colunas.novas.length, lancadas: colunas.lancadas.length,
           aprovadas: colunas.aprovadas.length, quitadas: colunas.quitadas.length,

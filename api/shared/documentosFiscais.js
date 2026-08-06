@@ -657,6 +657,49 @@ async function lerConfigSefaz(client, siteId) {
  * para um certificado de teste pequeno, e evita que este modulo dependa do Blob
  * Storage para sempre.
  */
+/**
+ * Data de corte: so entram no quadro contas com vencimento A PARTIR dela.
+ *
+ * Existe para o sistema nao nascer com anos de historico vencido do Omie. O
+ * financeiro so quer acompanhar dali para frente.
+ *
+ * E FIXA, NAO MOVEL, e isso e a parte importante. "Do primeiro dia do mes
+ * corrente para frente" parece equivalente e nao e: em setembro, as contas de
+ * agosto ainda em aberto sairiam do quadro — exatamente as vencidas e nao pagas,
+ * que sao as que mais precisam ser vistas. Uma vez definida, a data so muda se
+ * alguem mudar de proposito.
+ *
+ * Sem configuracao gravada, assume o primeiro dia do mes ATUAL. Isso so acontece
+ * antes da primeira gravacao da config; depois o valor vem de la e para de andar.
+ */
+function corteVencimentoPadrao() {
+  const h = new Date();
+  return h.getFullYear() + '-' + String(h.getMonth() + 1).padStart(2, '0') + '-01';
+}
+
+async function lerCorteVencimento(client, siteId) {
+  try {
+    const listId = await resolveListId(client, siteId, 'PRONEP-NF-Config');
+    if (!listId) return { data: corteVencimentoPadrao(), origem: 'padrao' };
+    const r = await client.api('/sites/' + siteId + '/lists/' + listId + '/items')
+      .expand('fields').top(20).get();
+    const item = ((r && r.value) || []).find(function (x) {
+      return x.fields && x.fields.Title === 'global';
+    });
+    if (!item || !item.fields || !item.fields.ConfigJson) {
+      return { data: corteVencimentoPadrao(), origem: 'padrao' };
+    }
+    const cfg = JSON.parse(item.fields.ConfigJson);
+    const d = cfg.sefaz && cfg.sefaz.corteVencimento;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))) {
+      return { data: corteVencimentoPadrao(), origem: 'padrao' };
+    }
+    return { data: d, origem: 'config' };
+  } catch (e) {
+    return { data: corteVencimentoPadrao(), origem: 'erro', erroLeitura: e.message };
+  }
+}
+
 async function lerCertificado(cnpj) {
   const doc = soDigitos(cnpj);
   const senha = process.env['SEFAZ_CERT_' + doc + '_SENHA'];
@@ -692,5 +735,6 @@ module.exports = {
   buscarPorChave, gravarDocumento, vincularNota, casarNotaComDocumento,
   gravarContaOmie, indexarPorCodigoOmie, gravarEmLote, prepararContaOmie,
   lerPonteiro, garantirPonteiro, gravarPonteiro,
-  lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, lerConfigSefaz
+  lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, lerConfigSefaz,
+  lerCorteVencimento, corteVencimentoPadrao
 };

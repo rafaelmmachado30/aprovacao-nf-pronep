@@ -33,7 +33,8 @@ const { getGraphClient, resolveSiteId } = require('../shared/graph');
 const { getCredentials, listarContasPagarPorVencimento,
         resolverFornecedoresPorCodigo } = require('../shared/omie');
 const { indexarPorCodigoOmie, gravarEmLote, prepararContaOmie, resolveListId,
-        LIST_DOCFIS, lerConfigSefaz, soDigitos } = require('../shared/documentosFiscais');
+        LIST_DOCFIS, lerConfigSefaz, lerCorteVencimento, soDigitos } =
+        require('../shared/documentosFiscais');
 
 const ORCAMENTO_MS = 30000;   // margem para fechar antes dos ~45s da plataforma
 
@@ -115,6 +116,12 @@ module.exports = async function (context, req) {
 
     const hoje = new Date();
     const desde = new Date(hoje.getTime() - dias * 86400000);
+
+    /* Contas vencidas antes do corte nao entram: o sistema nao deve nascer com
+       anos de historico vencido do Omie. A data e FIXA (ver lerCorteVencimento) —
+       movel faria as contas de agosto sumirem em setembro. */
+    const corte = await lerCorteVencimento(client, siteId);
+    diag.corteVencimento = corte;
 
     for (const u of unidades) {
       const bloco = {
@@ -257,6 +264,16 @@ module.exports = async function (context, req) {
         return !paga || !!indice[String(c.codigo_lancamento_omie)];
       });
       bloco.pagasIgnoradas = antesDoCorte - contas.length;
+
+      /* Vencimento anterior ao corte: fora. Conta SEM vencimento tambem fica de
+         fora — nao da para dizer se e recente, e deixar entrar traria de volta
+         justamente a sujeira que o corte existe para evitar. */
+      const antesDoVenc = contas.length;
+      contas = contas.filter(function (c) {
+        const v = dataOmieParaISO(c.data_vencimento);
+        return v && v >= corte.data;
+      });
+      bloco.antigasIgnoradas = antesDoVenc - contas.length;
 
       /* A conta a pagar traz so o CODIGO interno do fornecedor, e quem decide
          unidade e diretoria e o CNPJ. Resolve apenas os codigos que ainda nao

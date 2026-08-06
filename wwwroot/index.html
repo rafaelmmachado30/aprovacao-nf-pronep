@@ -4156,6 +4156,29 @@ function renderConfigIntegracoes(d) {
     + '</ul></div>';
   h += '</div>';
 
+  /* Data de corte. Fica visivel de propósito: é ela que explica por que uma NF
+     antiga não aparece no quadro — sem isso, alguém procuraria um bug. */
+  var corte = (d.corteVencimento || {});
+  h += '<div class="card"><h3 style="margin-top:0">Data de corte do quadro</h3>'
+    + '<div class="small muted" style="line-height:1.55;margin-bottom:10px">'
+    + 'Só entram no quadro contas com vencimento <b>a partir</b> desta data. Serve para o '
+    + 'sistema não nascer com anos de histórico vencido do Omie.'
+    + '</div>'
+    + '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">'
+    + '<input type="date" id="cfg-corte" value="' + _npEsc(corte.data || '') + '"'
+    + ' style="padding:7px 10px;border:1.5px solid var(--cinza-borda);border-radius:5px;font-size:13px">'
+    + '<button class="btn btn-primary" onclick="salvarCorteVencimento()">Salvar data</button>'
+    + (corte.origem === 'padrao'
+        ? '<span class="small muted">(ainda não salva — mostrando o padrão)</span>' : '')
+    + '</div>'
+    /* O motivo de ser fixa precisa estar escrito: alguem vai olhar isso em
+       setembro e achar que deveria ter andado sozinha. */
+    + '<div class="small muted" style="margin-top:9px;line-height:1.5">'
+    + '<b>Ela não anda sozinha, e isso é proposital.</b> Se fosse sempre "o primeiro dia do mês '
+    + 'atual", em setembro as contas de agosto ainda em aberto sumiriam do quadro — justo as '
+    + 'vencidas e não pagas, que são as que mais precisam ser vistas.'
+    + '</div></div>';
+
   /* Estado por CNPJ: um certificado vencido derruba uma filial e nao as outras,
      e sem isso a falha so apareceria como "sumiram as notas de SP". */
   var sefaz = d.sefaz || [];
@@ -4196,6 +4219,36 @@ function renderConfigIntegracoes(d) {
   return h;
 }
 
+async function salvarCorteVencimento() {
+  var el = document.getElementById('cfg-corte');
+  var d = el ? (el.value || '').trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { toast('Escolha uma data válida.', 'error'); return; }
+
+  if (!window._sistemConfig) await carregarConfigSistema();
+  var cfg = window._sistemConfig ? JSON.parse(JSON.stringify(window._sistemConfig)) : null;
+  if (!cfg || !cfg.multiNivel) {
+    toast('Não consegui ler a configuração atual. Recarregue a página.', 'error'); return;
+  }
+  /* Preserva o que ja existe em sefaz (habilitado, motivo) — gravar so o corte
+     apagaria o estado do liga/desliga. */
+  cfg.sefaz = Object.assign({ habilitado: true }, cfg.sefaz || {}, { corteVencimento: d });
+
+  mostrarSalvandoOverlay('Salvando a data de corte...');
+  try {
+    var r = await fetch('/api/ConfigUpdate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', body: JSON.stringify({ config: cfg })
+    });
+    var data = await r.json().catch(function () { return {}; });
+    if (!r.ok) { toast('Erro ao salvar: ' + (data.error || 'HTTP ' + r.status), 'error'); return; }
+    window._sistemConfig = cfg;
+    toast('Data de corte salva. Vale a partir da próxima sincronização.', 'success');
+    carregarConfigIntegracoes();
+  } catch (e) {
+    toast('Falha de comunicação: ' + (e && e.message), 'error');
+  } finally { esconderSalvandoOverlay(); }
+}
+
 async function alternarIntegracaoSefaz(ligar) {
   var motivo = '';
   if (!ligar) {
@@ -4210,12 +4263,15 @@ async function alternarIntegracaoSefaz(ligar) {
     toast('Não consegui ler a configuração atual. Recarregue a página e tente de novo.', 'error');
     return;
   }
-  cfg.sefaz = {
+  /* MESCLA, nao substitui: o bloco `sefaz` guarda tambem a data de corte, e
+     regravar o objeto inteiro apagaria ela em silencio — a proxima sincronizacao
+     voltaria a puxar historico vencido sem ninguem entender por que. */
+  cfg.sefaz = Object.assign({}, cfg.sefaz || {}, {
     habilitado: !!ligar,
     motivoDesligamento: ligar ? '' : motivo,
     desligadoPor: ligar ? '' : ((currentPersona && currentPersona.email) || ''),
     desligadoEm: ligar ? '' : new Date().toISOString()
-  };
+  });
 
   mostrarSalvandoOverlay(ligar ? 'Ligando a integração...' : 'Desligando a integração...');
   try {

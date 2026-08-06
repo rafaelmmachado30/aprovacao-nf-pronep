@@ -60,6 +60,13 @@ function validarConfig(c) {
         typeof c.sefaz.motivoDesligamento !== 'string') {
       return 'sefaz.motivoDesligamento deve ser texto';
     }
+    /* Data de corte do quadro NFs a Pagar: so entram contas com vencimento a
+       partir dela. Formato ISO para comparar como texto sem fuso no meio. */
+    if (c.sefaz.corteVencimento !== undefined && c.sefaz.corteVencimento !== '') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(c.sefaz.corteVencimento))) {
+        return 'sefaz.corteVencimento deve ser uma data no formato AAAA-MM-DD';
+      }
+    }
   }
   return null;
 }
