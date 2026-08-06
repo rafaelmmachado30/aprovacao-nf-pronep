@@ -4672,7 +4672,7 @@ function _npRoteamento(d) {
       + 'Sem cadastro nao da para saber a unidade nem a diretoria — e sem diretoria '
       + 'nao ha aprovador.</div>'
       + '<button class="btn btn-secondary" style="width:100%;margin-top:5px;padding:4px;font-size:10.5px"'
-      + ' onclick="cadastrarFornecedorDaSefaz(\'' + _npEsc(d.id) + '\')">Cadastrar fornecedor</button>'
+      + ' onclick="event.stopPropagation();cadastrarFornecedorDaSefaz(\'' + _npEsc(d.id) + '\')">Cadastrar fornecedor</button>'
       + '</div>';
   }
   if (d.cadastroIncompleto) {
@@ -4683,7 +4683,7 @@ function _npRoteamento(d) {
       + (!d.unidade && !d.diretoria ? 'unidade e diretoria' : (!d.unidade ? 'a unidade' : 'a diretoria'))
       + ' no cadastro do fornecedor.</div>'
       + '<button class="btn btn-secondary" style="width:100%;margin-top:5px;padding:4px;font-size:10.5px"'
-      + ' onclick="cadastrarFornecedorDaSefaz(\'' + _npEsc(d.id) + '\')">Completar cadastro</button>'
+      + ' onclick="event.stopPropagation();cadastrarFornecedorDaSefaz(\'' + _npEsc(d.id) + '\')">Completar cadastro</button>'
       + '</div>';
   }
   return '<div style="margin-top:6px;display:flex;flex-direction:column;gap:3px">'
@@ -4731,10 +4731,13 @@ function renderCardNFPagar(d, coluna) {
      cadastro sem ler card por card. */
   var pendencia = (coluna === 'novas') && (!d.fornecedorCadastrado || d.cadastroIncompleto);
 
-  var h = '<div style="border:1px solid ' + (pendencia ? '#EF6C00' : 'var(--cinza-borda)')
+  var h = '<div onclick="abrirDetalheNF(\'' + _npEsc(d.id) + '\')"'
+    + ' style="cursor:pointer;border:1px solid ' + (pendencia ? '#EF6C00' : 'var(--cinza-borda)')
     + ';border-left-width:' + (pendencia ? '3px' : '1px')
-    + ';border-radius:6px;padding:9px;margin-bottom:8px;'
-    + 'background:' + (cinza ? '#F7F8F9' : '#fff') + (cinza ? ';opacity:.75' : '') + '">'
+    + ';border-radius:6px;padding:9px;margin-bottom:8px;transition:box-shadow .12s;'
+    + 'background:' + (cinza ? '#F7F8F9' : '#fff') + (cinza ? ';opacity:.75' : '') + '"'
+    + ' onmouseover="this.style.boxShadow=\'0 2px 10px rgba(31,78,121,.15)\'"'
+    + ' onmouseout="this.style.boxShadow=\'\'">'
     + '<div style="font-weight:600;font-size:12.5px;line-height:1.3">' + _npEsc(d.emitenteNome || 'Emitente nao identificado') + '</div>'
     + '<div class="small muted mono" style="font-size:10px">' + _npCnpj(d.emitenteCNPJ) + '</div>'
     + '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:5px;gap:6px">'
@@ -4757,13 +4760,143 @@ function renderCardNFPagar(d, coluna) {
     var podeLancar = d.fornecedorCadastrado && !d.cadastroIncompleto;
     h += '<button class="btn btn-primary" style="width:100%;margin-top:7px;padding:5px;font-size:11.5px'
       + (podeLancar ? '' : ';opacity:.45;cursor:not-allowed') + '"'
-      + (podeLancar ? ' onclick="lancarDaSefaz(\'' + _npEsc(d.id) + '\')"' : ' disabled')
+      + (podeLancar ? ' onclick="event.stopPropagation();lancarDaSefaz(\'' + _npEsc(d.id) + '\')"' : ' disabled')
       + '>Lançar</button>';
   } else if (d.vinculadoAuto) {
     /* Sinaliza o merge: o card e a nota eram a mesma coisa e o sistema juntou. */
     h += '<div class="small muted" style="font-size:10px;margin-top:5px">↔ unificada com a NF lançada</div>';
   }
   return h + '</div>';
+}
+
+// ===== Detalhe da NF (modal) =====
+// O card e um resumo; a decisao exige o resto. Aqui mora o resto.
+//
+// O QUE ESTA TELA NAO INVENTA: uma parte relevante do que a Pronep paga e NFS-e
+// de servico — nao tem chave de 44 digitos e nao passa pela SEFAZ, porque e
+// municipal. Para essas, itens e impostos simplesmente NAO EXISTEM do nosso lado,
+// e a tela diz isso em vez de mostrar um bloco vazio que parece defeito.
+
+function _npLinha(rot, val, mono) {
+  if (val === null || val === undefined || val === '') return '';
+  return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #F0F3F5">'
+    + '<span class="small muted" style="min-width:150px;flex-shrink:0;font-size:11px;'
+    + 'text-transform:uppercase;letter-spacing:.03em">' + rot + '</span>'
+    + '<span class="' + (mono ? 'mono ' : '') + 'small" style="font-size:12.5px;word-break:break-all">'
+    + val + '</span></div>';
+}
+
+function abrirDetalheNF(docId) {
+  var d = null;
+  var cols = (_nfsAPagarCache && _nfsAPagarCache.colunas) || {};
+  for (var k in cols) for (var i = 0; i < cols[k].length; i++) {
+    if (String(cols[k][i].id) === String(docId)) d = cols[k][i];
+  }
+  if (!d) return;
+
+  var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">'
+    + '<div><h2 style="margin:0 0 2px">' + _npEsc(d.emitenteNome || 'Emitente não identificado') + '</h2>'
+    + '<div class="small muted mono">' + _npCnpj(d.emitenteCNPJ) + '</div></div>'
+    + '<button class="btn btn-secondary" onclick="closeModal()">Fechar</button></div>';
+
+  h += '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:14px 0;padding:12px;'
+    + 'background:#F7F9FB;border-radius:6px">'
+    + '<div><div class="small muted" style="font-size:10px;text-transform:uppercase">Valor total</div>'
+    + '<div style="font-weight:700;font-size:19px">' + _npFmtBRL(d.valor) + '</div></div>'
+    + '<div><div class="small muted" style="font-size:10px;text-transform:uppercase">'
+    + (d.totalParcelas > 1 ? 'Próximo vencimento' : 'Vencimento') + '</div>'
+    + '<div style="font-weight:600;font-size:15px;margin-top:3px">' + _npData(d.dataVencimento) + '</div></div>'
+    + (d.totalParcelas > 1
+        ? '<div><div class="small muted" style="font-size:10px;text-transform:uppercase">Parcelas</div>'
+          + '<div style="font-weight:600;font-size:15px;margin-top:3px">' + d.parcelasPagas
+          + ' de ' + d.totalParcelas + ' pagas</div></div>' : '')
+    + '</div>';
+
+  h += '<h3 style="margin:16px 0 4px;font-size:14px">Documento</h3><div>'
+    + _npLinha('Número da NF', _npEsc(d.numeroNF || '—') + (d.serie ? ' · série ' + _npEsc(d.serie) : ''))
+    + _npLinha('Emissão', _npData(d.dataEmissao))
+    + _npLinha('Chave de acesso', d.chaveAcesso ? _npEsc(d.chaveAcesso) : null, true)
+    + _npLinha('Origem', _npEsc(d.origem || '—'))
+    + '</div>';
+
+  /* Sem chave nao e falta de dado nosso: e NFS-e, que nao tem chave. Dizer isso
+     evita alguem procurar um problema que nao existe. */
+  if (!d.chaveAcesso) {
+    h += '<div class="small muted" style="margin-top:6px;line-height:1.5">'
+      + 'Sem chave de acesso — provavelmente <b>NFS-e de serviço</b>, que é municipal '
+      + 'e não passa pela SEFAZ. Itens e impostos não estão disponíveis para este tipo.'
+      + '</div>';
+  }
+
+  h += '<h3 style="margin:16px 0 4px;font-size:14px">Roteamento</h3><div>'
+    + _npLinha('Unidade', d.unidade ? '<span class="tag" style="background:#E3F0FB;color:#1565C0">'
+        + _npEsc(d.unidade) + '</span>' : null)
+    + _npLinha('Diretoria', d.diretoria ? '<span class="tag" style="background:#EDE7F6;color:#4527A0">'
+        + _npEsc(d.diretoria) + '</span>' : null)
+    + (!d.fornecedorCadastrado
+        ? _npLinha('Cadastro', '<span style="color:#8A4B00">Fornecedor não cadastrado</span>')
+        : (d.cadastroIncompleto
+            ? _npLinha('Cadastro', '<span style="color:#7A5C00">Incompleto</span>') : ''))
+    + '</div>';
+
+  if (d.parcelas && d.parcelas.length) {
+    h += '<h3 style="margin:16px 0 4px;font-size:14px">Parcelas</h3>'
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+      + '<thead><tr style="text-align:left;border-bottom:2px solid var(--cinza-borda)">'
+      + '<th style="padding:6px 8px">Parcela</th><th style="padding:6px 8px">Vencimento</th>'
+      + '<th style="padding:6px 8px;text-align:right">Valor</th><th style="padding:6px 8px">Situação</th>'
+      + '<th style="padding:6px 8px">Código de barras</th></tr></thead><tbody>';
+    for (var j = 0; j < d.parcelas.length; j++) {
+      var p = d.parcelas[j];
+      h += '<tr style="border-bottom:1px solid #F0F3F5' + (p.paga ? ';opacity:.6' : '') + '">'
+        + '<td style="padding:6px 8px">' + _npEsc(p.numero || (j + 1)) + '</td>'
+        + '<td style="padding:6px 8px">' + _npData(p.vencimento) + '</td>'
+        + '<td style="padding:6px 8px;text-align:right">' + _npFmtBRL(p.valor) + '</td>'
+        + '<td style="padding:6px 8px"><span class="tag" style="font-size:10px;background:'
+        + (p.paga ? '#E8F5E9;color:#1B5E20' : '#FFF4E5;color:#8A4B00') + '">'
+        + _npEsc(p.status || '—') + '</span></td>'
+        /* Codigo de barras copiavel: e o que o financeiro cola no banco. Mostrar
+           sem poder copiar seria mostrar por mostrar. */
+        + '<td style="padding:6px 8px">' + (p.codigoBarras
+            ? '<span class="mono small" style="font-size:10px">' + _npEsc(p.codigoBarras) + '</span>'
+              + ' <a onclick="copiarTexto(\'' + _npEsc(String(p.codigoBarras).replace(/\s/g, ''))
+              + '\')" style="cursor:pointer;color:var(--azul-claro);font-size:10px">copiar</a>'
+            : '<span class="small muted">—</span>') + '</td></tr>';
+    }
+    h += '</tbody></table></div>';
+  }
+
+  h += '<h3 style="margin:16px 0 4px;font-size:14px">Situação no sistema</h3><div>'
+    + _npLinha('Etapa', d.notaItemId
+        ? 'Lançada' + (d.statusNota ? ' · ' + _npEsc(d.statusNota) : '')
+        : 'Ainda não lançada')
+    + _npLinha('NF no sistema', d.notaItemId ? ('#' + _npEsc(d.notaItemId)) : null)
+    + _npLinha('Aprovador', _npEsc(d.aprovador || ''))
+    + (d.vinculadoAuto ? _npLinha('Vínculo', 'Unificada automaticamente com a NF lançada') : '')
+    + '</div>';
+
+  h += '<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">';
+  if (!d.notaItemId) {
+    var pode = d.fornecedorCadastrado && !d.cadastroIncompleto;
+    h += '<button class="btn btn-primary"' + (pode
+      ? ' onclick="closeModal();lancarDaSefaz(\'' + _npEsc(d.id) + '\')"'
+      : ' disabled style="opacity:.45;cursor:not-allowed"') + '>Lançar esta NF</button>';
+    if (!pode) {
+      h += '<button class="btn btn-secondary" onclick="closeModal();cadastrarFornecedorDaSefaz(\''
+        + _npEsc(d.id) + '\')">'
+        + (d.fornecedorCadastrado ? 'Completar cadastro' : 'Cadastrar fornecedor') + '</button>';
+    }
+  }
+  h += '</div>';
+
+  openModal(h);
+}
+
+function copiarTexto(t) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(t).then(function () { toast('Copiado.', 'success'); },
+      function () { toast('Não consegui copiar.', 'error'); });
+  }
 }
 
 // Leva para o cadastro de fornecedores com o CNPJ e a razao social ja em mao —
