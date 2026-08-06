@@ -4326,7 +4326,12 @@ async function carregarNFsAPagar() {
   var area = document.getElementById('content-area');
   if (!area) return;
   try {
-    var r = await fetch('/api/ListarDocumentosFiscais', { credentials: 'include' });
+    /* Leva a lente "Visualizando como" ao servidor. Sem isso o seletor nao teria
+       efeito no quadro: o servidor olha a identidade real e devolveria tudo,
+       parecendo que o escopo esta quebrado quando ele nem foi consultado. */
+    var lente = window._viewAsDiretoria || '';
+    var r = await fetch('/api/ListarDocumentosFiscais'
+      + (lente ? '?verComo=' + encodeURIComponent(lente) : ''), { credentials: 'include' });
     var data = await r.json();
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
     _nfsAPagarCache = data;
@@ -4547,6 +4552,14 @@ function renderAvisoCadastro(t) {
 function renderAvisoEscopo(esc) {
   if (!esc || esc.verTudo) return '';
   var dirs = esc.minhasDiretorias || [];
+  if (esc.motivo === 'lente') {
+    return '<div class="alert alert-info" style="margin-top:12px"><span class="ico">i</span><div>'
+      + '<b>Simulando a visão da Diretoria de ' + _npEsc(esc.lente) + '.</b> '
+      + 'É assim que o gestor dessa diretoria vê o quadro.'
+      + (esc.ocultadosPorEscopo ? ' ' + esc.ocultadosPorEscopo + ' nota(s) ocultada(s).' : '')
+      + '<br><span class="small muted">Você continua sendo admin — volte para "Admin do sistema" '
+      + 'no seletor para ver tudo.</span></div></div>';
+  }
   return '<div class="alert alert-info" style="margin-top:12px"><span class="ico">i</span><div>'
     + '<b>Você está vendo as notas da'
     + (dirs.length > 1 ? 's suas diretorias' : ' sua diretoria') + '</b>'
@@ -6590,6 +6603,9 @@ function trocarVisao(valor) {
   renderSeletorVisao();
   try { renderNav(); } catch (e) {}
   if (typeof currentView === 'string' && currentView) showView(currentView);
+  /* O quadro NFs a Pagar vem do servidor com o escopo ja aplicado, entao trocar a
+     lente exige refazer a chamada — re-renderizar o cache mostraria a visao antiga. */
+  if (currentView === 'nfs-a-pagar' && typeof carregarNFsAPagar === 'function') carregarNFsAPagar();
   var d = window._viewAsDiretoria;
   if (typeof toast === 'function') {
     toast(d ? ('Visualizando como Diretoria de ' + d + ' — apenas NFs dessa diretoria.') : 'Visualizando como Admin do sistema — todas as NFs.', 'success');

@@ -64,12 +64,24 @@ function colunaPorStatus(status, processado) {
  *                            alguem precisa poder corrigir o cadastro. Esconder
  *                            deixaria a nota travada sem ninguem responsavel.
  */
-async function montarEscopo(client, siteId, req) {
+async function montarEscopo(client, siteId, req, verComo) {
   let authz = null;
   try { authz = await resolveAuthz(req); } catch (e) { /* segue restrito */ }
 
   if (!authz) return { autenticado: false, verTudo: false, pares: {}, email: '' };
   if (authz.isAdmin || authz.isFinanceiro) {
+    /* LENTE "Visualizando como". Honrada SO para quem ja ve tudo, e so para
+       RESTRINGIR — nunca para ampliar. Estreitar a propria visao nao e escalada
+       de privilegio, entao aceitar o parametro aqui e seguro; aceitar de um
+       gestor para ALARGAR seria o oposto, e por isso nem e considerado.
+       Sem isto o seletor da tela nao teria efeito nenhum: o servidor olha a
+       identidade real e devolveria tudo, dando a impressao de que o escopo esta
+       quebrado quando na verdade ele nunca foi consultado. */
+    if (verComo) {
+      return { autenticado: true, verTudo: false, motivo: 'lente',
+               lente: verComo, diretorias: [verComo],
+               pares: { ['TODAS|' + verComo]: true }, email: authz.email };
+    }
     return { autenticado: true, verTudo: true, motivo: authz.isAdmin ? 'admin' : 'financeiro',
              pares: {}, email: authz.email };
   }
@@ -213,7 +225,8 @@ module.exports = async function (context, req) {
     }
 
     diag.step = 'escopo';
-    const escopo = await montarEscopo(client, siteId, req);
+    const verComo = String((req.query && req.query.verComo) || '').trim();
+    const escopo = await montarEscopo(client, siteId, req, verComo);
 
     const colunas = { novas: [], lancadas: [], aprovadas: [], quitadas: [] };
     let foraDoEscopo = 0;
@@ -387,6 +400,7 @@ module.exports = async function (context, req) {
           verTudo: escopo.verTudo,
           motivo: escopo.motivo || (escopo.verTudo ? '' : 'gestor'),
           minhasDiretorias: escopo.diretorias || [],
+          lente: escopo.lente || null,
           ocultadosPorEscopo: foraDoEscopo
         },
         integracao: await lerConfigSefaz(client, siteId),
