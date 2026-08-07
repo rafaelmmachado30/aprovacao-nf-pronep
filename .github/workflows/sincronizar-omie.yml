@@ -1,0 +1,187 @@
+name: Sincronizar Omie (NFs a Pagar)
+
+# Mantem o quadro "NFs a Pagar" vivo sozinho. Tres etapas, nesta ordem, porque
+# cada uma depende do resultado da anterior:
+#
+#   1. CONTAS      le as contas a pagar em aberto de cada unidade e grava no
+#                  SharePoint. Repete ate `restantes` zerar — uma execucao da
+#                  Function cabe em ~38s e SP tem ~730 contas, entao a primeira
+#                  rodada as vezes nao termina de escrever.
+#   2. FORNECEDORES resolve os CNPJs que ficaram pendentes. Etapa separada de
+#                  proposito: dentro da sincronizacao ela disputava tempo com a
+#                  gravacao e simplesmente nao acontecia em unidade grande.
+#   3. CASAMENTO   liga os cards as NFs ja lancadas no sistema. Sem isto, NF
+#                  aprovada e ate paga fica parada em "Novas".
+#
+# PRE-REQUISITO
+#   Secret SEFAZ_SECRET no repo, igual a App Setting homonima no Azure.
+#   Settings -> Secrets and variables -> Actions
+#
+# DESLIGAR SEM MEXER AQUI: Configuracoes > Integracoes tem o liga/desliga. O
+# SincronizarOmie respeita a chave e devolve `desligada: true` sem consultar nada.
+# Preferir aquele botao a desabilitar o workflow — ele para as duas pontas, e quem
+# desliga costuma ser quem nao mexe em YAML.
+#
+# HORARIO: GitHub cron usa UTC; BRT = UTC-3. Tres vezes por dia util, cobrindo
+# inicio, meio e fim do expediente. Nao roda de hora em hora porque contas a pagar
+# nao mudam nesse ritmo, e cada rodada completa gasta ~2 min de chamadas no Omie
+# (limite ~60 req/min por app_key).
+#   11:00 UTC = 08:00 BRT
+#   16:00 UTC = 13:00 BRT
+#   21:00 UTC = 18:00 BRT
+
+on:
+  schedule:
+    - cron: '0 11,16,21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      unidades:
+        description: 'Unidades (separadas por espaco). Vazio = RJ SP ES'
+        required: false
+        default: ''
+      pularCasamento:
+        description: 'Pular a etapa de casamento com NFs lancadas (true/false)'
+        required: false
+        default: 'false'
+
+# Duas execucoes ao mesmo tempo gravariam as mesmas linhas em paralelo. O
+# SharePoint nao tem constraint para impedir duplicata — a fila e a protecao.
+concurrency:
+  group: sincronizar-omie
+  cancel-in-progress: false
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Sincronizar contas, fornecedores e casamento
+        env:
+          SECRET: ${{ secrets.SEFAZ_SECRET }}
+          UNIDADES: ${{ github.event.inputs.unidades || 'RJ SP ES' }}
+          PULAR_CASAMENTO: ${{ github.event.inputs.pularCasamento || 'false' }}
+        run: |
+          set -uo pipefail
+          if [ -z "${SECRET:-}" ]; then
+            echo "::error::Secret SEFAZ_SECRET nao configurado no repo (Settings -> Secrets and variables -> Actions)"
+            exit 1
+          fi
+
+          BASE="https://purple-forest-09588fe10.7.azurestaticapps.net/api"
+          FALHAS=0
+
+          # Uma chamada. Ecoa a resposta e devolve o corpo em /tmp/resp.json.
+          # --max-time 290: a Function fecha sozinha em ~40s; o teto aqui e so
+          # para nao pendurar o job se a plataforma engasgar.
+          chamar () {
+            local url="$1"; local rotulo="$2"
+            echo "------------------------------------------------------"
+            echo ">> $rotulo"
+            local code
+            code=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+              -H "X-Automacao-Secret: $SECRET" -H "Accept: application/json" \
+              --max-time 290 "$url")
+            echo "HTTP $code"
+            # So a mensagem e os avisos: o corpo completo tem centenas de linhas
+            # e enterraria justamente o que precisa ser lido.
+            python3 - <<'PY' || head -c 800 /tmp/resp.json
+          import json
+          try:
+              d = json.load(open('/tmp/resp.json'))
+          except Exception:
+              print('(resposta nao e JSON)'); raise SystemExit(0)
+          print('  ' + str(d.get('mensagem') or d.get('error') or '(sem mensagem)'))
+          for a in (d.get('avisos') or []):
+              print('  aviso: ' + str(a))
+          PY
+            [ "$code" = "200" ] || return 1
+            return 0
+          }
+
+          # Le um contador da ultima resposta. Procura primeiro dentro de
+          # unidades[0] (onde o SincronizarOmie poe os numeros por unidade) e
+          # depois na raiz (onde o CasarDocumentosPendentes poe os dele).
+          # Ausente ou resposta invalida vira 0 — o laco entao para, em vez de
+          # repetir para sempre por causa de um campo que nao existe.
+          ler () {
+            CAMPO="$1" python3 -c "
+          import json, os
+          campo = os.environ['CAMPO']
+          try:
+              d = json.load(open('/tmp/resp.json'))
+          except Exception:
+              print(0); raise SystemExit
+          u = (d.get('unidades') or [{}])[0] or {}
+          v = u.get(campo)
+          if v is None:
+              v = d.get(campo)
+          try:
+              print(int(v or 0))
+          except Exception:
+              print(0)
+          " 2>/dev/null || echo 0
+          }
+
+          # ---------------------------------------------------------- 1. contas
+          for U in $UNIDADES; do
+            # O PONTEIRO DE PAGINA PRECISA SOBREVIVER A VOLTA. A primeira versao
+            # chamava a pagina seguinte e depois recomecava da pagina 1 na volta
+            # seguinte — releria o mesmo trecho para sempre. Aqui a pagina e
+            # estado do laco, nao um desvio dentro dele.
+            PAGINA=1
+            # Teto de 6: cobre paginacao (SP tem 15 paginas, 20 por execucao) mais
+            # algumas repeticoes de gravacao. Existe para o job nao girar eterno se
+            # a Function passar a devolver sempre o mesmo pendente.
+            for TENTATIVA in 1 2 3 4 5 6; do
+              URL="$BASE/SincronizarOmie?unidade=$U"
+              [ "$PAGINA" -gt 1 ] && URL="$URL&paginaInicial=$PAGINA"
+              chamar "$URL" "contas $U (pagina $PAGINA, rodada $TENTATIVA)" \
+                || { echo "::warning::Falha ao sincronizar contas de $U"; FALHAS=$((FALHAS+1)); break; }
+
+              RESTANTES=$(ler restantes)
+              PROXIMA=$(ler proximaPagina)
+
+              # Gravacao vem antes de avancar: o que foi lido e ainda nao entrou
+              # se perderia se pulassemos de pagina agora.
+              if [ "${RESTANTES:-0}" -gt 0 ]; then
+                echo "  faltam $RESTANTES linha(s) por gravar — repetindo a mesma pagina"
+                continue
+              fi
+              if [ "${PROXIMA:-0}" -gt 0 ]; then
+                echo "  leitura truncada — avancando para a pagina $PROXIMA"
+                PAGINA="$PROXIMA"
+                continue
+              fi
+              break
+            done
+          done
+
+          # --------------------------------------------------- 2. fornecedores
+          for U in $UNIDADES; do
+            for TENTATIVA in 1 2 3; do
+              chamar "$BASE/SincronizarOmie?unidade=$U&apenasFornecedores=1" \
+                "fornecedores $U (rodada $TENTATIVA)" \
+                || { echo "::warning::Falha ao resolver fornecedores de $U"; FALHAS=$((FALHAS+1)); break; }
+              PEND=$(ler fornecedoresAindaPendentes)
+              [ "${PEND:-0}" -gt 0 ] || break
+              echo "  ainda faltam $PEND fornecedor(es) — repetindo"
+            done
+          done
+
+          # ------------------------------------------------------ 3. casamento
+          if [ "$PULAR_CASAMENTO" != "true" ]; then
+            chamar "$BASE/CasarDocumentosPendentes" "casar com NFs lancadas" \
+              || { echo "::warning::Falha no casamento"; FALHAS=$((FALHAS+1)); }
+          else
+            echo ">> casamento pulado por parametro"
+          fi
+
+          echo "======================================================"
+          # Falha parcial vira warning, nao erro: o proximo ciclo retoma de onde
+          # parou e derrubar o job faria o alerta perder o sentido de urgencia.
+          # Erro so quando NADA funcionou — a e sinal de secret ou app fora do ar.
+          if [ "$FALHAS" -gt 0 ]; then
+            echo "::warning::$FALHAS etapa(s) com falha — o proximo ciclo retoma."
+          else
+            echo "Ciclo completo sem falhas."
+          fi
