@@ -572,7 +572,7 @@ async function casarDocumentosPendentes(client, siteId, opts) {
   if (!listDoc || !listNotas) return { erro: 'listas nao encontradas' };
 
   const { carregarNotas } = require('./notas');
-  const { notas, identidade } = await carregarNotas(client, siteId, listNotas);
+  const { notas, identidade, divergentes } = await carregarNotas(client, siteId, listNotas);
 
   /* Numero de NF comparavel: "000084" e "84" sao a mesma nota. */
   function numNorm(v) {
@@ -659,6 +659,7 @@ async function casarDocumentosPendentes(client, siteId, opts) {
   return {
     notasLidas: notas.length,
     mapaDeColunasEIdentidade: identidade,
+    colunasDivergentes: divergentes,
     documentosOrfaos: Object.keys(grupos).length,
     jaVinculados: jaVinculados,
     semDadosParaCasar: semDados,

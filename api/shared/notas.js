@@ -18,13 +18,15 @@ const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
 async function mapaDeColunas(client, siteId, listId) {
   const resp = await client.api('/sites/' + siteId + '/lists/' + listId + '/columns').get();
   const inv = {};
-  let identidade = true;
+  const divergentes = [];
   for (const c of (resp.value || [])) {
     if (!c.displayName || !c.name) continue;
     inv[c.name] = c.displayName;
-    if (c.name !== c.displayName) identidade = false;
+    /* Quais colunas divergem importa mais do que "alguma diverge": e a diferenca
+       entre "tem risco em algum lugar" e "Status esta sendo lido errado". */
+    if (c.name !== c.displayName) divergentes.push(c.name + ' -> ' + c.displayName);
   }
-  return { inv: inv, identidade: identidade };
+  return { inv: inv, identidade: divergentes.length === 0, divergentes: divergentes };
 }
 
 /**
@@ -32,7 +34,7 @@ async function mapaDeColunas(client, siteId, listId) {
  * @returns {{notas:[{id,f}], identidade:boolean, paginas:number}}
  */
 async function carregarNotas(client, siteId, listId, maxPaginas) {
-  const { inv, identidade } = await mapaDeColunas(client, siteId, listId);
+  const { inv, identidade, divergentes } = await mapaDeColunas(client, siteId, listId);
   const notas = [];
   let url = '/sites/' + siteId + '/lists/' + listId + '/items?expand=fields&$top=999';
   let p = 0;
@@ -47,7 +49,7 @@ async function carregarNotas(client, siteId, listId, maxPaginas) {
     const nl = r['@odata.nextLink'];
     url = nl ? nl.replace('https://graph.microsoft.com/v1.0', '') : null;
   }
-  return { notas: notas, identidade: identidade, paginas: p };
+  return { notas: notas, identidade: identidade, divergentes: divergentes, paginas: p };
 }
 
 module.exports = { LIST_NOTAS, carregarNotas, mapaDeColunas };

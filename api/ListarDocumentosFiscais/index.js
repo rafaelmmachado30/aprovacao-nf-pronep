@@ -25,6 +25,7 @@ const {
 /* Escopo mora em shared porque o detalhe da NF aplica a MESMA regra. Duas copias
    de regra de visibilidade divergem, e a que diverge e sempre a esquecida. */
 const { montarEscopo, podeVer, todosItens } = require('../shared/escopoNF');
+const { carregarNotas } = require('../shared/notas');
 
 /* Traduz o status da nota para a coluna do quadro. */
 function colunaPorStatus(status, processado) {
@@ -64,7 +65,18 @@ module.exports = async function (context, req) {
 
     diag.step = 'ler';
     const docs = await todosItens(client, siteId, idDoc);
-    const notas = idNotas ? await todosItens(client, siteId, idNotas) : [];
+    /* As notas NAO podem ser lidas cruas. O SharePoint guarda cada coluna com um
+       `name` interno que nem sempre e igual ao `displayName`, e nesta lista eles
+       divergem (medido). Lendo cru, fields.Status vem undefined — e undefined em
+       status nao explode: colunaPorStatus cai no default e joga TODO card
+       vinculado em "Lancadas", inclusive os aprovados e os ja pagos. Um card na
+       coluna errada nao parece defeito, parece o processo estar atrasado. */
+    let notas = [];
+    if (idNotas) {
+      const r = await carregarNotas(client, siteId, idNotas);
+      notas = r.notas.map(function (n) { return { id: n.id, fields: n.f }; });
+      diag.notasColunasDivergentes = r.divergentes;
+    }
     const ponteiros = idSefaz ? await todosItens(client, siteId, idSefaz, 2) : [];
 
     /* Unidade e diretoria vem do CADASTRO DE FORNECEDOR, pelo CNPJ do emitente.
@@ -355,6 +367,10 @@ module.exports = async function (context, req) {
           semCadastro: colunas.novas.filter(function (c) { return !c.fornecedorCadastrado; }).length,
           cadastroIncompleto: colunas.novas.filter(function (c) { return c.cadastroIncompleto; }).length
         },
+        /* Vai na resposta de proposito: se um dia a lista de Notas ganhar colunas
+           renomeadas novas, quem estiver depurando um card na coluna errada ve o
+           motivo aqui em vez de suspeitar do fluxo de aprovacao. */
+        notasColunasDivergentes: diag.notasColunasDivergentes || [],
         timeMs: diag.timeMs
       }
     };
