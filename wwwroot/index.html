@@ -4841,6 +4841,13 @@ function abrirDetalheNF(docId) {
       + '</div>';
   }
 
+  /* Itens: buscados no Omie depois que o modal ja abriu. A consulta leva 1-2s e
+     segurar o modal fechado por causa dela faria o clique parecer travado. */
+  if (d.chaveAcesso) {
+    h += '<h3 style="margin:16px 0 4px;font-size:14px">Itens da nota</h3>'
+      + '<div id="np-itens"><div class="small muted">Buscando os itens no Omie…</div></div>';
+  }
+
   h += '<h3 style="margin:16px 0 4px;font-size:14px">Roteamento</h3><div>'
     + _npLinha('Unidade', d.unidade ? '<span class="tag" style="background:#E3F0FB;color:#1565C0">'
         + _npEsc(d.unidade) + '</span>' : null)
@@ -4909,6 +4916,110 @@ function abrirDetalheNF(docId) {
   openModal(h);
   window._npDocAtual = d;
   setTimeout(carregarDocsDoCard, 30);
+  if (d.chaveAcesso) setTimeout(carregarItensDaNF, 30);
+}
+
+// ITENS DA NF — vem do Omie (modulo Recebimento de NF-e), por chave de acesso.
+//
+// So NF-e tem itens aqui. NFS-e de servico nao tem chave e nao passa pelo
+// recebimento; o proprio endpoint devolve semChave e a explicacao ja aparece
+// acima, entao aqui a secao simplesmente some em vez de mostrar "nada".
+//
+// O QUE ESTA API NAO TRAZ: o arquivo. Nao ha XML nem link de DANFE — so o
+// conteudo. O PDF continua vindo do e-mail ou do anexo manual.
+async function carregarItensDaNF() {
+  var alvo = document.getElementById('np-itens');
+  var d = window._npDocAtual;
+  if (!alvo || !d) return;
+  try {
+    var lente = window._viewAsDiretoria || '';
+    var r = await fetch('/api/DetalheNFOmie?docId=' + encodeURIComponent(d.id)
+      + (lente ? '&verComo=' + encodeURIComponent(lente) : ''), { credentials: 'include' });
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    /* Sem chave nao ha o que buscar. Some com a secao inteira (titulo incluso):
+       deixar "Itens da nota" seguido de vazio parece falha de carregamento. */
+    if (data.semChave) {
+      var titulo = alvo.previousElementSibling;
+      if (titulo && titulo.tagName === 'H3') titulo.style.display = 'none';
+      alvo.style.display = 'none';
+      return;
+    }
+
+    var itens = data.itens || [];
+    if (!itens.length) {
+      alvo.innerHTML = '<div class="small muted">O Omie não retornou itens para esta nota.</div>';
+      return;
+    }
+
+    var t = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+      + '<thead><tr style="text-align:left;border-bottom:2px solid var(--cinza-borda)">'
+      + '<th style="padding:6px 8px">#</th><th style="padding:6px 8px">Código</th>'
+      + '<th style="padding:6px 8px">Descrição</th><th style="padding:6px 8px">NCM</th>'
+      + '<th style="padding:6px 8px">CFOP</th><th style="padding:6px 8px;text-align:right">Qtd</th>'
+      + '<th style="padding:6px 8px;text-align:right">Unitário</th>'
+      + '<th style="padding:6px 8px;text-align:right">Total</th></tr></thead><tbody>';
+    for (var i = 0; i < itens.length; i++) {
+      var it = itens[i];
+      /* Quantidade recebida diferente da faturada e exatamente o que o aprovador
+         precisa notar antes de autorizar — por isso vem marcada, nao escondida. */
+      var divergencia = (it.quantidadeRecebida != null && it.quantidadeRecebida !== it.quantidade);
+      t += '<tr style="border-bottom:1px solid #F0F3F5">'
+        + '<td style="padding:6px 8px" class="muted">' + _npEsc(it.sequencia) + '</td>'
+        + '<td style="padding:6px 8px" class="mono">' + _npEsc(it.codigo || '—') + '</td>'
+        + '<td style="padding:6px 8px">' + _npEsc(it.descricao || '—') + '</td>'
+        + '<td style="padding:6px 8px" class="mono small">' + _npEsc(it.ncm || '—') + '</td>'
+        + '<td style="padding:6px 8px" class="mono small">' + _npEsc(it.cfop || '—') + '</td>'
+        + '<td style="padding:6px 8px;text-align:right">' + _npEsc(it.quantidade)
+        + (it.unidade ? ' <span class="muted small">' + _npEsc(it.unidade) + '</span>' : '')
+        + (divergencia
+            ? '<div class="small" style="color:#8A4B00">recebido: ' + _npEsc(it.quantidadeRecebida) + '</div>'
+            : '')
+        + '</td>'
+        + '<td style="padding:6px 8px;text-align:right">' + _npFmtBRL(it.precoUnitario) + '</td>'
+        + '<td style="padding:6px 8px;text-align:right;font-weight:600">' + _npFmtBRL(it.total) + '</td>'
+        + '</tr>';
+    }
+    t += '</tbody></table></div>';
+
+    var tot = data.totais || {};
+    var cab = data.cabec || {};
+    t += '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:10px;padding:10px;'
+      + 'background:#F7F9FB;border-radius:6px">'
+      + '<div><div class="small muted" style="font-size:10px;text-transform:uppercase">Produtos</div>'
+      + '<div style="font-weight:600">' + _npFmtBRL(tot.produtos) + '</div></div>'
+      + '<div><div class="small muted" style="font-size:10px;text-transform:uppercase">ICMS</div>'
+      + '<div style="font-weight:600">' + _npFmtBRL(tot.valorICMS) + '</div></div>'
+      + '<div><div class="small muted" style="font-size:10px;text-transform:uppercase">Total da NF</div>'
+      + '<div style="font-weight:700">' + _npFmtBRL(tot.nota || cab.valorTotalNF) + '</div></div>'
+      + '</div>';
+
+    /* O card mostra UMA parcela; a NF traz o total. Quando diferem, dizer por que
+       — senao o primeiro aprovador que abrir vai achar que o sistema errou. */
+    var totalNF = tot.nota || cab.valorTotalNF || 0;
+    if (totalNF && Math.abs(totalNF - (d.valor || 0)) > 0.01) {
+      t += '<div class="small muted" style="margin-top:6px;line-height:1.5">'
+        + 'O total da NF (' + _npFmtBRL(totalNF) + ') difere do valor deste card ('
+        + _npFmtBRL(d.valor) + ') porque o card é '
+        + (d.totalParcelas > 1 ? 'uma das ' + d.totalParcelas + ' parcelas' : 'a parcela em aberto')
+        + ' desta nota.</div>';
+    }
+
+    if (data.transporte) {
+      t += '<h3 style="margin:14px 0 4px;font-size:14px">Transporte</h3><div>'
+        + _npLinha('Transportadora', _npEsc(data.transporte.transportadora))
+        + _npLinha('CNPJ', _npEsc(data.transporte.cnpj || '—'))
+        + _npLinha('Volumes', _npEsc((data.transporte.volumes || '—') + ' · '
+            + (data.transporte.especie || '')))
+        + '</div>';
+    }
+
+    alvo.innerHTML = t;
+  } catch (e) {
+    /* Falha aqui nao invalida o card: o resto do modal continua util. */
+    alvo.innerHTML = '<div class="small" style="color:#8A4B00">Não foi possível carregar os itens: '
+      + _npEsc(e.message) + '</div>';
+  }
 }
 
 // CASAMENTO POR NOME DE ARQUIVO — E SUGESTAO, NUNCA DECISAO.
