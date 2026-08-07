@@ -4810,7 +4810,12 @@ function _npLinha(rot, val, mono) {
   return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #F0F3F5">'
     + '<span class="small muted" style="min-width:150px;flex-shrink:0;font-size:11px;'
     + 'text-transform:uppercase;letter-spacing:.03em">' + rot + '</span>'
-    + '<span class="' + (mono ? 'mono ' : '') + 'small" style="font-size:12.5px;word-break:break-all">'
+    /* break-all SO no mono. Em texto normal ele parte no meio da palavra e
+       "com a NF lançada" vira "com a N F lançada" — parece erro de digitacao.
+       A chave de 44 digitos, essa sim, precisa quebrar em qualquer ponto, senao
+       estoura a largura da coluna. */
+    + '<span class="' + (mono ? 'mono ' : '') + 'small" style="font-size:12.5px;'
+    + (mono ? 'word-break:break-all' : 'overflow-wrap:break-word') + '">'
     + val + '</span></div>';
 }
 
@@ -4822,23 +4827,31 @@ function abrirDetalheNF(docId) {
   }
   if (!d) return;
 
-  var h = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">'
-    + '<div><h2 style="margin:0 0 2px">' + _npEsc(d.emitenteNome || 'Emitente não identificado') + '</h2>'
-    + '<div class="small muted mono">' + _npCnpj(d.emitenteCNPJ) + '</div></div>'
-    + '<button class="btn btn-secondary" onclick="closeModal()">Fechar</button></div>';
+  /* CABECALHO EM FAIXA. Quem, quanto e quando saem do fluxo e viram cabecalho:
+     sao o que identifica a conta, e antes disso competiam em peso visual com
+     rotulo de campo. */
+  var h = '<div class="np-cabecalho">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">'
+    + '<div style="min-width:0"><h2>' + _npEsc(d.emitenteNome || 'Emitente não identificado') + '</h2>'
+    + '<div class="np-doc">' + _npCnpj(d.emitenteCNPJ) + '</div></div>'
+    + '<button class="btn-fechar" onclick="closeModal()">Fechar</button></div>';
 
-  h += '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:14px 0;padding:12px;'
-    + 'background:#F7F9FB;border-radius:6px">'
-    + '<div><div class="small muted" style="font-size:10px;text-transform:uppercase">Valor total</div>'
-    + '<div style="font-weight:700;font-size:19px">' + _npFmtBRL(d.valor) + '</div></div>'
-    + '<div><div class="small muted" style="font-size:10px;text-transform:uppercase">'
-    + (d.totalParcelas > 1 ? 'Próximo vencimento' : 'Vencimento') + '</div>'
-    + '<div style="font-weight:600;font-size:15px;margin-top:3px">' + _npData(d.dataVencimento) + '</div></div>'
+  h += '<div class="np-chips">'
+    + '<div class="np-chip destaque"><span class="rot">Valor total</span>'
+    + '<span class="val">' + _npFmtBRL(d.valor) + '</span></div>'
+    + '<div class="np-chip"><span class="rot">'
+    + (d.totalParcelas > 1 ? 'Próximo vencimento' : 'Vencimento') + '</span>'
+    + '<span class="val">' + _npData(d.dataVencimento) + '</span></div>'
     + (d.totalParcelas > 1
-        ? '<div><div class="small muted" style="font-size:10px;text-transform:uppercase">Parcelas</div>'
-          + '<div style="font-weight:600;font-size:15px;margin-top:3px">' + d.parcelasPagas
-          + ' de ' + d.totalParcelas + ' pagas</div></div>' : '')
-    + '</div>';
+        ? '<div class="np-chip"><span class="rot">Parcelas</span><span class="val">'
+          + d.parcelasPagas + ' de ' + d.totalParcelas + ' pagas</span></div>' : '')
+    /* A unidade some no corpo quando ja esta aqui — e onde o olho procura. */
+    + (d.unidade
+        ? '<div class="np-chip"><span class="rot">Unidade</span><span class="val">'
+          + _npEsc(d.unidade) + '</span></div>' : '')
+    + '</div></div>';
+
+  h += '<div class="np-corpo">';
 
   /* DUAS COLUNAS. Em coluna unica o modal virava uma fita de rolagem: para
      comparar o valor da parcela com o total da nota era preciso rolar entre os
@@ -4857,11 +4870,11 @@ function abrirDetalheNF(docId) {
   /* A etiqueta de origem vive no titulo da secao. Dentro de uma caixa propria ela
      obrigava a caixa a existir — e a caixa so existia para repetir nome e CNPJ que
      o cabecalho do modal ja mostra. */
-  h += '<h3 style="margin:2px 0 4px;font-size:14px;display:flex;align-items:center;gap:8px">'
-    + 'Fornecedor <span id="np-forn-origem"></span></h3>'
+  h += '<h3 style="display:flex;align-items:center;gap:8px">Fornecedor '
+    + '<span id="np-forn-origem"></span></h3>'
     + '<div id="np-fornecedor"><div class="small muted">Carregando a ficha…</div></div>';
 
-  h += '<h3 style="margin:16px 0 4px;font-size:14px">Documento</h3><div>'
+  h += '<h3>Documento</h3><div>'
     + _npLinha('Número da NF', _npEsc(d.numeroNF || '—') + (d.serie ? ' · série ' + _npEsc(d.serie) : ''))
     + _npLinha('Emissão', _npData(d.dataEmissao))
     + _npLinha('Chave de acesso', d.chaveAcesso ? _npEsc(d.chaveAcesso) : null, true)
@@ -4877,9 +4890,10 @@ function abrirDetalheNF(docId) {
       + '</div>';
   }
 
-  h += '<h3 style="margin:16px 0 4px;font-size:14px">Roteamento</h3><div>'
-    + _npLinha('Unidade', d.unidade ? '<span class="tag" style="background:#E3F0FB;color:#1565C0">'
-        + _npEsc(d.unidade) + '</span>' : null)
+  h += '<h3>Roteamento</h3><div>'
+    /* Unidade so aqui quando NAO coube no cabecalho. Repetir seria o mesmo defeito
+       que acabamos de tirar da ficha do fornecedor. */
+    + (d.unidade ? '' : _npLinha('Unidade', null))
     + _npLinha('Diretoria', d.diretoria ? '<span class="tag" style="background:#EDE7F6;color:#4527A0">'
         + _npEsc(d.diretoria) + '</span>' : null)
     + (!d.fornecedorCadastrado
@@ -4893,7 +4907,7 @@ function abrirDetalheNF(docId) {
   /* ---------- coluna 2 ---------- */
   h += '<div>';
 
-  h += '<h3 style="margin:2px 0 4px;font-size:14px">Situação no sistema</h3><div>'
+  h += '<h3>Situação no sistema</h3><div>'
     + _npLinha('Etapa', d.notaItemId
         ? 'Lançada' + (d.statusNota ? ' · ' + _npEsc(d.statusNota) : '')
         : 'Ainda não lançada')
@@ -4903,7 +4917,7 @@ function abrirDetalheNF(docId) {
     + '</div>';
 
   if (d.parcelas && d.parcelas.length) {
-    h += '<h3 style="margin:16px 0 4px;font-size:14px">Parcelas</h3>'
+    h += '<h3>Parcelas</h3>'
       + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
       + '<thead><tr style="text-align:left;border-bottom:2px solid var(--cinza-borda)">'
       + '<th style="padding:6px 8px">Parcela</th><th style="padding:6px 8px">Vencimento</th>'
@@ -4934,7 +4948,7 @@ function abrirDetalheNF(docId) {
   }
 
   /* Documentos: carregado depois, para o modal abrir na hora. */
-  h += '<h3 style="margin:16px 0 4px;font-size:14px">Documentos</h3>'
+  h += '<h3>Documentos</h3>'
     + '<div id="np-docs"><div class="small muted">Procurando na sua caixa de entrada…</div></div>';
 
   h += '</div></div>';
@@ -4943,7 +4957,7 @@ function abrirDetalheNF(docId) {
      Fora da grade de proposito: sao oito colunas com descricao de produto, e
      dentro de meia tela a descricao quebraria em tres linhas por item. */
   if (d.chaveAcesso) {
-    h += '<h3 style="margin:18px 0 4px;font-size:14px">Itens da nota</h3>'
+    h += '<h3>Itens da nota</h3>'
       + '<div id="np-itens"><div class="small muted">Buscando os itens no Omie…</div></div>';
   }
 
@@ -4960,6 +4974,8 @@ function abrirDetalheNF(docId) {
     }
   }
   h += '</div>';
+
+  h += '</div>';   /* fecha .np-corpo */
 
   openModal(h, { largo: true });
   window._npDocAtual = d;
@@ -5127,7 +5143,7 @@ async function carregarDetalheNF() {
     }
 
     if (data.transporte) {
-      t += '<h3 style="margin:14px 0 4px;font-size:14px">Transporte</h3><div>'
+      t += '<h3>Transporte</h3><div>'
         + _npLinha('Transportadora', _npEsc(data.transporte.transportadora))
         + _npLinha('CNPJ', _npEsc(data.transporte.cnpj || '—'))
         + _npLinha('Volumes', _npEsc((data.transporte.volumes || '—') + ' · '

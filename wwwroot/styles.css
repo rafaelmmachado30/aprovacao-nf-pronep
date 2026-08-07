@@ -198,11 +198,74 @@
      fornecedor, o documento, as parcelas e os itens viravam uma fita vertical de
      rolagem — para comparar o valor da parcela com o total da nota era preciso
      rolar entre os dois. Lado a lado, cabe na tela. */
-  .modal.modal-largo { max-width: 1080px; }
-  .np-colunas { display: grid; grid-template-columns: 1fr 1fr; gap: 0 30px; align-items: start; }
+  .modal.modal-largo { max-width: 1080px; padding: 0 0 26px; }
+
+  /* CABECALHO EM FAIXA. O modal era branco de ponta a ponta e tudo tinha o mesmo
+     peso visual — nome do fornecedor, rotulo de campo e valor competiam pela
+     atencao. A faixa escura resolve hierarquia antes de resolver estetica: o que
+     identifica a conta (quem, quanto, quando) sai do fluxo e vira cabecalho.
+     Sangra ate a borda com margem negativa porque meia-faixa com margem branca
+     dos lados parece defeito de renderizacao. */
+  .np-cabecalho {
+    padding: 22px 32px 18px;
+    background: linear-gradient(135deg, var(--azul-escuro) 0%, #2A6DA6 55%, #3A8FC4 100%);
+    color: #fff; border-radius: 10px 10px 0 0;
+  }
+  .np-cabecalho h2 { margin: 0; color: #fff; font-size: 20px; line-height: 1.25; font-weight: 700; }
+  .np-cabecalho .np-doc {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 12.5px; color: rgba(255,255,255,.72); margin-top: 3px;
+  }
+  /* Chips de valor: fundo translucido em vez de cor solida — assim eles pertencem
+     a faixa em vez de parecerem colados sobre ela. */
+  .np-chips { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+  .np-chip {
+    background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.18);
+    border-radius: 8px; padding: 7px 14px;
+  }
+  .np-chip .rot {
+    font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em;
+    color: rgba(255,255,255,.7); display: block;
+  }
+  .np-chip .val { font-size: 17px; font-weight: 700; line-height: 1.3; }
+  .np-chip.destaque { background: rgba(255,255,255,.2); }
+  .np-cabecalho .btn-fechar {
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.4);
+    color: #fff; border-radius: 6px; padding: 7px 15px; cursor: pointer; font-size: 13px;
+  }
+  .np-cabecalho .btn-fechar:hover { background: rgba(255,255,255,.26); }
+
+  .np-corpo { padding: 20px 32px 0; }
+
+  /* Titulo de secao com barra de acento: separa os blocos sem precisar de caixa,
+     que engordaria uma tela que ja tem muita informacao. */
+  .np-corpo h3 {
+    color: var(--azul-escuro); font-size: 13px !important; text-transform: uppercase;
+    letter-spacing: .04em; border-left: 3px solid var(--azul-claro);
+    padding-left: 9px; margin: 20px 0 8px !important;
+  }
+  .np-corpo h3:first-child { margin-top: 0 !important; }
+
+  .np-colunas { display: grid; grid-template-columns: 1fr 1fr; gap: 0 32px; align-items: start; }
+  /* Fio entre as colunas: sem ele os dois blocos de rotulo+valor se misturam
+     visualmente e a leitura pula de uma coluna para a outra. */
+  .np-colunas > div:last-child { border-left: 1px solid var(--cinza-borda); padding-left: 32px; }
+  .np-corpo table thead tr { background: var(--azul-bg); }
+  .np-corpo table th { color: var(--azul-escuro); font-weight: 600; }
+
   /* Abaixo de 900px as duas colunas nao cabem sem espremer numero e tabela:
      volta a ser uma so, que e o comportamento certo no celular. */
-  @media (max-width: 900px) { .np-colunas { grid-template-columns: 1fr; } }
+  @media (max-width: 900px) {
+    .np-colunas { grid-template-columns: 1fr; }
+    .np-colunas > div:last-child { border-left: 0; padding-left: 0; margin-top: 6px; }
+    .np-cabecalho, .np-corpo { padding-left: 18px; padding-right: 18px; }
+    /* Precisa de !important porque a regra mobile generica (.modal, em 768px) usa
+       !important para forcar padding 16px. Sem isto a faixa azul ganharia uma
+       moldura branca no celular e pareceria elemento desalinhado, nao cabecalho.
+       Entre declaracoes !important quem decide e a especificidade, e
+       .modal.modal-largo e mais especifico que .modal. */
+    .modal.modal-largo { padding: 0 0 20px !important; }
+  }
   .modal .close-x { float: right; cursor: pointer; color: var(--cinza-medio); font-size: 20px; line-height: 1; }
   .modal-pdf-preview { background: #F0F4F8; border: 1px solid var(--cinza-borda); padding: 16px; margin: 12px 0; border-radius: 4px; font-size: 12px; color: var(--cinza-medio); font-family: 'Courier New', monospace; position: relative; min-height: 220px; }
   .modal-pdf-preview .watermark-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: Arial, sans-serif; transform: rotate(-22deg); color: rgba(0,90,180,0.30); font-size: 22px; font-weight: 800; letter-spacing: 2px; text-align: center; line-height: 1.5; pointer-events: none; }
