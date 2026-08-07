@@ -71,10 +71,13 @@ async function tentar(param, creds) {
   const itens = data.conta_pagar_cadastro || data.contas_pagar_cadastro || [];
   const status = {};
   const vencs = [];
+  const forn = {};
   for (const c of itens) {
     status[String(c.status_titulo || '?')] = (status[String(c.status_titulo || '?')] || 0) + 1;
     if (c.data_vencimento) vencs.push(c.data_vencimento);
+    forn[String(c.codigo_cliente_fornecedor || '?')] = true;
   }
+  const codigos = Object.keys(forn);
   return {
     aceito: true,
     totalRegistros: data.total_de_registros,
@@ -82,7 +85,12 @@ async function tentar(param, creds) {
     /* Os vencimentos provam se o filtro realmente mordeu: se pedi uma janela e
        voltou coisa fora dela, o parametro foi ACEITO mas ignorado — que e pior
        do que ser recusado, porque parece que funcionou. */
-    vencimentos: vencs.slice(0, 6)
+    vencimentos: vencs.slice(0, 6),
+    /* Mesma logica para o filtro de fornecedor: um so codigo na amostra e sinal
+       de que mordeu; varios significam parametro ignorado. */
+    fornecedoresNaAmostra: codigos.slice(0, 6),
+    umFornecedorSo: codigos.length === 1,
+    primeiroFornecedor: codigos[0] || null
   };
 }
 
@@ -138,6 +146,43 @@ module.exports = async function (context, req) {
     for (const [nome, param] of candidatos) {
       try { diag.testes[nome] = await tentar(param, creds); }
       catch (e) { diag.testes[nome] = { aceito: false, erro: e.message }; }
+    }
+
+    /* RODADA 3 — FILTRO POR FORNECEDOR. Isto conserta um bug real.
+       buscarContaPagar procura a conta de UMA nota montando uma janela de data
+       em torno do VENCIMENTO, mas o unico filtro de data que existe e o de
+       ALTERACAO. Numa conta de vencimento longo (IPTU em 10 cotas, parcela
+       010/013) a alteracao foi hoje e a janela esta meses a frente: a conta nao
+       volta, e o lancamento falha com "conta a pagar nao encontrada".
+       Filtrar por fornecedor eliminaria a adivinhacao de data por completo — o
+       conjunto vira "as contas deste fornecedor", que e pequeno e exato.
+       O codigo do fornecedor sai de uma conta real da propria base: inventar um
+       numero testaria o parser do Omie, nao o filtro. */
+    const semFiltro = await tentar({}, creds);
+    const codForn = semFiltro.primeiroFornecedor;
+    diag.fornecedorDeTeste = codForn;
+    if (!codForn) {
+      diag.avisoFornecedor = 'Nao achei nenhuma conta para extrair um codigo de fornecedor.';
+    } else {
+      const porForn = [
+        ['forn_filtrar_por_cliente',        { filtrar_por_cliente: Number(codForn) }],
+        ['forn_codigo_cliente_fornecedor',  { codigo_cliente_fornecedor: Number(codForn) }],
+        ['forn_filtrar_por_fornecedor',     { filtrar_por_fornecedor: Number(codForn) }],
+        ['forn_filtrar_cliente_fornecedor', { filtrar_cliente_fornecedor: Number(codForn) }]
+      ];
+      for (const [nome, param] of porForn) {
+        try {
+          const r = await tentar(param, creds);
+          /* ACEITO NAO BASTA. Se voltou mais de um fornecedor na amostra, o Omie
+             engoliu o parametro e devolveu tudo — usar isso como filtro daria a
+             falsa sensacao de precisao. */
+          if (r.aceito) {
+            r.filtroMordeu = r.umFornecedorSo && r.fornecedoresNaAmostra[0] === String(codForn);
+            if (!r.filtroMordeu) r.alerta = 'ACEITO PORÉM IGNORADO — nao use como filtro';
+          }
+          diag.testes[nome] = r;
+        } catch (e) { diag.testes[nome] = { aceito: false, erro: e.message }; }
+      }
     }
 
     diag.timeMs = Date.now() - t0;
