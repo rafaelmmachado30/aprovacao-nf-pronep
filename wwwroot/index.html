@@ -4854,7 +4854,11 @@ function abrirDetalheNF(docId) {
   /* Ficha do fornecedor: carregada junto com o resto. Vem primeiro porque e a
      primeira pergunta de quem abre o card — "quem esta cobrando" antes de
      "quanto" e "quando". */
-  h += '<h3 style="margin:2px 0 4px;font-size:14px">Fornecedor</h3>'
+  /* A etiqueta de origem vive no titulo da secao. Dentro de uma caixa propria ela
+     obrigava a caixa a existir — e a caixa so existia para repetir nome e CNPJ que
+     o cabecalho do modal ja mostra. */
+  h += '<h3 style="margin:2px 0 4px;font-size:14px;display:flex;align-items:center;gap:8px">'
+    + 'Fornecedor <span id="np-forn-origem"></span></h3>'
     + '<div id="np-fornecedor"><div class="small muted">Carregando a ficha…</div></div>';
 
   h += '<h3 style="margin:16px 0 4px;font-size:14px">Documento</h3><div>'
@@ -4966,33 +4970,45 @@ function abrirDetalheNF(docId) {
 
 /* Ficha do fornecedor. A origem vem marcada de proposito: "cadastro" e dado
    nosso, curado; "omie" e do ERP; "documento" e so o que veio na conta. Quem
-   olha precisa saber se esta vendo cadastro ou eco da nota — a acao muda. */
-function _npFichaFornecedor(fo) {
+/* Ficha do fornecedor — SO o que o cabecalho do modal ainda nao disse.
+ *
+ * Nome e CNPJ ja aparecem no topo, em destaque. Repeti-los numa caixa logo abaixo
+ * nao acrescenta nada e ainda cria duvida: duas grafias do mesmo dado fazem quem
+ * le procurar a diferenca entre elas.
+ *
+ * A razao social volta a aparecer numa unica situacao — quando a do CADASTRO
+ * difere da que veio na conta. Aí nao e repeticao, e divergencia, e vale ver.
+ *
+ * A origem do dado ("cadastro" / "omie" / "documento") vai como etiqueta no titulo
+ * da secao. Quem olha precisa saber se esta vendo cadastro ou eco da nota: a acao
+ * muda — cadastro se corrige, eco da nota se cadastra.
+ */
+function _npFichaFornecedor(fo, card) {
+  var alvo = document.getElementById('np-forn-origem');
+  if (alvo) alvo.innerHTML = '';
   if (!fo) return '<div class="small muted">Sem ficha de fornecedor.</div>';
-  var doc = fo.documento || '';
-  var rotulo = fo.tipoDocumento === 'CPF' ? 'CPF' : 'CNPJ';
-  var local = [fo.cidade, fo.uf].filter(Boolean).join(' / ');
-  var endereco = [fo.logradouro, fo.bairro].filter(Boolean).join(' — ');
 
   var origem = { cadastro: ['Cadastro Pronep', '#E8F5E9', '#1B5E20'],
                  omie: ['Cadastro do Omie', '#E3F0FB', '#1565C0'],
-                 documento: ['Só o que veio na conta', '#FFF4E5', '#8A4B00'] }[fo.origem]
-             || ['—', '#EEE', '#555'];
+                 documento: ['Só o que veio na conta', '#FFF4E5', '#8A4B00'] }[fo.origem];
+  if (alvo && origem) {
+    alvo.innerHTML = '<span class="tag" style="font-size:10px;font-weight:400;white-space:nowrap;'
+      + 'background:' + origem[1] + ';color:' + origem[2] + '">' + origem[0] + '</span>';
+  }
 
-  var h = '<div style="padding:12px;background:#F7F9FB;border-radius:6px;margin-bottom:6px">'
-    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
-    + '<div><div style="font-weight:700;font-size:15px">' + _npEsc(fo.razao || '—') + '</div>'
-    + (fo.fantasia && fo.fantasia !== fo.razao
-        ? '<div class="small muted">' + _npEsc(fo.fantasia) + '</div>' : '')
-    + '<div class="mono" style="font-size:14px;margin-top:5px">'
-    + '<span class="small muted" style="font-size:10px;text-transform:uppercase">' + rotulo + '</span> '
-    + _npEsc(doc ? _npCnpj(doc) : '—') + '</div></div>'
-    /* nowrap: na coluna estreita "Cadastro Pronep" quebrava em duas linhas e a
-       etiqueta virava um bloco maior que o dado que ela qualifica. */
-    + '<span class="tag" style="font-size:10px;white-space:nowrap;background:' + origem[1]
-    + ';color:' + origem[2] + '">' + origem[0] + '</span></div></div>';
+  function mesmoTexto(a, b) {
+    return String(a || '').trim().toUpperCase() === String(b || '').trim().toUpperCase();
+  }
+  var nomeDoTopo = (card && card.emitenteNome) || '';
+  var local = [fo.cidade, fo.uf].filter(Boolean).join(' / ');
+  var endereco = [fo.logradouro, fo.bairro].filter(Boolean).join(' — ');
 
-  h += '<div>'
+  var h = '<div>'
+    /* So quando difere do nome do cabecalho — ver o comentario acima. */
+    + (fo.razao && !mesmoTexto(fo.razao, nomeDoTopo)
+        ? _npLinha('Razão social', _npEsc(fo.razao)) : '')
+    + (fo.fantasia && !mesmoTexto(fo.fantasia, fo.razao) && !mesmoTexto(fo.fantasia, nomeDoTopo)
+        ? _npLinha('Nome fantasia', _npEsc(fo.fantasia)) : '')
     + (endereco ? _npLinha('Endereço', _npEsc(endereco)) : '')
     + (local ? _npLinha('Cidade / UF', _npEsc(local)) : '')
     + (fo.cep ? _npLinha('CEP', _npEsc(fo.cep)) : '')
@@ -5043,7 +5059,8 @@ async function carregarDetalheNF() {
     var data = await r.json();
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
 
-    if (alvoForn) alvoForn.innerHTML = _npFichaFornecedor(data.fornecedor);
+    /* Passa o card para a ficha saber o que o cabecalho ja mostrou e nao repetir. */
+    if (alvoForn) alvoForn.innerHTML = _npFichaFornecedor(data.fornecedor, d);
 
     /* Sem chave nao ha itens a buscar. Some com a secao inteira (titulo incluso):
        deixar "Itens da nota" seguido de vazio parece falha de carregamento. */
