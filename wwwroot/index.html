@@ -4825,6 +4825,12 @@ function abrirDetalheNF(docId) {
           + ' de ' + d.totalParcelas + ' pagas</div></div>' : '')
     + '</div>';
 
+  /* Ficha do fornecedor: carregada junto com o resto. Fica ANTES do documento
+     porque e a primeira pergunta de quem abre o card — "quem esta cobrando" vem
+     antes de "quanto" e "quando". */
+  h += '<h3 style="margin:16px 0 4px;font-size:14px">Fornecedor</h3>'
+    + '<div id="np-fornecedor"><div class="small muted">Carregando a ficha…</div></div>';
+
   h += '<h3 style="margin:16px 0 4px;font-size:14px">Documento</h3><div>'
     + _npLinha('Número da NF', _npEsc(d.numeroNF || '—') + (d.serie ? ' · série ' + _npEsc(d.serie) : ''))
     + _npLinha('Emissão', _npData(d.dataEmissao))
@@ -4916,7 +4922,59 @@ function abrirDetalheNF(docId) {
   openModal(h);
   window._npDocAtual = d;
   setTimeout(carregarDocsDoCard, 30);
-  if (d.chaveAcesso) setTimeout(carregarItensDaNF, 30);
+  /* Sempre — a ficha do fornecedor nao depende de haver chave de acesso. */
+  setTimeout(carregarDetalheNF, 30);
+}
+
+/* Ficha do fornecedor. A origem vem marcada de proposito: "cadastro" e dado
+   nosso, curado; "omie" e do ERP; "documento" e so o que veio na conta. Quem
+   olha precisa saber se esta vendo cadastro ou eco da nota — a acao muda. */
+function _npFichaFornecedor(fo) {
+  if (!fo) return '<div class="small muted">Sem ficha de fornecedor.</div>';
+  var doc = fo.documento || '';
+  var rotulo = fo.tipoDocumento === 'CPF' ? 'CPF' : 'CNPJ';
+  var local = [fo.cidade, fo.uf].filter(Boolean).join(' / ');
+  var endereco = [fo.logradouro, fo.bairro].filter(Boolean).join(' — ');
+
+  var origem = { cadastro: ['Cadastro Pronep', '#E8F5E9', '#1B5E20'],
+                 omie: ['Cadastro do Omie', '#E3F0FB', '#1565C0'],
+                 documento: ['Só o que veio na conta', '#FFF4E5', '#8A4B00'] }[fo.origem]
+             || ['—', '#EEE', '#555'];
+
+  var h = '<div style="padding:12px;background:#F7F9FB;border-radius:6px;margin-bottom:6px">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">'
+    + '<div><div style="font-weight:700;font-size:15px">' + _npEsc(fo.razao || '—') + '</div>'
+    + (fo.fantasia && fo.fantasia !== fo.razao
+        ? '<div class="small muted">' + _npEsc(fo.fantasia) + '</div>' : '')
+    + '<div class="mono" style="font-size:14px;margin-top:5px">'
+    + '<span class="small muted" style="font-size:10px;text-transform:uppercase">' + rotulo + '</span> '
+    + _npEsc(doc ? _npCnpj(doc) : '—') + '</div></div>'
+    + '<span class="tag" style="font-size:10px;background:' + origem[1] + ';color:' + origem[2] + '">'
+    + origem[0] + '</span></div></div>';
+
+  h += '<div>'
+    + (endereco ? _npLinha('Endereço', _npEsc(endereco)) : '')
+    + (local ? _npLinha('Cidade / UF', _npEsc(local)) : '')
+    + (fo.cep ? _npLinha('CEP', _npEsc(fo.cep)) : '')
+    + (fo.telefone ? _npLinha('Telefone', _npEsc(fo.telefone)) : '')
+    + (fo.email ? _npLinha('E-mail', _npEsc(fo.email)) : '')
+    + (fo.inscricaoEstadual ? _npLinha('Inscrição estadual', _npEsc(fo.inscricaoEstadual)) : '')
+    + (fo.origem === 'cadastro'
+        ? _npLinha('Situação', fo.ativo
+            ? '<span style="color:#1B5E20">Ativo</span>'
+            : '<span style="color:#8A4B00">Inativo</span>')
+        : '')
+    + '</div>';
+
+  /* Fornecedor sem cadastro nosso nao tem unidade nem diretoria — e sem elas o
+     card nao tem aprovador. Dizer o que falta vale mais do que so omitir. */
+  if (fo.origem !== 'cadastro') {
+    h += '<div class="small muted" style="margin-top:6px;line-height:1.5">'
+      + 'Este fornecedor <b>não está no cadastro da Pronep</b>. Sem cadastro não há '
+      + 'unidade nem diretoria, e por isso o card aparece para todos até alguém '
+      + 'completar.</div>';
+  }
+  return h;
 }
 
 // ITENS DA NF — vem do Omie (modulo Recebimento de NF-e), por chave de acesso.
@@ -4927,24 +4985,30 @@ function abrirDetalheNF(docId) {
 //
 // O QUE ESTA API NAO TRAZ: o arquivo. Nao ha XML nem link de DANFE — so o
 // conteudo. O PDF continua vindo do e-mail ou do anexo manual.
-async function carregarItensDaNF() {
+async function carregarDetalheNF() {
   var alvo = document.getElementById('np-itens');
+  var alvoForn = document.getElementById('np-fornecedor');
   var d = window._npDocAtual;
-  if (!alvo || !d) return;
+  if (!d || (!alvo && !alvoForn)) return;
+  function sumirItens() {
+    if (!alvo) return;
+    var t = alvo.previousElementSibling;
+    if (t && t.tagName === 'H3') t.style.display = 'none';
+    alvo.style.display = 'none';
+  }
   try {
     var lente = window._viewAsDiretoria || '';
     var r = await fetch('/api/DetalheNFOmie?docId=' + encodeURIComponent(d.id)
       + (lente ? '&verComo=' + encodeURIComponent(lente) : ''), { credentials: 'include' });
     var data = await r.json();
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
-    /* Sem chave nao ha o que buscar. Some com a secao inteira (titulo incluso):
+
+    if (alvoForn) alvoForn.innerHTML = _npFichaFornecedor(data.fornecedor);
+
+    /* Sem chave nao ha itens a buscar. Some com a secao inteira (titulo incluso):
        deixar "Itens da nota" seguido de vazio parece falha de carregamento. */
-    if (data.semChave) {
-      var titulo = alvo.previousElementSibling;
-      if (titulo && titulo.tagName === 'H3') titulo.style.display = 'none';
-      alvo.style.display = 'none';
-      return;
-    }
+    if (data.semChave) { sumirItens(); return; }
+    if (!alvo) return;
 
     var itens = data.itens || [];
     if (!itens.length) {
@@ -5016,9 +5080,13 @@ async function carregarItensDaNF() {
 
     alvo.innerHTML = t;
   } catch (e) {
-    /* Falha aqui nao invalida o card: o resto do modal continua util. */
-    alvo.innerHTML = '<div class="small" style="color:#8A4B00">Não foi possível carregar os itens: '
+    /* Falha aqui nao invalida o card: o resto do modal continua util. E o alvo
+       dos itens pode nem existir (NFS-e nao tem a secao) — escrever nele sem
+       checar transformaria uma falha de rede em modal quebrado. */
+    var msg = '<div class="small" style="color:#8A4B00">Não foi possível carregar: '
       + _npEsc(e.message) + '</div>';
+    if (alvo) alvo.innerHTML = msg;
+    if (alvoForn && /Carregando/.test(alvoForn.innerHTML)) alvoForn.innerHTML = msg;
   }
 }
 

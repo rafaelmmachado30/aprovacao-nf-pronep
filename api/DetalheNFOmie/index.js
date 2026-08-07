@@ -53,16 +53,58 @@ async function fornecedorPorCnpj(client, siteId) {
   if (idForn) {
     for (const it of await todosItens(client, siteId, idForn)) {
       const f = it.fields || {};
-      /* field_2=documento, field_4=unidade, field_5=diretoria, field_7=ativo
+      /* Title=razao, field_1=tipoDoc, field_2=documento, field_3=fantasia,
+         field_4=unidade, field_5=diretoria, field_6=uf, field_7=ativo,
+         field_8=telefone, field_9=email, field_10=cidade, field_11=cep
          (mesmo mapa de ListarFornecedores — se um mudar, os dois mudam). */
       const doc = soDigitos(f.field_2);
-      if (doc.length !== 14 || mapa[doc]) continue;
-      mapa[doc] = { unidade: f.field_4 || '', diretoria: f.field_5 || '',
-                    ativo: String(f.field_7 || '').toLowerCase() === 'sim' };
+      /* 11 digitos tambem entram: fornecedor pessoa fisica existe e hoje ficava
+         de fora do cabecalho por causa de um teste de tamanho. */
+      if ((doc.length !== 14 && doc.length !== 11) || mapa[doc]) continue;
+      mapa[doc] = {
+        razao: f.Title || '', fantasia: f.field_3 || '',
+        tipoDocumento: f.field_1 || '', documento: doc,
+        unidade: f.field_4 || '', diretoria: f.field_5 || '',
+        uf: f.field_6 || '', cidade: f.field_10 || '', cep: f.field_11 || '',
+        telefone: f.field_8 || '', email: f.field_9 || '',
+        ativo: String(f.field_7 || '').toLowerCase() === 'sim'
+      };
     }
   }
   _fornCache = { em: Date.now(), mapa: mapa };
   return mapa;
+}
+
+/* Cadastro do fornecedor no Omie — SO quando nao temos o nosso.
+   O cadastro local vem primeiro por tres motivos: e instantaneo, e curado pela
+   Pronep (unidade e diretoria so existem la) e nao gasta chamada numa API com
+   limite de ~60/min. O Omie entra exatamente onde o local falha: fornecedor que
+   ainda nao foi cadastrado — que e tambem quando esses dados mais servem, porque
+   e deles que sai o cadastro. */
+async function fornecedorNoOmie(codigoClienteOmie, unidade) {
+  if (!codigoClienteOmie) return null;
+  const creds = getCredentials(unidade);
+  const resp = await fetch(OMIE_BASE + '/geral/clientes/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
+               'User-Agent': 'PronepNF/1.0 (Azure SWA Functions)' },
+    body: JSON.stringify({ call: 'ConsultarCliente', app_key: creds.appKey,
+                           app_secret: creds.appSecret,
+                           param: [{ codigo_cliente_omie: Number(codigoClienteOmie) }] })
+  });
+  const texto = await resp.text();
+  let d;
+  try { d = JSON.parse(texto); } catch (e) { return null; }
+  if (!d || d.faultstring) return null;
+  const partes = [d.endereco, d.endereco_numero, d.complemento].filter(Boolean);
+  return {
+    razao: d.razao_social || '', fantasia: d.nome_fantasia || '',
+    documento: soDigitos(d.cnpj_cpf), tipoDocumento: soDigitos(d.cnpj_cpf).length === 11 ? 'CPF' : 'CNPJ',
+    logradouro: partes.join(', '), bairro: d.bairro || '',
+    cidade: d.cidade || '', uf: d.estado || '', cep: d.cep || '',
+    telefone: [d.telefone1_ddd, d.telefone1_numero].filter(Boolean).join(' '),
+    email: d.email || '', inscricaoEstadual: d.inscricao_estadual || ''
+  };
 }
 
 async function consultarRecebimento(chave, creds) {
@@ -155,16 +197,37 @@ module.exports = async function (context, req) {
       return;
     }
 
+    const unidade = String(f.UnidadeOmie || 'RJ').toUpperCase();
+
+    /* Cabecalho do fornecedor. Vem ANTES do desvio de "sem chave" porque nao
+       depende de NF-e nenhuma: e justamente na NFS-e, que nao tem itens para
+       mostrar, que a ficha do fornecedor sustenta a tela sozinha. */
+    let fornecedor = null;
+    if (forn) {
+      fornecedor = Object.assign({ origem: 'cadastro' }, forn);
+    } else if (f.CodigoClienteOmie) {
+      try {
+        const noOmie = await fornecedorNoOmie(f.CodigoClienteOmie, unidade);
+        if (noOmie) fornecedor = Object.assign({ origem: 'omie' }, noOmie);
+      } catch (e) { /* cabecalho incompleto nao invalida o resto da tela */ }
+    }
+    /* Ultimo recurso: o que o proprio documento guarda. Sem isto, um fornecedor
+       nao cadastrado e sem codigo do Omie abriria um modal sem nome nenhum. */
+    if (!fornecedor && (f.EmitenteNome || cnpj)) {
+      fornecedor = { origem: 'documento', razao: f.EmitenteNome || '', documento: cnpj,
+                     tipoDocumento: cnpj.length === 11 ? 'CPF' : 'CNPJ' };
+    }
+
     const chave = soDigitos(f.ChaveAcesso);
     if (chave.length !== 44) {
       context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
-        body: { ok: true, semChave: true, timeMs: Date.now() - t0,
+        body: { ok: true, semChave: true, fornecedor: fornecedor,
+          timeMs: Date.now() - t0,
           motivo: 'Documento sem chave de acesso — NFS-e de servico ou lancamento ' +
                   'manual. O Omie so guarda itens de NF-e recebida.' } };
       return;
     }
 
-    const unidade = String(f.UnidadeOmie || 'RJ').toUpperCase();
     const d = await consultarRecebimento(chave, getCredentials(unidade));
 
     const cab = (d && d.cabec) || {};
@@ -188,6 +251,7 @@ module.exports = async function (context, req) {
       body: {
         ok: true,
         chave: chave,
+        fornecedor: fornecedor,
         cabec: {
           numeroNF: cab.cNumeroNFe || '', serie: cab.cSerieNFe || '',
           modelo: cab.cModeloNFe || '', emissao: cab.dEmissaoNFe || '',
