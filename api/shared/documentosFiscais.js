@@ -624,9 +624,24 @@ async function casarDocumentosPendentes(client, siteId, opts) {
     grupos[k].linhas.push(d);
   }
 
+  /* Indice por CNPJ para achar divergencia de NUMERO. Ver o bloco no fim do laco. */
+  const notasPorCnpj = {};
+  for (const n of notas) {
+    const c = soDigitos(n.f.CNPJFornecedor);
+    if (!c) continue;
+    if (!notasPorCnpj[c]) notasPorCnpj[c] = [];
+    notasPorCnpj[c].push(n);
+  }
+  const notaJaUsada = {};
+  for (const d of docs) {
+    const g = d.fields || {};
+    if (g.NotaItemId) notaJaUsada[String(g.NotaItemId)] = true;
+  }
+
   const ops = [];
   const ambiguos = [];
   const casados = [];
+  const divergenciasDeNumero = [];
   for (const k of Object.keys(grupos)) {
     const g = grupos[k];
     let nota = null, via = null;
@@ -642,6 +657,41 @@ async function casarDocumentosPendentes(client, siteId, opts) {
         continue;
       }
     }
+    /* NAO CASOU: sera que so o NUMERO esta errado?
+       O quadro virou auditoria de digitacao. Medido na base: Payfy lancada como
+       42010 e no Omie 42012; Iberwan 18593 contra 18539. Em todas o VALOR batia.
+       Aqui procuramos, entre as notas do mesmo fornecedor, alguma com o MESMO
+       VALOR e numero diferente — o valor e o sinal que sobrevive ao erro de
+       digitacao. So aponta; corrigir o numero de uma NF aprovada e decisao de
+       quem responde pelo processo, nao efeito colateral de um diagnostico. */
+    if (!nota && g.cnpj) {
+      const valorDoc = Number((g.linhas[0].fields || {}).Valor || 0);
+      if (valorDoc > 0) {
+        const iguaisNoValor = (notasPorCnpj[g.cnpj] || []).filter(function (n) {
+          if (notaJaUsada[String(n.id)]) return false;
+          if (numNorm(n.f.NumeroNF) === g.num) return false;      /* numero bate: nao e este caso */
+          return Math.abs(Number(n.f.Valor || 0) - valorDoc) < 0.01;
+        });
+        /* Um so candidato = correcao obvia. Varios = nao da para dizer qual, e
+           chutar aqui produziria uma lista de "corrija para X" errada. */
+        if (iguaisNoValor.length === 1) {
+          const n = iguaisNoValor[0];
+          divergenciasDeNumero.push({
+            fornecedor: (g.linhas[0].fields || {}).EmitenteNome || '',
+            cnpj: g.cnpj,
+            valor: valorDoc,
+            numeroNoOmie: (g.linhas[0].fields || {}).NumeroNF || '',
+            numeroNaNota: n.f.NumeroNF || '',
+            notaId: n.id,
+            statusDaNota: n.f.Status || '',
+            unidade: n.f.Unidade || '',
+            vencimentoNoOmie: (g.linhas[0].fields || {}).DataVencimento || null,
+            vencimentoNaNota: n.f.DataVencimento || null
+          });
+        }
+      }
+    }
+
     if (!nota) continue;
 
     for (const linha of g.linhas) {
@@ -668,6 +718,10 @@ async function casarDocumentosPendentes(client, siteId, opts) {
     linhasRestantes: r.restantes,
     falhas: r.falhas.length,
     ambiguos: ambiguos,
+    /* Lista de "corrija o numero desta nota". E o que permite arrumar na origem
+       em vez de vincular por cima: numero errado tambem quebra relatorio e o
+       buscarContaPagar, que procura a conta no Omie pelo numero. */
+    divergenciasDeNumero: divergenciasDeNumero,
     casados: casados.slice(0, 50)
   };
 }

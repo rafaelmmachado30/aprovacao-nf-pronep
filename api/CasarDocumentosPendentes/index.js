@@ -78,6 +78,13 @@ module.exports = async function (context, req) {
         'de exibicao. Este endpoint traduz, mas outros pontos que leem o campo cru ' +
         'podem estar lendo undefined — vale revisar.');
     }
+    if (r.divergenciasDeNumero && r.divergenciasDeNumero.length) {
+      avisos.push(r.divergenciasDeNumero.length + ' NF(s) com o MESMO valor e numero ' +
+        'DIFERENTE — provavel erro de digitacao no lancamento. Veja ' +
+        '"divergenciasDeNumero": corrigir o numero na lista de Notas faz o ' +
+        'casamento acontecer sozinho na proxima execucao, e ainda conserta ' +
+        'relatorio e a busca da conta no Omie, que tambem usa o numero.');
+    }
     if (r.ambiguos && r.ambiguos.length) {
       avisos.push(r.ambiguos.length + ' documento(s) com mais de uma nota candidata. ' +
         'Nao foram vinculados de proposito: escolher errado faria o card exibir o ' +
