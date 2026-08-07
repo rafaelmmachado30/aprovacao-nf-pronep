@@ -86,6 +86,11 @@ module.exports = async function (context, req) {
   /* So resolve CNPJ de fornecedor, sem ler contas do Omie. Ver o bloco no laco. */
   const apenasFornecedores = q.apenasFornecedores === '1' || q.apenasFornecedores === 'true';
   const pedido = String(q.unidade || 'TODAS').toUpperCase();
+  /* Retomada da leitura. Uma unidade com mais de 1.000 contas em aberto (SP tem
+     2.053) nao cabe numa execucao; sem isto, cada rodada releria a pagina 1 e a
+     segunda metade nunca entraria. Faixas sobrepostas sao seguras — a gravacao
+     casa por codigo_lancamento_omie e atualiza em vez de duplicar. */
+  const paginaInicial = Math.max(1, parseInt(q.paginaInicial, 10) || 1);
   const unidades = pedido === 'TODAS' ? ['RJ', 'SP', 'ES'] : [pedido];
 
   const diag = { step: 'init', dryRun: dryRun, dias: dias, unidades: [], avisos: [], timeMs: 0 };
@@ -206,14 +211,20 @@ module.exports = async function (context, req) {
       let abertas = [];
       try {
         const r = await listarContasPagarPorVencimento(
-          { filtroExtra: { filtrar_por_status: 'EMABERTO' }, maxPaginas: 20 }, creds);
+          { filtroExtra: { filtrar_por_status: 'EMABERTO' },
+            maxPaginas: 20, paginaInicial: paginaInicial }, creds);
         abertas = r.contas;
         bloco.emAberto = abertas.length;
         bloco.truncado = r.truncado;
+        bloco.paginasLidas = { de: paginaInicial, ate: r.ultimaPaginaLida, total: r.totalPaginas };
         if (r.truncado) {
-          diag.avisos.push(u + ': a lista de contas em aberto foi truncada (' + r.paginas +
-            ' paginas lidas de ' + Math.ceil(r.totalRegistros / 50) + '). O quadro pode ' +
-            'estar incompleto — aumente maxPaginas ou sincronize essa unidade sozinha.');
+          /* O aviso antigo mandava "aumentar maxPaginas ou sincronizar a unidade
+             sozinha" — nenhum dos dois resolvia, porque a leitura sempre recomecava
+             da pagina 1. Agora diz exatamente qual URL rodar em seguida. */
+          bloco.proximaPagina = r.proximaPagina;
+          diag.avisos.push(u + ': faltam paginas (' + r.ultimaPaginaLida + ' de ' +
+            r.totalPaginas + ' lidas). Rode em seguida: ?unidade=' + u +
+            '&paginaInicial=' + r.proximaPagina);
         }
       } catch (e) { bloco.erro = 'em aberto: ' + e.message; continue; }
 

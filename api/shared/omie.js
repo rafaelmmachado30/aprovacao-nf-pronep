@@ -638,11 +638,21 @@ async function listarContasPagarPorVencimento(opts, creds) {
   }
   Object.assign(base, opts.filtroExtra || {});
 
-  for (let pagina = 1; pagina <= maxPag; pagina++) {
+  /* RETOMADA POR PAGINA. Sem isto, uma unidade maior que maxPag NUNCA sincroniza
+     por inteiro: cada execucao le da pagina 1 e traz sempre os mesmos registros.
+     SP tem 2.053 contas em aberto contra o teto de 1.000 de uma execucao — metade
+     ficaria fora para sempre, e o quadro pareceria completo.
+     Reler faixas sobrepostas e seguro: a gravacao casa por codigo_lancamento_omie
+     e atualiza em vez de duplicar. */
+  const inicio = Math.max(1, Number(opts.paginaInicial) || 1);
+  let ultimaLida = inicio - 1;
+
+  for (let pagina = inicio; pagina < inicio + maxPag; pagina++) {
     const resp = await callOmie('/financas/contapagar/', 'ListarContasPagar',
       Object.assign({}, base, { pagina: pagina }), creds);
 
     paginas++;
+    ultimaLida = pagina;
     totalRegistros = (resp && resp.total_de_registros) || totalRegistros;
     totalPags = (resp && resp.total_de_paginas) || pagina;
     const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
@@ -651,10 +661,14 @@ async function listarContasPagarPorVencimento(opts, creds) {
     if (pagina >= totalPags) break;
   }
 
-  /* truncado avisa que a janela tem mais paginas do que lemos. Sem esse sinal, um
-     quadro incompleto passa por completo — que e o pior tipo de erro num painel
-     de contas a pagar. */
-  return { contas, paginas, totalRegistros, truncado: paginas < totalPags };
+  /* truncado avisa que sobrou base por ler. Sem esse sinal, um quadro incompleto
+     passa por completo — o pior tipo de erro num painel de contas a pagar.
+     proximaPagina diz por onde retomar, em vez de deixar a conta para o usuario. */
+  const truncado = ultimaLida < totalPags;
+  return { contas, paginas, totalRegistros, totalPaginas: totalPags,
+           ultimaPaginaLida: ultimaLida,
+           proximaPagina: truncado ? ultimaLida + 1 : null,
+           truncado: truncado };
 }
 
 /* Cache em memoria do codigo interno do Omie -> CNPJ. A instancia da Function e
