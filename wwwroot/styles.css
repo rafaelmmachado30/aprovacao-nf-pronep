@@ -194,6 +194,15 @@
   .modal-backdrop.active { display: flex; }
   .modal { background: var(--branco); border-radius: 10px; padding: 28px 32px; max-width: 560px; width: 100%; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
   .modal h3 { margin: 0 0 14px; color: var(--azul-escuro); font-size: 18px; }
+  /* Detalhe da NF: tela larga em vez de coluna alta. Com 560px a ficha do
+     fornecedor, o documento, as parcelas e os itens viravam uma fita vertical de
+     rolagem — para comparar o valor da parcela com o total da nota era preciso
+     rolar entre os dois. Lado a lado, cabe na tela. */
+  .modal.modal-largo { max-width: 1080px; }
+  .np-colunas { display: grid; grid-template-columns: 1fr 1fr; gap: 0 30px; align-items: start; }
+  /* Abaixo de 900px as duas colunas nao cabem sem espremer numero e tabela:
+     volta a ser uma so, que e o comportamento certo no celular. */
+  @media (max-width: 900px) { .np-colunas { grid-template-columns: 1fr; } }
   .modal .close-x { float: right; cursor: pointer; color: var(--cinza-medio); font-size: 20px; line-height: 1; }
   .modal-pdf-preview { background: #F0F4F8; border: 1px solid var(--cinza-borda); padding: 16px; margin: 12px 0; border-radius: 4px; font-size: 12px; color: var(--cinza-medio); font-family: 'Courier New', monospace; position: relative; min-height: 220px; }
   .modal-pdf-preview .watermark-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: Arial, sans-serif; transform: rotate(-22deg); color: rgba(0,90,180,0.30); font-size: 22px; font-weight: 800; letter-spacing: 2px; text-align: center; line-height: 1.5; pointer-events: none; }

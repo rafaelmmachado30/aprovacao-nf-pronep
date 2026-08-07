@@ -1306,8 +1306,13 @@ function toast(msg, kind='info') {
   document.getElementById('toasts').appendChild(el);
   setTimeout(() => el.remove(), 3500);
 }
-function openModal(html) {
-  document.getElementById('modal-content').innerHTML = html;
+/* opts.largo abre o modal em tela larga (detalhe da NF). A classe e SEMPRE
+   removida quando nao pedida: sem isso o proximo modal pequeno herdaria a largura
+   do anterior, e um "confirmar exclusao" apareceria com 1080px. */
+function openModal(html, opts) {
+  var caixa = document.getElementById('modal-content');
+  caixa.innerHTML = html;
+  caixa.classList.toggle('modal-largo', !!(opts && opts.largo));
   document.getElementById('modal-backdrop').classList.add('active');
 }
 function closeModal() { document.getElementById('modal-backdrop').classList.remove('active'); }
@@ -4393,10 +4398,20 @@ function renderNFsAPagar(data) {
 // tela inteira faria o campo de busca perder o foco a cada tecla.
 function renderColunasNFPagar(data) {
   var cols = [
-    { k: 'novas',     titulo: 'Novas na SEFAZ', cor: '#1565C0', ajuda: 'Emitidas contra nossos CNPJs e ainda nao lancadas.' },
-    { k: 'lancadas',  titulo: 'Lançadas',       cor: '#EF6C00', ajuda: 'Ja viraram NF e estao aguardando aprovacao.' },
-    { k: 'aprovadas', titulo: 'Aprovadas',      cor: '#2E7D32', ajuda: 'Aprovadas, aguardando pagamento.' },
-    { k: 'quitadas',  titulo: 'Quitadas',       cor: '#5E6C77', ajuda: 'Processadas no financeiro.' }
+    /* Os ROTULOS mudam; as chaves nao. `quitadas` e `novas` viajam pela API, pelos
+       testes e pelo codigo — renomear identificador para corrigir texto de tela
+       espalha a mudanca sem necessidade.
+       "Quitadas" afirmava pagamento, e a coluna nao prova isso: ela reune o que o
+       financeiro processou aqui E o que o Omie ja marcou como pago. "Processadas
+       pelo Financeiro" descreve o tramite, que e o que a coluna de fato sabe.
+       "Novas na SEFAZ" ficou falso quando a origem virou o Omie — a SEFAZ esta
+       desligada. Rotulo que aponta para a fonte errada manda quem investiga
+       procurar no lugar errado. */
+    { k: 'novas',     titulo: 'Novas',      cor: '#1565C0', ajuda: 'Vieram do Omie e ainda nao foram lancadas aqui.' },
+    { k: 'lancadas',  titulo: 'Lançadas',   cor: '#EF6C00', ajuda: 'Ja viraram NF e estao aguardando aprovacao.' },
+    { k: 'aprovadas', titulo: 'Aprovadas',  cor: '#2E7D32', ajuda: 'Aprovadas, aguardando pagamento.' },
+    { k: 'quitadas',  titulo: 'Processadas pelo Financeiro', cor: '#5E6C77',
+      ajuda: 'O financeiro concluiu o tramite, ou o Omie ja marcou a conta como paga.' }
   ];
   var termo = (window._nfsAPagarBusca || '').trim();
   var fUnid = window._nfsAPagarUnidade || '';
@@ -4825,10 +4840,21 @@ function abrirDetalheNF(docId) {
           + ' de ' + d.totalParcelas + ' pagas</div></div>' : '')
     + '</div>';
 
-  /* Ficha do fornecedor: carregada junto com o resto. Fica ANTES do documento
-     porque e a primeira pergunta de quem abre o card — "quem esta cobrando" vem
-     antes de "quanto" e "quando". */
-  h += '<h3 style="margin:16px 0 4px;font-size:14px">Fornecedor</h3>'
+  /* DUAS COLUNAS. Em coluna unica o modal virava uma fita de rolagem: para
+     comparar o valor da parcela com o total da nota era preciso rolar entre os
+     dois, e conferencia que exige memoria e conferencia que erra.
+     A esquerda responde QUEM e O QUE (fornecedor, documento, roteamento); a
+     direita responde EM QUE PE ESTA (situacao, parcelas, arquivos). Os itens
+     ficam fora da grade, largura cheia, porque sao tabela de oito colunas. */
+  h += '<div class="np-colunas">';
+
+  /* ---------- coluna 1 ---------- */
+  h += '<div>';
+
+  /* Ficha do fornecedor: carregada junto com o resto. Vem primeiro porque e a
+     primeira pergunta de quem abre o card — "quem esta cobrando" antes de
+     "quanto" e "quando". */
+  h += '<h3 style="margin:2px 0 4px;font-size:14px">Fornecedor</h3>'
     + '<div id="np-fornecedor"><div class="small muted">Carregando a ficha…</div></div>';
 
   h += '<h3 style="margin:16px 0 4px;font-size:14px">Documento</h3><div>'
@@ -4847,13 +4873,6 @@ function abrirDetalheNF(docId) {
       + '</div>';
   }
 
-  /* Itens: buscados no Omie depois que o modal ja abriu. A consulta leva 1-2s e
-     segurar o modal fechado por causa dela faria o clique parecer travado. */
-  if (d.chaveAcesso) {
-    h += '<h3 style="margin:16px 0 4px;font-size:14px">Itens da nota</h3>'
-      + '<div id="np-itens"><div class="small muted">Buscando os itens no Omie…</div></div>';
-  }
-
   h += '<h3 style="margin:16px 0 4px;font-size:14px">Roteamento</h3><div>'
     + _npLinha('Unidade', d.unidade ? '<span class="tag" style="background:#E3F0FB;color:#1565C0">'
         + _npEsc(d.unidade) + '</span>' : null)
@@ -4865,34 +4884,12 @@ function abrirDetalheNF(docId) {
             ? _npLinha('Cadastro', '<span style="color:#7A5C00">Incompleto</span>') : ''))
     + '</div>';
 
-  if (d.parcelas && d.parcelas.length) {
-    h += '<h3 style="margin:16px 0 4px;font-size:14px">Parcelas</h3>'
-      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
-      + '<thead><tr style="text-align:left;border-bottom:2px solid var(--cinza-borda)">'
-      + '<th style="padding:6px 8px">Parcela</th><th style="padding:6px 8px">Vencimento</th>'
-      + '<th style="padding:6px 8px;text-align:right">Valor</th><th style="padding:6px 8px">Situação</th>'
-      + '<th style="padding:6px 8px">Código de barras</th></tr></thead><tbody>';
-    for (var j = 0; j < d.parcelas.length; j++) {
-      var p = d.parcelas[j];
-      h += '<tr style="border-bottom:1px solid #F0F3F5' + (p.paga ? ';opacity:.6' : '') + '">'
-        + '<td style="padding:6px 8px">' + _npEsc(p.numero || (j + 1)) + '</td>'
-        + '<td style="padding:6px 8px">' + _npData(p.vencimento) + '</td>'
-        + '<td style="padding:6px 8px;text-align:right">' + _npFmtBRL(p.valor) + '</td>'
-        + '<td style="padding:6px 8px"><span class="tag" style="font-size:10px;background:'
-        + (p.paga ? '#E8F5E9;color:#1B5E20' : '#FFF4E5;color:#8A4B00') + '">'
-        + _npEsc(p.status || '—') + '</span></td>'
-        /* Codigo de barras copiavel: e o que o financeiro cola no banco. Mostrar
-           sem poder copiar seria mostrar por mostrar. */
-        + '<td style="padding:6px 8px">' + (p.codigoBarras
-            ? '<span class="mono small" style="font-size:10px">' + _npEsc(p.codigoBarras) + '</span>'
-              + ' <a onclick="copiarTexto(\'' + _npEsc(String(p.codigoBarras).replace(/\s/g, ''))
-              + '\')" style="cursor:pointer;color:var(--azul-claro);font-size:10px">copiar</a>'
-            : '<span class="small muted">—</span>') + '</td></tr>';
-    }
-    h += '</tbody></table></div>';
-  }
+  h += '</div>';
 
-  h += '<h3 style="margin:16px 0 4px;font-size:14px">Situação no sistema</h3><div>'
+  /* ---------- coluna 2 ---------- */
+  h += '<div>';
+
+  h += '<h3 style="margin:2px 0 4px;font-size:14px">Situação no sistema</h3><div>'
     + _npLinha('Etapa', d.notaItemId
         ? 'Lançada' + (d.statusNota ? ' · ' + _npEsc(d.statusNota) : '')
         : 'Ainda não lançada')
@@ -4901,9 +4898,50 @@ function abrirDetalheNF(docId) {
     + (d.vinculadoAuto ? _npLinha('Vínculo', 'Unificada automaticamente com a NF lançada') : '')
     + '</div>';
 
+  if (d.parcelas && d.parcelas.length) {
+    h += '<h3 style="margin:16px 0 4px;font-size:14px">Parcelas</h3>'
+      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+      + '<thead><tr style="text-align:left;border-bottom:2px solid var(--cinza-borda)">'
+      + '<th style="padding:6px 8px">Parcela</th><th style="padding:6px 8px">Vencimento</th>'
+      + '<th style="padding:6px 8px;text-align:right">Valor</th><th style="padding:6px 8px">Situação</th>'
+      + '</tr></thead><tbody>';
+    for (var j = 0; j < d.parcelas.length; j++) {
+      var p = d.parcelas[j];
+      h += '<tr style="border-bottom:1px solid #F0F3F5' + (p.paga ? ';opacity:.6' : '') + '">'
+        + '<td style="padding:6px 8px">' + _npEsc(p.numero || (j + 1)) + '</td>'
+        + '<td style="padding:6px 8px">' + _npData(p.vencimento) + '</td>'
+        + '<td style="padding:6px 8px;text-align:right">' + _npFmtBRL(p.valor) + '</td>'
+        + '<td style="padding:6px 8px"><span class="tag" style="font-size:10px;background:'
+        + (p.paga ? '#E8F5E9;color:#1B5E20' : '#FFF4E5;color:#8A4B00') + '">'
+        + _npEsc(p.status || '—') + '</span></td></tr>'
+        /* O codigo de barras ganhou linha propria: espremido numa quinta coluna
+           ele quebrava em duas linhas e empurrava a tabela para fora da metade.
+           E o que o financeiro cola no banco, entao precisa continuar copiavel. */
+        + (p.codigoBarras
+            ? '<tr style="border-bottom:1px solid #F0F3F5' + (p.paga ? ';opacity:.6' : '') + '">'
+              + '<td colspan="4" style="padding:0 8px 6px">'
+              + '<span class="mono small" style="font-size:10px">' + _npEsc(p.codigoBarras) + '</span>'
+              + ' <a onclick="copiarTexto(\'' + _npEsc(String(p.codigoBarras).replace(/\s/g, ''))
+              + '\')" style="cursor:pointer;color:var(--azul-claro);font-size:10px">copiar</a>'
+              + '</td></tr>'
+            : '');
+    }
+    h += '</tbody></table></div>';
+  }
+
   /* Documentos: carregado depois, para o modal abrir na hora. */
   h += '<h3 style="margin:16px 0 4px;font-size:14px">Documentos</h3>'
     + '<div id="np-docs"><div class="small muted">Procurando na sua caixa de entrada…</div></div>';
+
+  h += '</div></div>';
+
+  /* ---------- largura cheia: itens ----------
+     Fora da grade de proposito: sao oito colunas com descricao de produto, e
+     dentro de meia tela a descricao quebraria em tres linhas por item. */
+  if (d.chaveAcesso) {
+    h += '<h3 style="margin:18px 0 4px;font-size:14px">Itens da nota</h3>'
+      + '<div id="np-itens"><div class="small muted">Buscando os itens no Omie…</div></div>';
+  }
 
   h += '<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">';
   if (!d.notaItemId) {
@@ -4919,7 +4957,7 @@ function abrirDetalheNF(docId) {
   }
   h += '</div>';
 
-  openModal(h);
+  openModal(h, { largo: true });
   window._npDocAtual = d;
   setTimeout(carregarDocsDoCard, 30);
   /* Sempre — a ficha do fornecedor nao depende de haver chave de acesso. */
@@ -4949,8 +4987,10 @@ function _npFichaFornecedor(fo) {
     + '<div class="mono" style="font-size:14px;margin-top:5px">'
     + '<span class="small muted" style="font-size:10px;text-transform:uppercase">' + rotulo + '</span> '
     + _npEsc(doc ? _npCnpj(doc) : '—') + '</div></div>'
-    + '<span class="tag" style="font-size:10px;background:' + origem[1] + ';color:' + origem[2] + '">'
-    + origem[0] + '</span></div></div>';
+    /* nowrap: na coluna estreita "Cadastro Pronep" quebrava em duas linhas e a
+       etiqueta virava um bloco maior que o dado que ela qualifica. */
+    + '<span class="tag" style="font-size:10px;white-space:nowrap;background:' + origem[1]
+    + ';color:' + origem[2] + '">' + origem[0] + '</span></div></div>';
 
   h += '<div>'
     + (endereco ? _npLinha('Endereço', _npEsc(endereco)) : '')
