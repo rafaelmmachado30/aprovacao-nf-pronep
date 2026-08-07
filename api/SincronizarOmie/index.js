@@ -179,9 +179,12 @@ module.exports = async function (context, req) {
         bloco.fornecedoresPendentes = pendentes.length;
         if (!pendentes.length) { bloco.mensagem = 'Nada pendente.'; continue; }
 
-        const sobra = ORCAMENTO_MS - (Date.now() - t0);
-        const teto = Math.max(0, Math.min(80, Math.floor((sobra - 8000) / 600)));
-        const rf = await resolverFornecedoresPorCodigo(pendentes, creds, teto);
+        /* Mesmo prazo por relogio do outro caminho: reserva 8s para a escrita,
+           senao as consultas comem tudo e as linhas resolvidas nao chegam a ser
+           gravadas — o trabalho seria refeito do zero na rodada seguinte. */
+        const prazoForn = t0 + ORCAMENTO_MS - 8000;
+        const teto = Math.max(0, Math.min(80, Math.floor((prazoForn - Date.now()) / 600)));
+        const rf = await resolverFornecedoresPorCodigo(pendentes, creds, teto, prazoForn);
         bloco.fornecedoresConsultados = rf.consultados;
 
         /* Uma linha pode repetir o mesmo fornecedor (parcelas): atualiza TODAS. */
@@ -395,22 +398,34 @@ module.exports = async function (context, req) {
 
     diag.step = 'done';
     diag.timeMs = Date.now() - t0;
-    /* A mensagem conta o que ENTROU no SharePoint, nao o que foi planejado. Somar
-       planejados fazia uma execucao que gravou zero anunciar "355 nova(s), 44
-       atualizada(s)" — e a primeira linha da resposta e justamente a unica que
-       muita gente le. */
-    const gravados = diag.unidades.reduce(function (s, u) { return s + (u.gravados || 0); }, 0);
-    const restantes = diag.unidades.reduce(function (s, u) { return s + (u.restantes || 0); }, 0);
+    /* A mensagem conta o que ENTROU no SharePoint, nao o que foi planejado — e
+       precisa cobrir OS DOIS modos. A primeira versao disto so somava `gravados`,
+       entao uma execucao de ?apenasFornecedores=1 que preencheu 69 CNPJs anunciava
+       "nada mudou". Trocar uma mensagem mentirosa por outra e facil quando o
+       resumo conhece so metade do trabalho; por isso agora ele monta as partes a
+       partir de cada contador real, e "nada mudou" so aparece se nenhum deles
+       tiver acontecido. */
+    function somar(campo) {
+      return diag.unidades.reduce(function (s, u) { return s + (u[campo] || 0); }, 0);
+    }
+    const gravados = somar('gravados');
+    const cnpjPreenchidos = somar('linhasAtualizadas');
+    const restantes = somar('restantes');
+    const fornPendentes = somar('fornecedoresAindaPendentes');
     const comErro = diag.unidades.filter(function (u) { return u.erro; });
+
+    const partes = [];
+    if (gravados) partes.push(gravados + ' conta(s) gravada(s)');
+    if (cnpjPreenchidos) partes.push(cnpjPreenchidos + ' linha(s) com CNPJ preenchido');
+    if (restantes) partes.push(restantes + ' ainda por gravar, rode de novo');
+    if (fornPendentes) partes.push(fornPendentes + ' fornecedor(es) pendentes');
+    if (comErro.length) partes.push(comErro.length + ' unidade(s) com erro');
+    if (!partes.length) partes.push('nada mudou');
 
     context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
       body: Object.assign({
         ok: comErro.length === 0,
-        mensagem: (dryRun ? '[SIMULACAO] ' : '') +
-                  gravados + ' gravada(s)' +
-                  (restantes ? ' · ' + restantes + ' ainda por gravar, rode de novo' : '') +
-                  (comErro.length ? ' · ' + comErro.length + ' unidade(s) com erro' : '') +
-                  (!gravados && !restantes && !comErro.length ? ' · nada mudou' : '')
+        mensagem: (dryRun ? '[SIMULACAO] ' : '') + partes.join(' · ')
       }, diag) };
   } catch (err) {
     diag.timeMs = Date.now() - t0;
