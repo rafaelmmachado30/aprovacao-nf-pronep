@@ -5009,7 +5009,12 @@ function abrirDetalheNF(docId) {
       + ' style="text-decoration:none"'
       + ' href="/api/AbrirPdfDaNota?id=' + encodeURIComponent(d.notaItemId) + '">'
       + 'Abrir NF em PDF</a>'
-      + '<span class="small muted">Abre em nova aba, direto do SharePoint.</span>';
+      /* Desfazer precisa estar onde o erro aparece. Vinculo errado manda o card
+         para a coluna de outra conta e leva junto o PDF dela — sem este botao a
+         correcao seria edicao manual no SharePoint. */
+      + '<button class="btn btn-secondary" onclick="desvincularNF(\'' + _npEsc(d.id) + '\')">'
+      + 'Desvincular</button>'
+      + '<span class="small muted">Desvincular devolve o card para “Novas”.</span>';
   }
 
   if (!d.notaItemId) {
@@ -5115,7 +5120,7 @@ async function abrirVinculoNF(docId) {
         + (n.jaVinculada
             ? '<span class="small muted">já vinculada a outro card</span>'
             : '<button class="btn btn-primary" style="padding:5px 12px;font-size:12px" onclick="confirmarVinculoNF(\''
-              + _npEsc(docId) + '\',\'' + _npEsc(n.notaId) + '\',\'' + _npEsc(n.numeroNF) + '\')">Vincular</button>')
+              + _npEsc(docId) + '\',\'' + _npEsc(n.notaId) + '\',\'' + _npEsc(n.numeroNF) + '\',this)">Vincular</button>')
         + '</td></tr>';
     }
     h += '</tbody></table></div>';
@@ -5127,7 +5132,32 @@ async function abrirVinculoNF(docId) {
   }
 }
 
-async function confirmarVinculoNF(docId, notaId, numeroNF) {
+/* Escreve no SharePoint e leva 2-4s. Sem sinal na tela o usuario clica de novo ou
+   recarrega no meio da gravacao — e clicar duas vezes em "Vincular" dispara duas
+   escritas. O botao vira "Vinculando…" e desabilita TODOS os botoes do modal, nao
+   so o clicado: a linha de baixo tambem vincula, e para outra nota. */
+function _npTrabalhando(botao, texto) {
+  var caixa = document.getElementById('modal-content');
+  var botoes = caixa ? caixa.querySelectorAll('button') : [];
+  var antes = [];
+  for (var i = 0; i < botoes.length; i++) {
+    antes.push({ el: botoes[i], html: botoes[i].innerHTML, dis: botoes[i].disabled });
+    botoes[i].disabled = true;
+    botoes[i].style.opacity = '.55';
+  }
+  if (botao) { botao.innerHTML = texto; botao.style.opacity = '1'; }
+  /* Devolve como desfazer: em caso de erro o modal continua na tela e precisa
+     voltar a ser usavel, senao o usuario fica preso olhando botoes cinzas. */
+  return function () {
+    for (var j = 0; j < antes.length; j++) {
+      antes[j].el.innerHTML = antes[j].html;
+      antes[j].el.disabled = antes[j].dis;
+      antes[j].el.style.opacity = '';
+    }
+  };
+}
+
+async function confirmarVinculoNF(docId, notaId, numeroNF, botao) {
   var ok = await confirmarAcao({
     titulo: 'Vincular esta NF ao card?',
     mensagem: 'O card passa a mostrar o status da NF ' + numeroNF + '. '
@@ -5136,6 +5166,7 @@ async function confirmarVinculoNF(docId, notaId, numeroNF) {
     tipo: 'info', confirmLabel: 'Vincular'
   });
   if (!ok) return;
+  var restaurar = _npTrabalhando(botao, 'Vinculando…');
   try {
     var r = await fetch('/api/VincularNotaAoCard', {
       method: 'POST', credentials: 'include',
@@ -5149,7 +5180,35 @@ async function confirmarVinculoNF(docId, notaId, numeroNF) {
     toast(data.mensagem || 'Vinculada.', 'success');
     carregarNFsAPagar();
   } catch (e) {
+    restaurar();
     toast('Não foi possível vincular: ' + e.message, 'error');
+  }
+}
+
+async function desvincularNF(docId) {
+  var ok = await confirmarAcao({
+    titulo: 'Desvincular esta NF do card?',
+    mensagem: 'O card volta para “Novas” e deixa de mostrar o status e o PDF da NF. '
+            + 'A NF lançada não é alterada nem apagada.',
+    tipo: 'warning', confirmLabel: 'Desvincular'
+  });
+  if (!ok) return;
+  var restaurar = _npTrabalhando(null, '');
+  try {
+    var r = await fetch('/api/VincularNotaAoCard', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ docId: docId, acao: 'desvincular',
+                             verComo: window._viewAsDiretoria || '' })
+    });
+    var data = await _npLerJson(r);
+    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+    closeModal();
+    toast(data.mensagem || 'Desvinculada.', 'success');
+    carregarNFsAPagar();
+  } catch (e) {
+    restaurar();
+    toast('Não foi possível desvincular: ' + e.message, 'error');
   }
 }
 

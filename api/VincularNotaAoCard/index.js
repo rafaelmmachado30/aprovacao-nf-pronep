@@ -111,51 +111,79 @@ module.exports = async function (context, req) {
 
     /* ---------------------------------------------------------- POST: vincula */
     if (metodo === 'POST') {
+      /* DESVINCULAR existe porque vincular errado acontece — e aconteceu: um
+         agrupamento frouxo levou contas de setembro e novembro para "Aprovadas"
+         junto com a de agosto. Sem desfazer pela tela, a correcao viraria edicao
+         manual no SharePoint, que ninguem alem da TI faz.
+         O vinculo automatico nao volta sozinho nesses casos: conta sem chave e sem
+         numero e ignorada pelo casamento (semDadosParaCasar), entao desvincular
+         realmente resolve em vez de durar ate o proximo cron. */
+      const desvincular = String(body.acao || '') === 'desvincular';
       const notaId = String(body.notaId || '');
-      if (!notaId) throw new Error('notaId obrigatorio');
+      if (!desvincular && !notaId) throw new Error('notaId obrigatorio');
 
-      const nota = notas.find(function (n) { return String(n.id) === notaId; });
-      if (!nota) throw new Error('NF nao encontrada');
+      const nota = desvincular ? null
+        : notas.find(function (n) { return String(n.id) === notaId; });
+      if (!desvincular && !nota) throw new Error('NF nao encontrada');
 
       /* A nota escolhida precisa ser do MESMO fornecedor. Sem esta trava, um
          docId valido mais um notaId qualquer ligariam contas de empresas
          diferentes — e o card passaria a exibir o status de uma nota alheia. */
-      if (soDigitos(nota.f.CNPJFornecedor) !== cnpj) {
+      if (nota && soDigitos(nota.f.CNPJFornecedor) !== cnpj) {
         context.res = { status: 400, headers: { 'Content-Type': 'application/json' },
           body: { error: 'A NF escolhida e de outro fornecedor. Vinculo recusado.',
                   cnpjDoCard: cnpj, cnpjDaNota: soDigitos(nota.f.CNPJFornecedor) } };
         return;
       }
 
-      /* Todas as parcelas da mesma NF recebem o vinculo: o quadro elege uma linha
-         como principal e e ela que precisa estar ligada — vincular so a clicada
-         deixaria o card orfao conforme a ordem de leitura. */
-      const todos = await todosItens(client, siteId, listDoc);
-      const irmas = todos.filter(function (it) {
-        const g = it.fields || {};
-        if (String(g.Descartado || '') === 'Sim') return false;
-        if (soDigitos(g.EmitenteCNPJ) !== cnpj) return false;
-        return numNorm(g.NumeroNF) === numDoc;
-      });
-      const alvos = irmas.length ? irmas.map(function (i) { return String(i.id); }) : [String(doc.id)];
+      /* As parcelas da mesma NF recebem o vinculo junto — o quadro elege uma
+         linha como principal e e ela que precisa estar ligada.
+         MAS SO QUANDO EXISTE UMA IDENTIDADE DE VERDADE. A primeira versao agrupava
+         por CNPJ + numero sem exigir que o numero existisse: nas contas da
+         Telefonica, que vem SEM numero, '' === '' casou com todas as contas
+         daquele fornecedor e um clique vinculou tambem as de setembro e novembro,
+         que foram parar em "Aprovadas" com o PDF de agosto.
+         Ausencia de dado nao e dado. Sem chave e sem numero, vincula SO a linha
+         em que o usuario clicou. */
+      const chaveDoc = soDigitos(doc.f.ChaveAcesso);
+      const temIdentidade = chaveDoc.length === 44 || !!numDoc;
+      let alvos = [String(doc.id)];
+
+      if (temIdentidade) {
+        const todos = await todosItens(client, siteId, listDoc);
+        const irmas = todos.filter(function (it) {
+          const g = it.fields || {};
+          if (String(g.Descartado || '') === 'Sim') return false;
+          if (chaveDoc.length === 44) return soDigitos(g.ChaveAcesso) === chaveDoc;
+          if (soDigitos(g.EmitenteCNPJ) !== cnpj) return false;
+          return !!numNorm(g.NumeroNF) && numNorm(g.NumeroNF) === numDoc;
+        });
+        if (irmas.length) alvos = irmas.map(function (i) { return String(i.id); });
+      }
 
       for (const id of alvos) {
-        await vincularNota(client, siteId, id, notaId, false);   /* false = manual */
+        /* null apaga o vinculo; false marca como decisao manual nos dois casos. */
+        await vincularNota(client, siteId, id, desvincular ? null : notaId, false);
       }
 
       let user = null;
       try { user = await getUser(req); } catch (e) { /* auditoria nao bloqueia */ }
-      auditRegistrar(user, 'vincular_nf_manual',
+      auditRegistrar(user, desvincular ? 'desvincular_nf_manual' : 'vincular_nf_manual',
         { tipo: 'documento_fiscal', id: docId, numero: doc.f.NumeroNF || '' },
         'sucesso',
-        { notaId: notaId, numeroNaNota: nota.f.NumeroNF || '', numeroNoOmie: doc.f.NumeroNF || '',
-          divergenciaDeNumero: numNorm(nota.f.NumeroNF) !== numDoc,
-          linhasVinculadas: alvos.length }
+        desvincular
+          ? { linhasAfetadas: alvos.length, vinculoAnterior: doc.f.NotaItemId || '' }
+          : { notaId: notaId, numeroNaNota: nota.f.NumeroNF || '', numeroNoOmie: doc.f.NumeroNF || '',
+              divergenciaDeNumero: numNorm(nota.f.NumeroNF) !== numDoc,
+              linhasVinculadas: alvos.length }
       ).catch(function () {});
 
       context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
-        body: { ok: true, linhasVinculadas: alvos.length, notaId: notaId,
-                mensagem: alvos.length + ' linha(s) vinculada(s) à NF #' + notaId,
+        body: { ok: true, linhasAfetadas: alvos.length,
+                notaId: desvincular ? null : notaId,
+                mensagem: desvincular
+                  ? alvos.length + ' linha(s) desvinculada(s). O card volta para "Novas".'
+                  : alvos.length + ' linha(s) vinculada(s) à NF #' + notaId,
                 timeMs: Date.now() - t0 } };
       return;
     }
