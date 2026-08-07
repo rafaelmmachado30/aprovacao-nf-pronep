@@ -36,7 +36,15 @@ const { indexarPorCodigoOmie, gravarEmLote, prepararContaOmie, resolveListId,
         LIST_DOCFIS, lerConfigSefaz, lerCorteVencimento, soDigitos } =
         require('../shared/documentosFiscais');
 
-const ORCAMENTO_MS = 30000;   // margem para fechar antes dos ~45s da plataforma
+const ORCAMENTO_MS = 38000;   // margem para fechar antes dos ~45s da plataforma
+
+/* PRIORIDADE: GRAVAR. Resolver CNPJ de fornecedor e leitura no Omie e disputava o
+   mesmo orcamento da escrita no SharePoint — sem prazo proprio, 40 consultas
+   comeram tudo e uma execucao leu 875 contas para gravar ZERO. Escrita que nao
+   acontece nao volta sozinha; CNPJ pendente volta na proxima e ainda tem modo
+   dedicado (?apenasFornecedores=1). Por isso os fornecedores param aos 20s e os
+   18s restantes ficam reservados para a gravacao. */
+const PRAZO_FORNECEDORES_MS = 20000;
 
 function readClientPrincipal(req) {
   const h = req.headers && req.headers['x-ms-client-principal'];
@@ -131,7 +139,8 @@ module.exports = async function (context, req) {
     for (const u of unidades) {
       const bloco = {
         unidade: u, emAberto: 0, alteradas: 0, contas: 0,
-        novos: 0, atualizados: 0, semMudanca: 0, canceladas: 0,
+        planejadosNovos: 0, planejadosAtualizados: 0, gravados: 0,
+        semMudanca: 0, canceladas: 0,
         semFornecedor: 0, erro: null, truncado: false
       };
       diag.unidades.push(bloco);
@@ -309,13 +318,14 @@ module.exports = async function (context, req) {
       }
       let mapaForn = jaResolvido;
       if (codigosFaltando.length) {
-        /* Teto pelo TEMPO que sobrou, nao por um numero fixo: cada consulta custa
-           ~0,5s e a leitura das contas ja consumiu ~20s. Numero fixo ora sobra,
-           ora estoura. */
-        const sobra = ORCAMENTO_MS - (Date.now() - t0);
-        const teto = Math.max(0, Math.min(60, Math.floor((sobra - 12000) / 600)));
+        /* Prazo ABSOLUTO, verificado a cada consulta dentro da funcao. A versao
+           antiga estimava o custo (~600ms por consulta) e parava pela contagem;
+           quando o Omie respondia mais devagar, a estimativa furava e a gravacao
+           herdava um prazo ja vencido. */
+        const prazoForn = t0 + PRAZO_FORNECEDORES_MS;
+        const teto = Math.max(0, Math.min(60, Math.floor((prazoForn - Date.now()) / 600)));
         try {
-          const rf = await resolverFornecedoresPorCodigo(codigosFaltando, creds, teto);
+          const rf = await resolverFornecedoresPorCodigo(codigosFaltando, creds, teto, prazoForn);
           mapaForn = Object.assign({}, jaResolvido, rf.mapa);
           bloco.fornecedoresConsultados = rf.consultados;
           bloco.fornecedoresPendentes = codigosFaltando.length - rf.consultados;
@@ -360,8 +370,12 @@ module.exports = async function (context, req) {
       }
 
       const r = await gravarEmLote(client, siteId, listId, ops, t0 + ORCAMENTO_MS);
-      bloco.novos = ops.filter(function (o) { return o.tipo === 'post'; }).length;
-      bloco.atualizados = ops.filter(function (o) { return o.tipo === 'patch'; }).length;
+      /* PLANEJADO nao e FEITO. Estes dois contam o que foi MONTADO; o que entrou
+         no SharePoint e r.ok. Enquanto a mensagem do topo somava os planejados,
+         uma execucao que gravou zero anunciava "355 nova(s), 44 atualizada(s)" —
+         e quem lesse so a primeira linha ia embora achando que estava sincronizado. */
+      bloco.planejadosNovos = ops.filter(function (o) { return o.tipo === 'post'; }).length;
+      bloco.planejadosAtualizados = ops.filter(function (o) { return o.tipo === 'patch'; }).length;
       bloco.gravados = r.ok;
       if (r.restantes > 0) {
         bloco.restantes = r.restantes;
@@ -381,15 +395,22 @@ module.exports = async function (context, req) {
 
     diag.step = 'done';
     diag.timeMs = Date.now() - t0;
-    const novos = diag.unidades.reduce(function (s, u) { return s + u.novos; }, 0);
-    const atu = diag.unidades.reduce(function (s, u) { return s + u.atualizados; }, 0);
+    /* A mensagem conta o que ENTROU no SharePoint, nao o que foi planejado. Somar
+       planejados fazia uma execucao que gravou zero anunciar "355 nova(s), 44
+       atualizada(s)" — e a primeira linha da resposta e justamente a unica que
+       muita gente le. */
+    const gravados = diag.unidades.reduce(function (s, u) { return s + (u.gravados || 0); }, 0);
+    const restantes = diag.unidades.reduce(function (s, u) { return s + (u.restantes || 0); }, 0);
     const comErro = diag.unidades.filter(function (u) { return u.erro; });
 
     context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
       body: Object.assign({
         ok: comErro.length === 0,
-        mensagem: (dryRun ? '[SIMULACAO] ' : '') + novos + ' nova(s), ' + atu + ' atualizada(s)' +
-                  (comErro.length ? ' · ' + comErro.length + ' unidade(s) com erro' : '')
+        mensagem: (dryRun ? '[SIMULACAO] ' : '') +
+                  gravados + ' gravada(s)' +
+                  (restantes ? ' · ' + restantes + ' ainda por gravar, rode de novo' : '') +
+                  (comErro.length ? ' · ' + comErro.length + ' unidade(s) com erro' : '') +
+                  (!gravados && !restantes && !comErro.length ? ' · nada mudou' : '')
       }, diag) };
   } catch (err) {
     diag.timeMs = Date.now() - t0;

@@ -690,13 +690,19 @@ const _cacheFornecedor = {};
  * alternativa — resolver tudo de uma vez — estouraria os 45s da Function e nao
  * gravaria nada, que e estritamente pior.
  */
-async function resolverFornecedoresPorCodigo(codigos, creds, limite) {
+async function resolverFornecedoresPorCodigo(codigos, creds, limite, prazoFinal) {
   const out = {};
   let gastos = 0;
+  let pararPorTempo = false;
   for (const cod of codigos) {
     const ck = creds.empresa + '|' + cod;
     if (_cacheFornecedor[ck]) { out[cod] = _cacheFornecedor[ck]; continue; }
     if (gastos >= (limite || 40)) continue;   /* fica para a proxima execucao */
+    /* TETO PELO RELOGIO, nao so por contagem. O teto por numero supunha ~600ms
+       por consulta; quando o Omie responde mais devagar, 40 consultas comem o
+       orcamento inteiro e a GRAVACAO fica sem tempo — foi assim que uma execucao
+       leu 875 contas e gravou zero. Contagem estima, relogio mede. */
+    if (prazoFinal && Date.now() > prazoFinal) { pararPorTempo = true; continue; }
     gastos++;
     try {
       const resp = await callOmie('/geral/clientes/', 'ConsultarCliente',
@@ -714,7 +720,8 @@ async function resolverFornecedoresPorCodigo(codigos, creds, limite) {
       out[cod] = { cnpj: '', razao: '', erro: e.message };
     }
   }
-  return { mapa: out, consultados: gastos, pendentes: codigos.length - Object.keys(out).length };
+  return { mapa: out, consultados: gastos, pararPorTempo: pararPorTempo,
+           pendentes: codigos.length - Object.keys(out).length };
 }
 
 module.exports = {
