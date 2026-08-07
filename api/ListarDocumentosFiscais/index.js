@@ -403,6 +403,33 @@ module.exports = async function (context, req) {
           lente: escopo.lente || null,
           ocultadosPorEscopo: foraDoEscopo
         },
+        /* COBERTURA DE CHAVE, medida sobre os cards REAIS — nao sobre amostra.
+           Decide se vale buscar o XML na SEFAZ: a chave e o unico jeito de
+           consultar, e sem ela nao ha o que pedir. Uma amostra de 6 contas deu
+           "17%", numero que nao sustenta decisao nenhuma; aqui a base e o quadro
+           inteiro. Quebrado por unidade porque a mistura de perfis (RJ compra
+           mais material, servicos concentram em outra) esconderia a diferenca. */
+        coberturaChave: (function () {
+          const porUnid = {};
+          let com = 0, total = 0;
+          for (const k of Object.keys(colunas)) {
+            for (const c of colunas[k]) {
+              const u = c.unidade || '(sem unidade)';
+              if (!porUnid[u]) porUnid[u] = { com: 0, total: 0 };
+              porUnid[u].total++; total++;
+              if (soDigitos(c.chaveAcesso).length === 44) { porUnid[u].com++; com++; }
+            }
+          }
+          for (const u of Object.keys(porUnid)) {
+            porUnid[u].percentual = porUnid[u].total
+              ? Math.round((porUnid[u].com / porUnid[u].total) * 100) + '%' : '—';
+          }
+          return {
+            total: total, comChave: com, semChave: total - com,
+            percentual: total ? Math.round((com / total) * 100) + '%' : '—',
+            porUnidade: porUnid
+          };
+        })(),
         integracao: await lerConfigSefaz(client, siteId),
         corteVencimento: await lerCorteVencimento(client, siteId),
         totais: {
