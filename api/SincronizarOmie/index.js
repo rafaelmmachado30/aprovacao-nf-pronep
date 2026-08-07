@@ -33,7 +33,8 @@ const { getGraphClient, resolveSiteId } = require('../shared/graph');
 const { getCredentials, listarContasPagarPorVencimento,
         resolverFornecedoresPorCodigo } = require('../shared/omie');
 const { indexarPorCodigoOmie, gravarEmLote, prepararContaOmie, resolveListId,
-        LIST_DOCFIS, lerConfigSefaz, lerCorteVencimento, soDigitos } =
+        LIST_DOCFIS, lerConfigSefaz, lerCorteVencimento, soDigitos,
+        casarDocumentosPendentes } =
         require('../shared/documentosFiscais');
 
 const ORCAMENTO_MS = 38000;   // margem para fechar antes dos ~45s da plataforma
@@ -418,6 +419,26 @@ module.exports = async function (context, req) {
         diag.avisos.push(u + ': ' + r.falhas.length + ' de ' + ops.length +
           ' gravacoes falharam — a proxima sincronizacao tenta de novo.');
       }
+    }
+
+    /* CASAMENTO com as NFs ja lancadas, se sobrar tempo.
+       Uma conta que chega do Omie depois de a nota existir nunca e reconhecida —
+       o casamento automatico so roda na criacao da nota. Sem isto, NF aprovada e
+       ate paga continua em "Novas".
+       SO RODA COM FOLGA REAL (>10s). Numa unidade grande o orcamento acaba antes e
+       este passo simplesmente nao acontece — por isso ele tambem existe sozinho em
+       /api/CasarDocumentosPendentes. Fingir que cabe aqui seria repetir o erro dos
+       fornecedores, que nunca rodavam e ninguem percebia. */
+    const sobra = ORCAMENTO_MS - (Date.now() - t0);
+    if (!dryRun && !apenasFornecedores && sobra > 10000) {
+      try {
+        diag.casamento = await casarDocumentosPendentes(client, siteId,
+          { prazoFinal: t0 + ORCAMENTO_MS });
+      } catch (e) { diag.avisos.push('casamento com NFs lancadas: ' + e.message); }
+    } else if (!dryRun && !apenasFornecedores) {
+      diag.casamento = { pulado: 'sem tempo nesta execucao' };
+      diag.avisos.push('Nao sobrou tempo para reconhecer NFs ja lancadas. ' +
+        'Rode /api/CasarDocumentosPendentes.');
     }
 
     diag.step = 'done';

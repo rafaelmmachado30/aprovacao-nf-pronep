@@ -542,6 +542,135 @@ async function acharCodigoOmieDaNota(client, siteId, alvo) {
   return { encontrado: false, motivo: 'nenhum documento sincronizado corresponde a esta nota' };
 }
 
+/**
+ * Casa documentos ORFAOS com notas ja lancadas — do lado do documento.
+ *
+ * O BURACO QUE ISTO TAPA: casarNotaComDocumento roda quando a NOTA e criada. Se a
+ * conta chega do Omie DEPOIS de a nota existir, ninguem mais tenta casar. E o
+ * quadro so reconhece o vinculo por NotaItemId ou por chave de acesso — entao
+ * NFS-e, que nao tem chave, fica em "Novas" para sempre mesmo ja aprovada e paga.
+ * Nao e caso isolado: sao todas as NFS-e lancadas antes da sincronizacao.
+ *
+ * REGRA, e ela e conservadora de proposito:
+ *   chave de acesso   prova, casa direto
+ *   CNPJ + numero     casa SO se houver exatamente UM candidato
+ * Havendo mais de um, NAO escolhe. Vincular a nota errada faz um card exibir o
+ * status de outra: uma conta em aberto apareceria como quitada, e alguem deixaria
+ * de pagar. Ambiguidade volta na resposta para decisao humana.
+ *
+ * Casa TODAS as linhas do mesmo grupo (as parcelas de uma NF sao varias linhas):
+ * o quadro escolhe uma delas como principal e e ela que precisa estar vinculada.
+ *
+ * NAO altera a nota, so grava o vinculo no documento. A coluna do quadro continua
+ * derivada do status da nota — nao existe estado duplicado para sair de sincronia.
+ */
+async function casarDocumentosPendentes(client, siteId, opts) {
+  const o = opts || {};
+  const prazoFinal = o.prazoFinal || null;
+  const listDoc = await resolveListId(client, siteId, LIST_DOCFIS);
+  const listNotas = await resolveListId(client, siteId, LIST_NOTAS);
+  if (!listDoc || !listNotas) return { erro: 'listas nao encontradas' };
+
+  const { carregarNotas } = require('./notas');
+  const { notas, identidade } = await carregarNotas(client, siteId, listNotas);
+
+  /* Numero de NF comparavel: "000084" e "84" sao a mesma nota. */
+  function numNorm(v) {
+    const s = String(v == null ? '' : v).replace(/[^A-Za-z0-9]/g, '');
+    return /^\d+$/.test(s) ? (s.replace(/^0+/, '') || '0') : s.toUpperCase();
+  }
+
+  const notaPorChave = {};
+  const notasPorCnpjNum = {};
+  for (const n of notas) {
+    const ch = soDigitos(n.f.ChaveAcesso);
+    if (ch.length === 44 && !notaPorChave[ch]) notaPorChave[ch] = n;
+    const cnpj = soDigitos(n.f.CNPJFornecedor);
+    const num = numNorm(n.f.NumeroNF);
+    if (cnpj.length >= 11 && num) {
+      const k = cnpj + '|' + num;
+      if (!notasPorCnpjNum[k]) notasPorCnpjNum[k] = [];
+      notasPorCnpjNum[k].push(n);
+    }
+  }
+
+  const docs = await (async function () {
+    const out = [];
+    let url = '/sites/' + siteId + '/lists/' + listDoc + '/items?expand=fields&$top=999';
+    let p = 0;
+    while (url && p < 20) {
+      const r = await client.api(url).get();
+      out.push.apply(out, r.value || []);
+      p++;
+      const nl = r['@odata.nextLink'];
+      url = nl ? nl.replace('https://graph.microsoft.com/v1.0', '') : null;
+    }
+    return out;
+  })();
+
+  /* Agrupa as linhas orfas por (CNPJ, numero) — as parcelas da mesma NF. */
+  const grupos = {};
+  let jaVinculados = 0, semDados = 0;
+  for (const d of docs) {
+    const f = d.fields || {};
+    if (String(f.Descartado || '') === 'Sim') continue;
+    if (f.NotaItemId) { jaVinculados++; continue; }
+    const cnpj = soDigitos(f.EmitenteCNPJ);
+    const num = numNorm(f.NumeroNF);
+    const ch = soDigitos(f.ChaveAcesso);
+    if (!ch && (!cnpj || !num)) { semDados++; continue; }
+    const k = ch.length === 44 ? 'ch:' + ch : 'nf:' + cnpj + '|' + num;
+    if (!grupos[k]) grupos[k] = { chave: ch, cnpj: cnpj, num: num, linhas: [] };
+    grupos[k].linhas.push(d);
+  }
+
+  const ops = [];
+  const ambiguos = [];
+  const casados = [];
+  for (const k of Object.keys(grupos)) {
+    const g = grupos[k];
+    let nota = null, via = null;
+
+    if (g.chave && g.chave.length === 44 && notaPorChave[g.chave]) {
+      nota = notaPorChave[g.chave]; via = 'chave';
+    } else if (g.cnpj && g.num) {
+      const cand = notasPorCnpjNum[g.cnpj + '|' + g.num] || [];
+      if (cand.length === 1) { nota = cand[0]; via = 'cnpj+numero'; }
+      else if (cand.length > 1) {
+        ambiguos.push({ cnpj: g.cnpj, numeroNF: g.num, candidatos: cand.length,
+                        notaIds: cand.map(function (c) { return c.id; }).slice(0, 5) });
+        continue;
+      }
+    }
+    if (!nota) continue;
+
+    for (const linha of g.linhas) {
+      ops.push({ tipo: 'patch', itemId: linha.id,
+                 fields: { NotaItemId: String(nota.id), VinculadoAuto: 'Sim' } });
+    }
+    casados.push({ numeroNF: g.num, cnpj: g.cnpj, notaId: nota.id, via: via,
+                   linhas: g.linhas.length, status: nota.f.Status || '' });
+  }
+
+  const r = ops.length
+    ? await gravarEmLote(client, siteId, listDoc, ops, prazoFinal)
+    : { ok: 0, falhas: [], processadas: 0, restantes: 0 };
+
+  return {
+    notasLidas: notas.length,
+    mapaDeColunasEIdentidade: identidade,
+    documentosOrfaos: Object.keys(grupos).length,
+    jaVinculados: jaVinculados,
+    semDadosParaCasar: semDados,
+    gruposCasados: casados.length,
+    linhasVinculadas: r.ok,
+    linhasRestantes: r.restantes,
+    falhas: r.falhas.length,
+    ambiguos: ambiguos,
+    casados: casados.slice(0, 50)
+  };
+}
+
 /* ----------------------------------------------------------- ponteiro de NSU */
 
 /**
@@ -811,7 +940,7 @@ module.exports = {
   COLUNAS_DOCFIS, COLUNAS_SEFAZ, COLUNAS_NOTAS_EXTRA,
   resolveListId, soDigitos, chaveValida, chaveFraca,
   buscarPorChave, gravarDocumento, vincularNota, casarNotaComDocumento,
-  acharCodigoOmieDaNota,
+  acharCodigoOmieDaNota, casarDocumentosPendentes,
   gravarContaOmie, indexarPorCodigoOmie, gravarEmLote, prepararContaOmie,
   lerPonteiro, garantirPonteiro, gravarPonteiro,
   lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, lerConfigSefaz,
