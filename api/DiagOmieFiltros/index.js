@@ -178,11 +178,21 @@ module.exports = async function (context, req) {
     if (!codForn) {
       diag.avisoFornecedor = 'Nao achei nenhuma conta para extrair um codigo de fornecedor.';
     } else {
+      /* filtrar_por_cliente, filtrar_por_fornecedor e filtrar_cliente_fornecedor
+         NAO existem — o Omie recusou os tres pelo nome, com faultstring limpa.
+         codigo_cliente_fornecedor foi diferente: derrubou o backend com 502 do
+         nginx. Recusa por nome e uma resposta; 502 e uma pergunta em aberto. Ou
+         o campo existe no schema e engasgou com o formato, ou foi um 502
+         passageiro. As variacoes abaixo separam os dois casos: se TODAS derem
+         502 e a chamada sem filtro passar no meio, o problema e o parametro. */
       const porForn = [
-        ['forn_filtrar_por_cliente',        { filtrar_por_cliente: Number(codForn) }],
-        ['forn_codigo_cliente_fornecedor',  { codigo_cliente_fornecedor: Number(codForn) }],
-        ['forn_filtrar_por_fornecedor',     { filtrar_por_fornecedor: Number(codForn) }],
-        ['forn_filtrar_cliente_fornecedor', { filtrar_cliente_fornecedor: Number(codForn) }]
+        ['forn_ccf_numero',        { codigo_cliente_fornecedor: Number(codForn) }],
+        ['forn_ccf_string',        { codigo_cliente_fornecedor: String(codForn) }],
+        ['forn_controle_sem_filtro', {}],
+        ['forn_ccf_com_status',    { codigo_cliente_fornecedor: Number(codForn),
+                                     filtrar_por_status: 'EMABERTO' }],
+        ['forn_ccf_repeticao',     { codigo_cliente_fornecedor: Number(codForn),
+                                     registros_por_pagina: 21 }]
       ];
       for (const [nome, param] of porForn) {
         if (Date.now() - t0 > ORCAMENTO_MS) { diag.testes[nome] = { pulado: 'sem tempo' }; continue; }
@@ -191,9 +201,15 @@ module.exports = async function (context, req) {
           /* ACEITO NAO BASTA. Se voltou mais de um fornecedor na amostra, o Omie
              engoliu o parametro e devolveu tudo — usar isso como filtro daria a
              falsa sensacao de precisao. */
-          if (r.aceito) {
+          /* O controle nao tem filtro para morder: julga-lo pela mesma regra o
+             marcaria como "ignorado", que e leitura errada. Ele so responde a
+             outra pergunta — a chamada continua saudavel entre os 502? */
+          const temFiltro = param.codigo_cliente_fornecedor != null;
+          if (r.aceito && temFiltro) {
             r.filtroMordeu = r.umFornecedorSo && r.fornecedoresNaAmostra[0] === String(codForn);
             if (!r.filtroMordeu) r.alerta = 'ACEITO PORÉM IGNORADO — nao use como filtro';
+          } else if (r.aceito) {
+            r.papel = 'controle — mede se a chamada sem filtro segue de pe';
           }
           diag.testes[nome] = r;
         } catch (e) { diag.testes[nome] = { aceito: false, erro: e.message }; }
