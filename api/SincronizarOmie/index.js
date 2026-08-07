@@ -201,7 +201,31 @@ module.exports = async function (context, req) {
         const rr = await gravarEmLote(client, siteId, listaId, ops, t0 + ORCAMENTO_MS);
         bloco.linhasAtualizadas = rr.ok;
         bloco.restantes = rr.restantes;
-        bloco.fornecedoresAindaPendentes = pendentes.length - rf.consultados;
+
+        /* PENDENTE = SEM CNPJ, nao "sem consulta". A conta antiga era
+           pendentes - consultados, e o cache em memoria resolve fornecedor SEM
+           consultar: uma execucao preencheu 7 linhas com 0 consultas e mesmo assim
+           anunciou "ainda faltam 2". Contar o trabalho pela ferramenta usada, e nao
+           pelo resultado, faz o relatorio divergir da realidade — de novo. */
+        const resolvidos = Object.keys(rf.mapa).filter(function (c) {
+          return rf.mapa[c] && rf.mapa[c].cnpj;
+        }).length;
+        bloco.fornecedoresResolvidos = resolvidos;
+        bloco.fornecedoresAindaPendentes = Math.max(0, pendentes.length - resolvidos);
+
+        /* Codigo consultado que voltou SEM CNPJ nao resolve nunca — e fornecedor
+           pessoa fisica ou cadastro incompleto no proprio Omie. Sem separar isso,
+           ele volta como "pendente" a cada execucao e o aviso manda rodar de novo
+           para sempre. */
+        const semCnpjNoOmie = Object.keys(rf.mapa).filter(function (c) {
+          return rf.mapa[c] && !rf.mapa[c].cnpj;
+        }).length;
+        if (semCnpjNoOmie) {
+          bloco.semCnpjNoOmie = semCnpjNoOmie;
+          diag.avisos.push(u + ': ' + semCnpjNoOmie + ' fornecedor(es) sem CNPJ no ' +
+            'cadastro do proprio Omie (pessoa fisica ou cadastro incompleto). ' +
+            'Rodar de novo nao resolve — precisa arrumar no Omie.');
+        }
         if (bloco.fornecedoresAindaPendentes > 0) {
           diag.avisos.push(u + ': ainda faltam ' + bloco.fornecedoresAindaPendentes +
             ' fornecedor(es). Rode de novo com ?apenasFornecedores=1.');
