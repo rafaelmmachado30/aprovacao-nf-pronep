@@ -94,9 +94,14 @@ async function tentar(param, creds) {
   };
 }
 
+/* Fecha antes dos ~45s da plataforma. Sem isto a Function e morta no meio e o
+   navegador recebe "Backend call failure", que nao diz nada sobre a sondagem. */
+const ORCAMENTO_MS = 25000;
+
 module.exports = async function (context, req) {
   const t0 = Date.now();
-  const u = String((req.query || {}).unidade || 'RJ').toUpperCase();
+  const q = req.query || {};
+  const u = String(q.unidade || 'RJ').toUpperCase();
   const diag = { unidade: u, testes: {}, timeMs: 0 };
 
   try {
@@ -143,9 +148,18 @@ module.exports = async function (context, req) {
       ['alteracao_7dias',      { filtrar_por_data_de: de7, filtrar_por_data_ate: ate0, filtrar_apenas_alteracao: 'S' }]
     ];
 
-    for (const [nome, param] of candidatos) {
-      try { diag.testes[nome] = await tentar(param, creds); }
-      catch (e) { diag.testes[nome] = { aceito: false, erro: e.message }; }
+    /* AS RODADAS 1 E 2 JA ESTAO RESPONDIDAS e por isso nao rodam mais por padrao:
+       empilhar tudo numa execucao passou dos ~45s da plataforma e voltou
+       "Backend call failure" — 14 chamadas sequenciais ao Omie nao cabem.
+       Quem quiser remedir pede ?rodada=status. */
+    if (String(q.rodada || '') === 'status') {
+      for (const [nome, param] of candidatos) {
+        if (Date.now() - t0 > ORCAMENTO_MS) { diag.testes[nome] = { pulado: 'sem tempo' }; continue; }
+        try { diag.testes[nome] = await tentar(param, creds); }
+        catch (e) { diag.testes[nome] = { aceito: false, erro: e.message }; }
+      }
+    } else {
+      diag.rodadasAnteriores = 'puladas (use ?rodada=status para remedir)';
     }
 
     /* RODADA 3 — FILTRO POR FORNECEDOR. Isto conserta um bug real.
@@ -171,6 +185,7 @@ module.exports = async function (context, req) {
         ['forn_filtrar_cliente_fornecedor', { filtrar_cliente_fornecedor: Number(codForn) }]
       ];
       for (const [nome, param] of porForn) {
+        if (Date.now() - t0 > ORCAMENTO_MS) { diag.testes[nome] = { pulado: 'sem tempo' }; continue; }
         try {
           const r = await tentar(param, creds);
           /* ACEITO NAO BASTA. Se voltou mais de um fornecedor na amostra, o Omie
