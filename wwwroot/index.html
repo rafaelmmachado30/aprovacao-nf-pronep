@@ -4444,7 +4444,11 @@ function renderColunasNFPagar(data) {
       /* Com filtro, mostra "3 de 41": some o total e a coluna parece ter esvaziado. */
       + (temFiltro && todos.length !== itens.length ? ' de ' + todos.length : '') + '</span>'
       + '</div>'
-      + '<div class="small muted" style="margin:2px 0 8px">' + _npFmtBRL(soma) + '</div>';
+      /* O total da coluna e dinheiro a pagar, nao legenda: sai do cinza de apoio
+         e ganha peso proprio. Vermelho escuro (nao o vermelho de erro) porque a
+         leitura e "isto sai do caixa", nao "algo deu errado". */
+      + '<div style="margin:2px 0 9px;font-weight:700;font-size:15px;color:#9B1C1C">'
+      + _npFmtBRL(soma) + '</div>';
     if (!itens.length) {
       html += '<div class="small muted" style="padding:14px 4px;text-align:center">'
         + (temFiltro ? 'Nada nesta coluna com os filtros atuais.' : c.ajuda) + '</div>';

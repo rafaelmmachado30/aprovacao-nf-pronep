@@ -574,10 +574,25 @@ async function casarDocumentosPendentes(client, siteId, opts) {
   const { carregarNotas } = require('./notas');
   const { notas, identidade, divergentes } = await carregarNotas(client, siteId, listNotas);
 
-  /* Numero de NF comparavel: "000084" e "84" sao a mesma nota. */
+  /* Numero de NF comparavel: "000084" e "84" sao a mesma nota — e "ND 102",
+     "NF 13167" e "ND  41029975" tambem sao, so com o tipo do documento escrito na
+     frente. Medido na base: 8 das 33 divergencias relatadas eram apenas isso.
+     Nao era erro de cadastro, era comparador burro — e o relatorio chegou a
+     sugerir "corrigir" numero que estava certo. */
   function numNorm(v) {
-    const s = String(v == null ? '' : v).replace(/[^A-Za-z0-9]/g, '');
-    return /^\d+$/.test(s) ? (s.replace(/^0+/, '') || '0') : s.toUpperCase();
+    let s = String(v == null ? '' : v).trim().toUpperCase();
+    s = s.replace(/^(NFS-E|NFS|NFE|NF|ND|NC|RPS)[\s.\-:]*/, '');
+    s = s.replace(/[^A-Za-z0-9]/g, '');
+    return /^\d+$/.test(s) ? (s.replace(/^0+/, '') || '0') : s;
+  }
+
+  /* Data sem hora: o Omie devolve 2026-08-06T03:00:00Z e a nota 2026-08-06T00:00:00Z.
+     Comparar o instante diria que sao dias diferentes. */
+  function soData(v) { return String(v || '').substring(0, 10); }
+  function diasEntre(a, b) {
+    const da = new Date(soData(a)), db = new Date(soData(b));
+    if (isNaN(da.getTime()) || isNaN(db.getTime())) return null;
+    return Math.round(Math.abs(da - db) / 86400000);
   }
 
   const notaPorChave = {};
@@ -642,6 +657,14 @@ async function casarDocumentosPendentes(client, siteId, opts) {
   const ambiguos = [];
   const casados = [];
   const divergenciasDeNumero = [];
+  /* Convencao diferente NAO e erro: o Omie rotula 'REF 07/2026' para folha e
+     imposto, o nosso sistema numera em sequencia. Fica separado para nao virar
+     tarefa de correcao que nao existe. */
+  const convencoesDiferentes = [];
+  /* Duas contas diferentes nao podem reclamar a MESMA nota na mesma execucao.
+     Sem isto, dois grupos de mesmo valor e vencimento apontariam para a mesma NF
+     e um dos dois cards mostraria status alheio. */
+  const usadasNesteRun = {};
   for (const k of Object.keys(grupos)) {
     const g = grupos[k];
     let nota = null, via = null;
@@ -657,6 +680,73 @@ async function casarDocumentosPendentes(client, siteId, opts) {
         continue;
       }
     }
+    /* TERCEIRA VIA: mesmo fornecedor, MESMO VALOR e vencimento junto.
+       Existe porque para uma familia inteira de contas o numero NUNCA vai bater —
+       e nao por erro de ninguem. O Omie rotula "REF 07/2026", "RESCISAO",
+       "REEMBOLSO" para folha, imposto e aluguel; o nosso sistema numera em
+       sequencia (00217, 00220). As duas grafias estao certas, sao convencoes
+       diferentes para o mesmo fato. Medido: 20 das 33 divergencias eram isso.
+
+       CONDICOES DURAS, porque casar por valor e mais fraco que casar por numero:
+         - valor identico ao centavo
+         - vencimento a no maximo 3 dias (lancamento e Omie divergem em 1 dia as
+           vezes; alem disso ja e outra conta)
+         - UM unico candidato. Fornecedor com mensalidade fixa tem dezenas de
+           notas do mesmo valor — e ai a regra se recusa, que e o comportamento
+           certo. */
+    if (!nota && g.cnpj) {
+      const linhas = g.linhas.map(function (l) { return l.fields || {}; });
+      const valorGrupo = linhas.reduce(function (s, f) { return s + (Number(f.Valor) || 0); }, 0);
+      const vencGrupo = linhas.map(function (f) { return soData(f.DataVencimento); })
+                              .filter(Boolean).sort()[0] || null;
+      if (valorGrupo > 0 && vencGrupo) {
+        const cand = (notasPorCnpj[g.cnpj] || []).filter(function (n) {
+          if (notaJaUsada[String(n.id)] || usadasNesteRun[String(n.id)]) return false;
+          if (Math.abs(Number(n.f.Valor || 0) - valorGrupo) >= 0.01) return false;
+          const dd = diasEntre(n.f.DataVencimento, vencGrupo);
+          return dd !== null && dd <= 3;
+        });
+        if (cand.length === 1) {
+          nota = cand[0];
+          via = 'cnpj+valor+vencimento';
+        } else if (cand.length > 1) {
+          ambiguos.push({ cnpj: g.cnpj, numeroNF: g.num, candidatos: cand.length,
+                          por: 'valor+vencimento',
+                          notaIds: cand.map(function (c) { return c.id; }).slice(0, 5) });
+        }
+      }
+    }
+
+    /* CASOU POR VALOR, mas o numero diverge: vale reportar mesmo assim.
+       Casar resolve o quadro; nao resolve o CADASTRO. O numero errado continua
+       quebrando relatorio e o buscarContaPagar, que procura a conta no Omie
+       justamente pelo numero. Se so casassemos em silencio, o defeito ficaria
+       invisivel de novo — que foi exatamente como ele sobreviveu ate agora.
+
+       CLASSIFICA em vez de acusar: quando os dois lados sao numericos e diferem,
+       e provavel digitacao (LBS 84 x 83). Quando um lado e rotulo ("REF 07/2026",
+       "RESCISAO"), sao convencoes diferentes e nao ha nada a corrigir — mandar
+       corrigir isso estragaria dado bom. */
+    if (nota && via === 'cnpj+valor+vencimento') {
+      const numNota = numNorm(nota.f.NumeroNF);
+      if (numNota !== g.num) {
+        const ambosNumericos = /^\d+$/.test(numNota) && /^\d+$/.test(g.num);
+        const item = {
+          fornecedor: (g.linhas[0].fields || {}).EmitenteNome || '',
+          cnpj: g.cnpj,
+          valor: Number((g.linhas[0].fields || {}).Valor || 0),
+          numeroNoOmie: (g.linhas[0].fields || {}).NumeroNF || '',
+          numeroNaNota: nota.f.NumeroNF || '',
+          notaId: nota.id,
+          statusDaNota: nota.f.Status || '',
+          unidade: nota.f.Unidade || '',
+          casouAssimMesmo: true
+        };
+        if (ambosNumericos) divergenciasDeNumero.push(item);
+        else convencoesDiferentes.push(item);
+      }
+    }
+
     /* NAO CASOU: sera que so o NUMERO esta errado?
        O quadro virou auditoria de digitacao. Medido na base: Payfy lancada como
        42010 e no Omie 42012; Iberwan 18593 contra 18539. Em todas o VALOR batia.
@@ -694,6 +784,8 @@ async function casarDocumentosPendentes(client, siteId, opts) {
 
     if (!nota) continue;
 
+    usadasNesteRun[String(nota.id)] = true;
+
     for (const linha of g.linhas) {
       ops.push({ tipo: 'patch', itemId: linha.id,
                  fields: { NotaItemId: String(nota.id), VinculadoAuto: 'Sim' } });
@@ -714,6 +806,7 @@ async function casarDocumentosPendentes(client, siteId, opts) {
     jaVinculados: jaVinculados,
     semDadosParaCasar: semDados,
     gruposCasados: casados.length,
+    casadosPorVia: casados.reduce(function (acc, c) { acc[c.via] = (acc[c.via] || 0) + 1; return acc; }, {}),
     linhasVinculadas: r.ok,
     linhasRestantes: r.restantes,
     falhas: r.falhas.length,
@@ -722,6 +815,8 @@ async function casarDocumentosPendentes(client, siteId, opts) {
        em vez de vincular por cima: numero errado tambem quebra relatorio e o
        buscarContaPagar, que procura a conta no Omie pelo numero. */
     divergenciasDeNumero: divergenciasDeNumero,
+    convencoesDiferentes: convencoesDiferentes.length,
+    exemplosDeConvencao: convencoesDiferentes.slice(0, 5),
     casados: casados.slice(0, 50)
   };
 }
