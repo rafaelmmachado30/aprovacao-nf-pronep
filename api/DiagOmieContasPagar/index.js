@@ -119,7 +119,40 @@ module.exports = async function (context, req) {
          maioria, o merge por numero nao serve e o desenho muda. */
       bloco.temNumeroNF = semNF;
 
-      /* 4) Amostras completas para eu ler os formatos (data, valor, chave). */
+      /* 4) A PERGUNTA QUE DECIDE DUAS COISAS AO MESMO TEMPO.
+            Cruza "tem chave de NF-e" com id_origem (como a conta ENTROU no Omie).
+            - a coluna "com chave" mede o alcance de buscar XML na SEFAZ: chave e
+              o unico jeito de consultar, e sem ela nao ha o que pedir
+            - a coluna "sem chave" diz se existe integracao a reaproveitar. Se as
+              NFS-e entraram por API, alguem ja integrou com as prefeituras e vale
+              investigar; se entraram manualmente, ninguem integrou — alguem
+              digitou, e nao ha o que herdar. */
+      const cruzamento = {};
+      for (const c of r.contas) {
+        const temCh = String(c.chave_nfe || '').replace(/\D/g, '').length === 44;
+        const org = String(c.id_origem || '(vazio)');
+        const k = org + ' | ' + (temCh ? 'com chave (NF-e)' : 'sem chave (NFS-e/outro)');
+        cruzamento[k] = (cruzamento[k] || 0) + 1;
+      }
+      bloco.origemVsChave = cruzamento;
+
+      /* So as EM ABERTO — que sao as que viram card. Misturar as pagas inflaria o
+         numero com historico que nao vai para o quadro. */
+      const abertas = r.contas.filter(function (c) {
+        return String(c.status_titulo || '').toUpperCase().indexOf('PAGO') < 0;
+      });
+      const abertasComChave = abertas.filter(function (c) {
+        return String(c.chave_nfe || '').replace(/\D/g, '').length === 44;
+      }).length;
+      bloco.emAberto = {
+        total: abertas.length,
+        comChave: abertasComChave,
+        semChave: abertas.length - abertasComChave,
+        percentualComChave: abertas.length
+          ? Math.round((abertasComChave / abertas.length) * 100) + '%' : '—'
+      };
+
+      /* 5) Amostras completas para eu ler os formatos (data, valor, chave). */
       bloco.amostras = r.contas.slice(0, amostras);
     }
 
