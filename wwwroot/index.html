@@ -4367,7 +4367,10 @@ function renderNFsAPagar(data) {
   var html = '<div class="card" style="margin-bottom:14px">'
     + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">'
     + '<div><h2 style="margin:0">NFs a Pagar</h2>'
-    + '<div class="small muted">O que a SEFAZ diz que temos a pagar, cruzado com o que ja entrou no sistema.</div></div>'
+    /* Dizia "O que a SEFAZ diz que temos a pagar" — a fonte virou o Omie e a SEFAZ
+       esta desligada. Mesmo motivo da troca dos rotulos das colunas: subtitulo que
+       aponta para a fonte errada manda quem investiga procurar no lugar errado. */
+    + '<div class="small muted">As contas a pagar do Omie, cruzadas com o que já entrou no sistema.</div></div>'
     + '<button class="btn btn-secondary" onclick="carregarNFsAPagar()">Atualizar</button>'
     + '</div>'
     + renderAvisoEscopo(data.escopo)
@@ -4961,7 +4964,25 @@ function abrirDetalheNF(docId) {
       + '<div id="np-itens"><div class="small muted">Buscando os itens no Omie…</div></div>';
   }
 
-  h += '<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">';
+  h += '<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap;align-items:center">';
+
+  /* NF ja lancada: abre o PDF que esta no SharePoint.
+     Card lancado nao oferecia acao nenhuma — o modal terminava numa faixa vazia,
+     justamente quando o documento existe e e o que a pessoa quer conferir.
+     Usa o endpoint que ja existe: ele acha o arquivo na pasta certa conforme o
+     status (Pendentes / Aprovadas / Rejeitadas) e redireciona. Nao montamos a URL
+     do arquivo aqui de proposito — a pasta muda com o status, e duplicar essa
+     regra no front garantiria divergencia no dia em que ela mudar.
+     O endpoint tambem valida sessao e acesso a tela, entao o link nao e atalho
+     para quem nao poderia ver a nota. */
+  if (d.notaItemId) {
+    h += '<a class="btn btn-primary" target="_blank" rel="noopener"'
+      + ' style="text-decoration:none"'
+      + ' href="/api/AbrirPdfDaNota?id=' + encodeURIComponent(d.notaItemId) + '">'
+      + 'Abrir NF em PDF</a>'
+      + '<span class="small muted">Abre em nova aba, direto do SharePoint.</span>';
+  }
+
   if (!d.notaItemId) {
     var pode = d.fornecedorCadastrado && !d.cadastroIncompleto;
     h += '<button class="btn btn-primary"' + (pode
