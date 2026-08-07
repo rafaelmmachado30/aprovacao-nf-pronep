@@ -83,9 +83,14 @@ module.exports = async function (context, req) {
         'Nao foram vinculados de proposito: escolher errado faria o card exibir o ' +
         'status de outra NF.');
     }
-    if (r.linhasRestantes) {
+    /* Em dryRun as linhas "restantes" nao ficaram para tras por falta de tempo:
+       elas nao foram gravadas porque simular e nao gravar. Repetir o aviso de
+       tempo aqui mandaria rodar de novo para resolver um problema inexistente. */
+    if (r.linhasRestantes && !dryRun) {
       avisos.push(r.linhasRestantes + ' linha(s) ficaram sem gravar por tempo. ' +
         'Rode de novo — o que ja foi vinculado nao se repete.');
+    } else if (r.linhasRestantes && dryRun) {
+      avisos.push(r.linhasRestantes + ' linha(s) seriam gravadas. Rode sem ?dryRun=1.');
     }
 
     context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
