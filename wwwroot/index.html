@@ -4337,7 +4337,7 @@ async function carregarNFsAPagar() {
     var lente = window._viewAsDiretoria || '';
     var r = await fetch('/api/ListarDocumentosFiscais'
       + (lente ? '?verComo=' + encodeURIComponent(lente) : ''), { credentials: 'include' });
-    var data = await r.json();
+    var data = await _npLerJson(r);
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
     _nfsAPagarCache = data;
     area.innerHTML = renderNFsAPagar(data);
@@ -4812,6 +4812,31 @@ function renderCardNFPagar(d, coluna) {
 // municipal. Para essas, itens e impostos simplesmente NAO EXISTEM do nosso lado,
 // e a tela diz isso em vez de mostrar um bloco vazio que parece defeito.
 
+/**
+ * Le a resposta de um /api/* que DEVERIA ser JSON.
+ *
+ * POR QUE EXISTE: o Static Web Apps intercepta /api/* antes da Function e, com a
+ * sessao expirada, devolve a PAGINA de erro dele — HTML. O `r.json()` entao
+ * estoura com "Unexpected token '<', \"<!DOCTYPE\"... is not valid JSON", que
+ * aparece na tela para quem so quis abrir um card. A mensagem descreve o parser,
+ * nao o problema, e nao diz o que fazer.
+ *
+ * O sintoma e comum e tem uma causa dominante: sessao vencida. Vale nomear.
+ */
+async function _npLerJson(r) {
+  var txt = await r.text();
+  var t = (txt || '').trim();
+  if (t.charAt(0) === '<') {
+    if (r.status === 401 || r.status === 403 || /401: Unauthorized/i.test(t)) {
+      throw new Error('Sua sessão expirou. Recarregue a página para entrar de novo.');
+    }
+    throw new Error('O servidor respondeu com uma página em vez de dados (HTTP '
+      + r.status + '). Recarregue a página; se continuar, avise a TI.');
+  }
+  try { return JSON.parse(txt); }
+  catch (e) { throw new Error('Resposta inesperada do servidor (HTTP ' + r.status + ').'); }
+}
+
 function _npLinha(rot, val, mono) {
   if (val === null || val === undefined || val === '') return '';
   return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #F0F3F5">'
@@ -5035,7 +5060,7 @@ async function abrirVinculoNF(docId) {
   try {
     var r = await fetch('/api/VincularNotaAoCard?docId=' + encodeURIComponent(docId)
       + (lente ? '&verComo=' + encodeURIComponent(lente) : ''), { credentials: 'include' });
-    var data = await r.json();
+    var data = await _npLerJson(r);
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
 
     var c = data.card || {};
@@ -5118,7 +5143,7 @@ async function confirmarVinculoNF(docId, notaId, numeroNF) {
       body: JSON.stringify({ docId: docId, notaId: notaId,
                              verComo: window._viewAsDiretoria || '' })
     });
-    var data = await r.json();
+    var data = await _npLerJson(r);
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
     closeModal();
     toast(data.mensagem || 'Vinculada.', 'success');
@@ -5350,7 +5375,7 @@ async function carregarDocsDoCard() {
   if (!alvo || !d) return;
   try {
     var r = await fetch('/api/CaixaEntrada', { credentials: 'include' });
-    var data = await r.json();
+    var data = await _npLerJson(r);
     if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
     var itens = (data.itens || data.arquivos || data.value || []).filter(function (x) {
       /* Ja lancado nao entra: seria oferecer de novo o que ja foi usado, que e
