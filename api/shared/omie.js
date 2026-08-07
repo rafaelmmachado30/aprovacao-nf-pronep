@@ -16,10 +16,24 @@
  *
  * Rate limit Omie: ~60 req/min por app_key.
  *
- * IMPORTANTE: o lcpListarRequest do ListarContasPagar NAO aceita filtro de cliente
- * (clientesFiltro, codigo_cliente_fornecedor, filtrar_por_cnpj, etc — todos rejeitados).
- * Solucao: filtramos por janela de data de vencimento (filtrar_por_data_de e
- * filtrar_por_data_ate) ao redor da data de vencimento da NF.
+ * O QUE O lcpListarRequest NAO TEM (tudo sondado, ver DiagOmieFiltros):
+ *   filtro de cliente/fornecedor  clientesFiltro, codigo_cliente_fornecedor,
+ *                                 filtrar_por_cliente, filtrar_por_fornecedor,
+ *                                 filtrar_cliente_fornecedor — todos recusados
+ *   filtro por vencimento         filtrar_por_vencimento nao existe
+ *   filtro por pagamento          filtrar_por_pagamento nao existe
+ *
+ * ARMADILHA QUE JA CUSTOU UM BUG: filtrar_por_data_de/ate parece um filtro de
+ * vencimento e NAO E — filtra por data de ALTERACAO. Este arquivo dizia o
+ * contrario, e as buscas montavam a janela em torno do vencimento. Em conta de
+ * vencimento longo a alteracao fica fora da janela, a conta some do resultado, e
+ * o erro sai como "conta a pagar nao encontrada no Omie": acusando o Omie de nao
+ * ter uma conta que ele tem. So use esses dois campos quando quiser de fato
+ * recortar por alteracao, e diga isso no nome da variavel.
+ *
+ * Sem filtro util, achar UMA conta exige varrer paginas. Por isso o caminho
+ * normal do lancamento nao passa por aqui: acharCodigoOmieDaNota le o
+ * codigo_lancamento_omie que a sincronizacao ja gravou no SharePoint.
  */
 
 require('isomorphic-fetch');
@@ -28,9 +42,8 @@ const zlib = require('zlib');
 
 const OMIE_BASE = 'https://app.omie.com.br/api/v1';
 
-// Janela em dias antes/depois do vencimento da NF
-const JANELA_DIAS_ANTES = 60;
-const JANELA_DIAS_DEPOIS = 90;
+/* JANELA_DIAS_ANTES/DEPOIS foram removidas junto com o filtro de data das buscas.
+   Elas descreviam uma janela de vencimento que o Omie nunca aplicou. */
 // Limite de paginas pra evitar timeout SWA (30s)
 const MAX_PAGINAS = 50;
 
@@ -151,17 +164,25 @@ async function buscarCliente(cnpj, creds) {
 }
 
 /**
- * Busca uma conta a pagar no Omie.
+ * Busca uma conta a pagar no Omie varrendo o ListarContasPagar.
  *
- * Estrategia em 2 passos:
+ * PLANO B. O caminho normal e acharCodigoOmieDaNota, que le o codigo direto do
+ * nosso SharePoint, onde a sincronizacao ja gravou. Aqui so chega nota que nao
+ * esta sincronizada — e entao nao ha alternativa a varredura, porque o Omie nao
+ * tem filtro por vencimento nem por fornecedor (ambos sondados e recusados pelo
+ * nome; ver DiagOmieFiltros).
+ *
+ * Passos:
  *  1. buscarCliente(cnpj) -> codigo_cliente_omie
- *  2. ListarContasPagar filtrado por janela de data, match por
- *     codigo_cliente_fornecedor + numero NF
+ *  2. varre as paginas em duas passadas (em aberto, depois todas), casando por
+ *     codigo_cliente_fornecedor + numero da NF
  *
- * @param opts.cnpj — CNPJ do fornecedor
+ * @param opts.cnpj   — CNPJ do fornecedor
  * @param opts.numero — Numero da NF
- * @param opts.valor — Valor da NF (informativo, nao usado pra match)
- * @param opts.dataVencimento — Date | string ISO | DD/MM/AAAA
+ * @param opts.valor  — Valor da NF (informativo, nao usado no match)
+ *
+ * NAO recebe mais dataVencimento: a janela de data que existia aqui filtrava por
+ * data de ALTERACAO e escondia justamente as contas de vencimento longo.
  */
 async function buscarContaPagar(opts, creds) {
   const cnpjAlvo = normalizaDoc(opts.cnpj);
@@ -182,104 +203,113 @@ async function buscarContaPagar(opts, creds) {
   }
   const codClienteAlvo = Number(cli.codigo_cliente_omie);
 
-  // Calcula janela de data ao redor do vencimento
-  let dtRef = null;
-  if (opts.dataVencimento) {
-    const v = opts.dataVencimento;
-    if (v instanceof Date) dtRef = v;
-    else if (typeof v === 'string') {
-      // Tenta ISO primeiro, depois DD/MM/AAAA
-      const d = new Date(v);
-      if (!isNaN(d.getTime())) dtRef = d;
-      else {
-        const m = v.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-        if (m) dtRef = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  /* SEM JANELA DE DATA — e essa a correcao.
+     O codigo antigo montava uma janela em torno do VENCIMENTO e a mandava em
+     filtrar_por_data_de/ate, que no Omie filtra por data de ALTERACAO. Numa conta
+     de vencimento longo (IPTU em 10 cotas, parcela 010/013) a alteracao foi hoje e
+     a janela esta meses a frente: a conta nunca voltava, e o lancamento falhava
+     com "conta a pagar nao encontrada" — um erro que acusava o Omie de nao ter a
+     conta quando o filtro e que a escondia.
+     Filtro por vencimento e por fornecedor foram sondados e NAO existem
+     (DiagOmieFiltros). Entao aqui nao ha filtro esperto possivel: varre-se.
+
+     Este caminho e o PLANO B. O plano A e o IntegrarOmie achar o codigo direto no
+     nosso proprio SharePoint, onde a sincronizacao ja o gravou. Aqui so chega nota
+     que nao esta sincronizada. */
+  diag.estrategia = 'varredura sem filtro de data (filtro de vencimento nao existe no Omie)';
+
+  /* Duas passadas. A primeira restringe a EMABERTO — sao ~550 contas no RJ contra
+     6.300 no total, entao cabe em 11 paginas e resolve o caso normal, que e anexar
+     o PDF numa conta ainda nao paga. A segunda so roda se a primeira nao achou, e
+     cobre a conta que ja foi paga antes da integracao. Comecar pela ampla gastaria
+     127 paginas sempre. */
+  const passadas = [
+    ['em aberto', { filtrar_por_status: 'EMABERTO' }],
+    ['todas',     {}]
+  ];
+
+  for (const [rotuloPassada, filtroExtra] of passadas) {
+    let truncou = false;
+
+    for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
+      diag.paginas++;
+      const param = Object.assign({
+        pagina: pagina,
+        registros_por_pagina: 50,
+        apenas_importado_api: 'N'
+      }, filtroExtra);
+
+      let resp;
+      try {
+        resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
+        if (pagina === 1) {
+          diag['respostaPag1_' + rotuloPassada] = {
+            total_de_paginas: resp && resp.total_de_paginas,
+            total_de_registros: resp && resp.total_de_registros,
+            registros_retornados: ((resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || []).length
+          };
+        }
+      } catch (e) {
+        diag.erroNoListar = '[' + rotuloPassada + '] ' + e.message;
+        break;
       }
-    }
-  }
-  if (!dtRef || isNaN(dtRef.getTime())) {
-    // Fallback: usa hoje como referencia
-    dtRef = new Date();
-    diag.dataReferenciaSource = 'fallback_hoje';
-  } else {
-    diag.dataReferenciaSource = 'dataVencimento_do_SP';
-  }
-  const dtDe = new Date(dtRef.getTime() - JANELA_DIAS_ANTES * 86400 * 1000);
-  const dtAte = new Date(dtRef.getTime() + JANELA_DIAS_DEPOIS * 86400 * 1000);
-  diag.janela = { de: fmtDataOmie(dtDe), ate: fmtDataOmie(dtAte), dias: JANELA_DIAS_ANTES + JANELA_DIAS_DEPOIS };
 
-  for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
-    diag.paginas++;
-    const param = {
-      pagina: pagina,
-      registros_por_pagina: 50,
-      apenas_importado_api: 'N',
-      filtrar_por_data_de: fmtDataOmie(dtDe),
-      filtrar_por_data_ate: fmtDataOmie(dtAte)
-    };
-    let resp;
-    try {
-      resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
-      // Log meta da resposta pra debug (so na 1a pagina)
-      if (pagina === 1) {
-        diag.respostaPag1 = {
-          total_de_paginas: resp && resp.total_de_paginas,
-          total_de_registros: resp && resp.total_de_registros,
-          registros_retornados: ((resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || []).length,
-          chaves_top_level: resp ? Object.keys(resp).slice(0, 10) : []
-        };
-      }
-    } catch (e) {
-      diag.erroNoListar = e.message;
-      break;
-    }
-    const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
-    diag.totalLidos += items.length;
-    if (items.length === 0) break;
+      const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
+      diag.totalLidos += items.length;
+      if (items.length === 0) break;
 
-    // Guarda alguns documentos pra debug
-    if (pagina === 1) {
-      diag.primeirosDocs = items.slice(0, 3).map(function (it) {
-        return {
-          codigo_cliente_fornecedor: it.codigo_cliente_fornecedor,
-          codigo_lancamento_omie: it.codigo_lancamento_omie,
-          numero_documento: it.numero_documento,
-          nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
-          valor: it.valor_documento
-        };
-      });
-      // 1a conta completa pra debug
-      if (items[0]) {
-        diag.primeiroDocCompleto = Object.keys(items[0]);
-      }
-    }
-
-    for (const it of items) {
-      const itCodCli = Number(it.codigo_cliente_fornecedor || 0);
-      const itNum = normalizaNumeroNF(it.numero_documento || '');
-      const itNotaFiscal = normalizaNumeroNF(it.numero_documento_fiscal || it.nota_fiscal || '');
-      const itValor = Number(it.valor_documento || 0);
-
-      const docOk = itCodCli && itCodCli === codClienteAlvo;
-      const numOk = (itNum && itNum === numAlvo) || (itNotaFiscal && itNotaFiscal === numAlvo);
-      if (docOk && numOk) {
-        diag.candidatos.push({
-          codigo_lancamento_omie: it.codigo_lancamento_omie,
-          codigo_lancamento_integracao: it.codigo_lancamento_integracao,
-          numero_documento: it.numero_documento,
-          nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
-          valor: itValor,
-          status: it.status_titulo
+      if (pagina === 1 && !diag.primeirosDocs.length) {
+        diag.primeirosDocs = items.slice(0, 3).map(function (it) {
+          return {
+            codigo_cliente_fornecedor: it.codigo_cliente_fornecedor,
+            codigo_lancamento_omie: it.codigo_lancamento_omie,
+            numero_documento: it.numero_documento,
+            nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
+            valor: it.valor_documento
+          };
         });
+        if (items[0]) diag.primeiroDocCompleto = Object.keys(items[0]);
       }
+
+      for (const it of items) {
+        const itCodCli = Number(it.codigo_cliente_fornecedor || 0);
+        const itNum = normalizaNumeroNF(it.numero_documento || '');
+        const itNotaFiscal = normalizaNumeroNF(it.numero_documento_fiscal || it.nota_fiscal || '');
+        const itValor = Number(it.valor_documento || 0);
+
+        const docOk = itCodCli && itCodCli === codClienteAlvo;
+        const numOk = (itNum && itNum === numAlvo) || (itNotaFiscal && itNotaFiscal === numAlvo);
+        if (docOk && numOk) {
+          diag.candidatos.push({
+            codigo_lancamento_omie: it.codigo_lancamento_omie,
+            codigo_lancamento_integracao: it.codigo_lancamento_integracao,
+            numero_documento: it.numero_documento,
+            nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
+            valor: itValor,
+            status: it.status_titulo
+          });
+        }
+      }
+
+      if (diag.candidatos.length > 0) {
+        diag.achadoNaPassada = rotuloPassada;
+        return { found: true, conta: diag.candidatos[0], diag: diag };
+      }
+
+      const totalPags = (resp && resp.total_de_paginas) || pagina;
+      if (pagina >= totalPags) break;
+      if (pagina === MAX_PAGINAS && totalPags > MAX_PAGINAS) truncou = true;
     }
 
-    if (diag.candidatos.length > 0) {
-      return { found: true, conta: diag.candidatos[0], diag: diag };
+    /* Truncou = paramos no teto de paginas com base ainda por ler. Sem esse aviso,
+       "nao encontrada" viraria "nao existe", e alguem iria procurar no Omie uma
+       conta que estava na pagina 51. */
+    if (truncou) {
+      diag.truncado = true;
+      diag.avisoTruncado = 'A passada "' + rotuloPassada + '" parou em ' + MAX_PAGINAS +
+        ' paginas com registros ainda por ler. NAO ENCONTRADA aqui nao significa ' +
+        'que a conta nao exista no Omie.';
     }
-
-    const totalPags = (resp && resp.total_de_paginas) || pagina;
-    if (pagina >= totalPags) break;
   }
 
   return { found: false, diag: diag };
@@ -398,7 +428,9 @@ async function buscarContaPagarPF(opts, creds) {
   }
   const codClienteAlvo = Number(cli.codigo_cliente_omie);
 
-  // Calcula janela de data ao redor do vencimento
+  /* A data de vencimento continua sendo usada — mas para DESEMPATAR, nunca para
+     filtrar a consulta. Colaborador com duas contas do mesmo valor no mes e caso
+     real; a mais proxima do vencimento e a aposta certa. */
   let dtRef = null;
   if (opts.dataVencimento) {
     const v = opts.dataVencimento;
@@ -413,61 +445,59 @@ async function buscarContaPagarPF(opts, creds) {
     }
   }
   if (!dtRef || isNaN(dtRef.getTime())) {
-    dtRef = new Date();
-    diag.dataReferenciaSource = 'fallback_hoje';
+    dtRef = null;
+    diag.dataReferenciaSource = 'ausente — desempate por vencimento fica indisponivel';
   } else {
-    diag.dataReferenciaSource = 'dataVencimento_do_SP';
+    diag.dataReferenciaSource = 'dataVencimento_do_SP (so desempate)';
   }
-  const dtDe = new Date(dtRef.getTime() - JANELA_DIAS_ANTES * 86400 * 1000);
-  const dtAte = new Date(dtRef.getTime() + JANELA_DIAS_DEPOIS * 86400 * 1000);
-  diag.janela = { de: fmtDataOmie(dtDe), ate: fmtDataOmie(dtAte), dias: JANELA_DIAS_ANTES + JANELA_DIAS_DEPOIS };
 
-  // PASSO 2: listar contas a pagar no periodo
-  for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
-    diag.paginas++;
-    const param = {
-      pagina: pagina,
-      registros_por_pagina: 50,
-      apenas_importado_api: 'N',
-      filtrar_por_data_de: fmtDataOmie(dtDe),
-      filtrar_por_data_ate: fmtDataOmie(dtAte)
-    };
-    let resp;
-    try {
-      resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
-      // Log meta da resposta pra debug (so na 1a pagina)
-      if (pagina === 1) {
-        diag.respostaPag1 = {
-          total_de_paginas: resp && resp.total_de_paginas,
-          total_de_registros: resp && resp.total_de_registros,
-          registros_retornados: ((resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || []).length,
-          chaves_top_level: resp ? Object.keys(resp).slice(0, 10) : []
-        };
+  /* SEM JANELA DE DATA na consulta — mesma correcao do buscarContaPagar.
+     filtrar_por_data_de/ate filtra por ALTERACAO, nao por vencimento. A janela
+     montada em torno do vencimento escondia a conta de vencimento longo, e o erro
+     saia como "colaborador nao tem contas no periodo" — acusando o cadastro de um
+     problema que era do filtro. */
+  diag.estrategia = 'varredura sem filtro de data; vencimento so desempata';
+
+  const passadas = [
+    ['em aberto', { filtrar_por_status: 'EMABERTO' }],
+    ['todas',     {}]
+  ];
+
+  for (const [rotuloPassada, filtroExtra] of passadas) {
+    let truncou = false;
+
+    for (let pagina = 1; pagina <= MAX_PAGINAS; pagina++) {
+      diag.paginas++;
+      const param = Object.assign({
+        pagina: pagina,
+        registros_por_pagina: 50,
+        apenas_importado_api: 'N'
+      }, filtroExtra);
+
+      let resp;
+      try {
+        resp = await callOmie('/financas/contapagar/', 'ListarContasPagar', param, creds);
+        if (pagina === 1) {
+          diag['respostaPag1_' + rotuloPassada] = {
+            total_de_paginas: resp && resp.total_de_paginas,
+            total_de_registros: resp && resp.total_de_registros,
+            registros_retornados: ((resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || []).length
+          };
+        }
+      } catch (e) {
+        diag.erroNoListar = '[' + rotuloPassada + '] ' + e.message;
+        break;
       }
-    } catch (e) {
-      diag.erroNoListar = e.message;
-      break;
-    }
-    const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
-    diag.totalLidos += items.length;
-    if (items.length === 0) break;
+      const items = (resp && (resp.conta_pagar_cadastro || resp.contas_pagar_cadastro)) || [];
+      diag.totalLidos += items.length;
+      if (items.length === 0) break;
 
-    for (const it of items) {
-      const itCodCli = Number(it.codigo_cliente_fornecedor || 0);
-      const itValor = Number(it.valor_documento || 0);
-      const itVenc = it.data_vencimento || '';
-      if (itCodCli && itCodCli === codClienteAlvo) {
-        diag.todasContasDoCliente.push({
-          codigo_lancamento_omie: it.codigo_lancamento_omie,
-          numero_documento: it.numero_documento,
-          nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
-          valor: itValor,
-          data_vencimento: itVenc,
-          status: it.status_titulo
-        });
-        // Match por valor (tolerancia 1 centavo pra arredondamento)
-        if (Math.abs(itValor - valorAlvo) < 0.01) {
-          diag.candidatos.push({
+      for (const it of items) {
+        const itCodCli = Number(it.codigo_cliente_fornecedor || 0);
+        const itValor = Number(it.valor_documento || 0);
+        const itVenc = it.data_vencimento || '';
+        if (itCodCli && itCodCli === codClienteAlvo) {
+          diag.todasContasDoCliente.push({
             codigo_lancamento_omie: it.codigo_lancamento_omie,
             numero_documento: it.numero_documento,
             nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
@@ -475,12 +505,34 @@ async function buscarContaPagarPF(opts, creds) {
             data_vencimento: itVenc,
             status: it.status_titulo
           });
+          // Match por valor (tolerancia 1 centavo pra arredondamento)
+          if (Math.abs(itValor - valorAlvo) < 0.01) {
+            diag.candidatos.push({
+              codigo_lancamento_omie: it.codigo_lancamento_omie,
+              numero_documento: it.numero_documento,
+              nota_fiscal: it.numero_documento_fiscal || it.nota_fiscal,
+              valor: itValor,
+              data_vencimento: itVenc,
+              status: it.status_titulo
+            });
+          }
         }
       }
+
+      const totalPags = (resp && resp.total_de_paginas) || pagina;
+      if (pagina >= totalPags) break;
+      if (pagina === MAX_PAGINAS && totalPags > MAX_PAGINAS) truncou = true;
     }
 
-    const totalPags = (resp && resp.total_de_paginas) || pagina;
-    if (pagina >= totalPags) break;
+    if (truncou) {
+      diag.truncado = true;
+      diag.avisoTruncado = 'A passada "' + rotuloPassada + '" parou em ' + MAX_PAGINAS +
+        ' paginas com registros ainda por ler. NAO ENCONTRADA aqui nao significa ' +
+        'que a conta nao exista no Omie.';
+    }
+
+    /* Achou na passada estreita? Nao varre a base inteira atras de mais nada. */
+    if (diag.candidatos.length > 0) { diag.achadoNaPassada = rotuloPassada; break; }
   }
 
   if (diag.candidatos.length === 0) {

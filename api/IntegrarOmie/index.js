@@ -27,6 +27,7 @@ const { getUser } = require('../shared/auth');
 const { getUserRoles } = require('../shared/userRoles');
 const { registrar: auditRegistrar } = require('../shared/auditLog');
 const { getCredentials, buscarContaPagar, buscarContaPagarPF, anexarPDF } = require('../shared/omie');
+const { acharCodigoOmieDaNota } = require('../shared/documentosFiscais');
 const { getGraphClient } = require('../shared/graph');
 
 const LIST_NOTAS = 'PRONEP-NF-NotasFiscais';
@@ -147,18 +148,41 @@ module.exports = async function (context, req) {
     const ehPF = docDigitos.length === 11;
     diag.modoBusca = ehPF ? 'PF (CPF) — match por valor+data' : 'PJ (CNPJ) — match por numero NF';
 
-    const busca = ehPF
-      ? await buscarContaPagarPF({
-          cnpj: f.CNPJFornecedor,
-          valor: f.Valor,
-          dataVencimento: f.DataVencimento
-        }, creds)
-      : await buscarContaPagar({
-          cnpj: f.CNPJFornecedor,
-          numero: f.NumeroNF,
-          valor: f.Valor,
-          dataVencimento: f.DataVencimento
-        }, creds);
+    /* PLANO A: o codigo ja esta na nossa base.
+       A sincronizacao do quadro grava codigo_lancamento_omie em cada documento.
+       Procurar de novo no Omie era refazer com heuristica um trabalho ja feito
+       com precisao — e a heuristica estava errada: a janela de data usava o
+       filtro de ALTERACAO como se fosse de vencimento, escondendo justamente as
+       contas de vencimento longo (IPTU em cotas, parcela 010/013) e produzindo
+       "conta a pagar nao encontrada" para conta que existia.
+       Aqui a busca e local, exata e instantanea. */
+    let busca = null;
+    const local = await acharCodigoOmieDaNota(client, siteId, {
+      notaItemId: itemId,
+      chave: f.ChaveAcesso,
+      numeroNF: f.NumeroNF,
+      cnpj: f.CNPJFornecedor
+    });
+    diag.buscaLocal = local;
+
+    if (local.encontrado) {
+      busca = { found: true,
+                conta: { codigo_lancamento_omie: local.codigoLancamentoOmie },
+                diag: { origem: 'SharePoint', via: local.via, docItemId: local.docItemId } };
+    } else {
+      /* PLANO B: nota que nunca passou pela sincronizacao. Varre o Omie. */
+      busca = ehPF
+        ? await buscarContaPagarPF({
+            cnpj: f.CNPJFornecedor,
+            valor: f.Valor,
+            dataVencimento: f.DataVencimento
+          }, creds)
+        : await buscarContaPagar({
+            cnpj: f.CNPJFornecedor,
+            numero: f.NumeroNF,
+            valor: f.Valor
+          }, creds);
+    }
     diag.buscaOmie = busca.diag;
 
     if (!busca.found) {
@@ -169,11 +193,25 @@ module.exports = async function (context, req) {
         { motivo: 'conta_nao_encontrada_omie', empresa: creds.empresa, paginasLidas: busca.diag.paginas, totalLidos: busca.diag.totalLidos }
       ).catch(function(){});
 
+      /* "Nao encontrada" e "nao existe" sao coisas diferentes, e a mensagem tem
+         que dizer qual das duas foi. Quando a varredura para no teto de paginas
+         com base por ler, mandar o usuario "verificar se a conta foi lancada"
+         joga nele um trabalho que talvez nao exista — a conta pode estar na
+         pagina seguinte. */
+      const truncou = !!(busca.diag && busca.diag.truncado);
       context.res = {
         status: 404,
         body: {
-          error: 'Conta a pagar nao encontrada no Omie ' + creds.empresa,
-          detail: 'Verifique se a conta foi lancada no Omie com CNPJ ' + f.CNPJFornecedor + ' e numero NF ' + f.NumeroNF,
+          error: truncou
+            ? 'Conta a pagar nao localizada nas paginas lidas do Omie ' + creds.empresa
+            : 'Conta a pagar nao encontrada no Omie ' + creds.empresa,
+          detail: truncou
+            ? 'A busca parou no limite de paginas com registros ainda por ler, entao ' +
+              'isto NAO prova que a conta nao existe. Sincronize a unidade em ' +
+              '"NFs a Pagar" e tente de novo: com o card sincronizado, o lancamento ' +
+              'acha a conta direto, sem varrer o Omie.'
+            : 'Verifique se a conta foi lancada no Omie com CNPJ ' + f.CNPJFornecedor +
+              ' e numero NF ' + f.NumeroNF,
           diag
         }
       };

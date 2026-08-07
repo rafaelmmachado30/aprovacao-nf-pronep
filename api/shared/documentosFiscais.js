@@ -464,6 +464,84 @@ async function casarNotaComDocumento(client, siteId, nota) {
   return { vinculou: true, docItemId: candidatos[0].id, por: 'fraca' };
 }
 
+/**
+ * Acha o codigo_lancamento_omie de uma nota SEM perguntar ao Omie.
+ *
+ * POR QUE ISTO EXISTE: o Omie nao tem filtro por vencimento nem por fornecedor
+ * (os dois foram sondados e recusados pelo nome — ver DiagOmieFiltros). Sobrava
+ * varrer o ListarContasPagar pagina a pagina, e o buscarContaPagar fazia isso
+ * com uma janela montada em torno do VENCIMENTO usando o unico filtro de data
+ * que existe, o de ALTERACAO. Em conta de vencimento longo (IPTU em 10 cotas,
+ * parcela 010/013) a alteracao foi hoje e a janela esta meses a frente: a conta
+ * nunca voltava e o lancamento falhava com "conta a pagar nao encontrada".
+ *
+ * A sincronizacao ja gravou o codigo. Procurar de novo no Omie era refazer, com
+ * heuristica, um trabalho ja feito com precisao.
+ *
+ * TRES CAMINHOS, do mais forte ao mais fraco:
+ *   NotaItemId  vinculo explicito documento<->nota. Prova, nao indicio.
+ *   ChaveAcesso 44 digitos, unica no Brasil.
+ *   CNPJ+numero fraco: o mesmo fornecedor repete numero em series diferentes.
+ *               So aceita quando ha UM candidato — havendo mais, prefere nao
+ *               achar a anexar o PDF na conta errada.
+ *
+ * @returns {{encontrado:boolean, codigoLancamentoOmie?:string, docItemId?:string,
+ *            via?:'notaItemId'|'chave'|'cnpj+numero', motivo?:string}}
+ */
+async function acharCodigoOmieDaNota(client, siteId, alvo) {
+  const listId = await resolveListId(client, siteId, LIST_DOCFIS);
+  if (!listId) return { encontrado: false, motivo: 'lista de documentos nao existe' };
+
+  const base = '/sites/' + siteId + '/lists/' + listId + '/items';
+  async function consultar(filtro, topo) {
+    const r = await client.api(base).expand('fields').filter(filtro)
+      .header('Prefer', 'HonorNonIndexedQueriesWarningMayFailRandomly')
+      .top(topo || 20).get();
+    return (r && r.value) || [];
+  }
+  /* Linha sem codigo nao serve: existe no quadro mas ainda nao foi sincronizada
+     com o Omie. Tratar como "achei" faria o anexo ir para lugar nenhum. */
+  function comCodigo(itens) {
+    return itens.filter(function (it) {
+      return String((it.fields || {}).CodigoLancamentoOmie || '').trim() !== '';
+    });
+  }
+  function devolver(it, via) {
+    return { encontrado: true, via: via, docItemId: String(it.id),
+             codigoLancamentoOmie: String((it.fields || {}).CodigoLancamentoOmie).trim() };
+  }
+
+  try {
+    if (alvo.notaItemId) {
+      const achados = comCodigo(await consultar(
+        "fields/NotaItemId eq '" + String(alvo.notaItemId) + "'"));
+      if (achados.length) return devolver(achados[0], 'notaItemId');
+    }
+
+    const ch = soDigitos(alvo.chave);
+    if (chaveValida(ch)) {
+      const achados = comCodigo(await consultar("fields/ChaveAcesso eq '" + ch + "'"));
+      if (achados.length) return devolver(achados[0], 'chave');
+    }
+
+    const cnpj = soDigitos(alvo.cnpj);
+    const num = String(alvo.numeroNF || '').trim();
+    if (cnpj.length === 14 && num) {
+      const achados = comCodigo(await consultar(
+        "fields/EmitenteCNPJ eq '" + cnpj + "' and fields/NumeroNF eq '" + num + "'"));
+      if (achados.length === 1) return devolver(achados[0], 'cnpj+numero');
+      if (achados.length > 1) {
+        return { encontrado: false, motivo: achados.length + ' documentos com o mesmo ' +
+                 'CNPJ e numero — ambiguo, nao dá para escolher com seguranca' };
+      }
+    }
+  } catch (e) {
+    return { encontrado: false, motivo: 'consulta falhou: ' + ((e && e.message) || String(e)) };
+  }
+
+  return { encontrado: false, motivo: 'nenhum documento sincronizado corresponde a esta nota' };
+}
+
 /* ----------------------------------------------------------- ponteiro de NSU */
 
 /**
@@ -733,6 +811,7 @@ module.exports = {
   COLUNAS_DOCFIS, COLUNAS_SEFAZ, COLUNAS_NOTAS_EXTRA,
   resolveListId, soDigitos, chaveValida, chaveFraca,
   buscarPorChave, gravarDocumento, vincularNota, casarNotaComDocumento,
+  acharCodigoOmieDaNota,
   gravarContaOmie, indexarPorCodigoOmie, gravarEmLote, prepararContaOmie,
   lerPonteiro, garantirPonteiro, gravarPonteiro,
   lerCnpjsConfigurados, lerCertificado, lerBase64Certificado, lerConfigSefaz,
