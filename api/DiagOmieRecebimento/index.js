@@ -181,7 +181,38 @@ module.exports = async function (context, req) {
           ? { aceito: true, chaves: Object.keys(r.data || {}).slice(0, 20),
               tamanho: JSON.stringify(r.data || {}).length }
           : r;
-        if (r.aceito) { diag.obterQueFunciona = nome; break; }
+        if (r.aceito) {
+          diag.obterQueFunciona = nome;
+          /* CONFERE A IDENTIDADE, nao so o sucesso. Uma API que responde 200 pode
+             estar devolvendo o ultimo recebimento, um template vazio ou o registro
+             errado — e construir o modal em cima disso mostraria os itens de OUTRA
+             nota para quem vai aprovar pagamento. O cabec tem que bater com a
+             chave que eu pedi; se nao bater, `confere` fica false e o achado nao
+             vale nada. */
+          const d = r.data || {};
+          const cab = d.cabec || {};
+          const chaveVolta = String(cab.cChaveNFe || '').replace(/\D/g, '');
+          diag.conferenciaObter = {
+            chavePedida: chave,
+            chaveDevolvida: chaveVolta,
+            confere: chaveVolta === chave,
+            numeroNF: cab.cNumeroNFe || '',
+            emitente: cab.cRazaoSocial || cab.cNome || '',
+            cnpj: cab.cCNPJ_CPF || '',
+            valor: cab.nValorNFe
+          };
+          /* Os itens sao o motivo de tudo isto existir: e deles que sai a tela de
+             detalhe. Mostro os NOMES dos campos e UM item, para eu saber montar a
+             tabela sem despejar a nota inteira na resposta. */
+          const itens = d.itensRecebimento;
+          const arr = Array.isArray(itens) ? itens : (itens ? [itens] : []);
+          diag.itens = {
+            quantidade: arr.length,
+            campos: arr.length ? Object.keys(arr[0]).sort() : [],
+            primeiro: arr.length ? arr[0] : null
+          };
+          break;
+        }
         await dorme(PAUSA_MS);
       }
     } else if (chave.length !== 44) {
