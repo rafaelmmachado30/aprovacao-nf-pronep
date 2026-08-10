@@ -162,6 +162,11 @@
   .btn { padding: 10px 18px; border-radius: 5px; font-size: 14px; font-weight: 600; transition: all 0.15s; }
   .btn-primary { background: var(--azul-escuro); color: var(--branco); }
   .btn-primary:hover { background: #163A5B; }
+  /* Botao desabilitado precisa PARECER desabilitado: sem isto ele fica identico ao
+     ativo, o usuario clica, nada acontece e ele conclui que o sistema travou.
+     O :hover acima e neutralizado junto, senao o botao morto reage ao mouse. */
+  .btn:disabled, .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary:disabled:hover, .btn-primary[disabled]:hover { background: var(--azul-escuro); }
   .btn-secondary { background: var(--branco); color: var(--azul-escuro); border: 1.5px solid var(--cinza-borda); }
   .btn-secondary:hover { border-color: var(--azul-claro); color: var(--azul-claro); }
   .btn-success { background: var(--verde); color: var(--branco); }

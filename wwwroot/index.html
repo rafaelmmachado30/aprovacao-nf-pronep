@@ -2566,6 +2566,12 @@ function renderConfiguracoesView() {
   if (sub === 'sistema' && !_configEhAdmin()) sub = null;
   if (sub === 'aprovadores' && !_configPodeAprovadores()) sub = null;
   if (sub === 'integracoes' && !_configEhAdmin()) sub = null;
+  if (sub === 'certificado' && !_configEhAdmin()) sub = null;
+  if (sub === 'certificado') {
+    setTimeout(carregarConfigCertificado, 30);
+    return _voltarConfigHtml() + '<div id="cfg-certificado"><div class="card" style="text-align:center;padding:34px">'
+      + '<div class="small muted">Lendo o estado dos certificados…</div></div></div>';
+  }
   if (sub === 'sistema') return _voltarConfigHtml() + renderConfigSistema();
   if (sub === 'aprovadores') return _voltarConfigHtml() + renderConfigAprovadores();
   if (sub === 'integracoes') {
@@ -2604,6 +2610,11 @@ function renderConfigLanding() {
       <div class="card" onclick="abrirConfigSub('integracoes')" style="cursor:pointer;flex:1;min-width:280px;transition:box-shadow .15s,transform .15s" onmouseover="this.style.boxShadow='0 6px 18px rgba(31,78,121,0.18)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">
         <h3 style="margin-top:0">🔌 Integrações</h3>
         <p class="small muted" style="line-height:1.55">Liga e desliga a busca automática de NF-e na SEFAZ, e mostra o estado de cada CNPJ. Use para frear a entrada de notas quando o volume virar gargalo.</p>
+      </div>` : ''}
+      ${_configEhAdmin() ? `
+      <div class="card" onclick="abrirConfigSub('certificado')" style="cursor:pointer;flex:1;min-width:280px;transition:box-shadow .15s,transform .15s" onmouseover="this.style.boxShadow='0 6px 18px rgba(31,78,121,0.18)';this.style.transform='translateY(-2px)'" onmouseout="this.style.boxShadow='';this.style.transform=''">
+        <h3 style="margin-top:0">🔑 Certificado da SEFAZ (A1)</h3>
+        <p class="small muted" style="line-height:1.55">O A1 vence a cada 12 meses. Envie o arquivo novo e a senha por aqui, sem depender de alteração de código nem de acesso ao Azure.</p>
       </div>` : ''}
     </div>
   `;
@@ -4252,6 +4263,227 @@ async function salvarCorteVencimento() {
   } catch (e) {
     toast('Falha de comunicação: ' + (e && e.message), 'error');
   } finally { esconderSalvandoOverlay(); }
+}
+
+/* ============================ CERTIFICADO A1 ============================
+   Trocar o certificado da SEFAZ sem depender de codigo nem do portal do Azure.
+   O A1 vence a cada 12 meses; antes disso exigia subir blob e reescrever App
+   Setting, ou seja, dependia de quem tem acesso ao Azure.
+
+   A senha NUNCA volta do servidor. O que aparece aqui e apenas SE existe senha
+   gravada — e o campo comeca sempre vazio, de proposito: campo de senha
+   pre-preenchido convida a salvar sem querer o valor errado.                    */
+
+async function carregarConfigCertificado() {
+  var alvo = document.getElementById('cfg-certificado');
+  if (!alvo) return;
+  try {
+    var r = await fetch('/api/ConfigCertificadoSefaz', { credentials: 'include' });
+    var d = await _npLerJson(r);
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    /* Guardado porque o "aplicar às outras filiais" precisa saber quais existem. */
+    window._certLista = d.cnpjs || [];
+    alvo.innerHTML = renderConfigCertificado(d);
+  } catch (e) {
+    alvo.innerHTML = '<div class="card"><div class="alert alert-error"><span class="ico">x</span><div>'
+      + '<b>Não foi possível ler o estado dos certificados.</b><br>' + _npEsc(e.message)
+      + '</div></div></div>';
+  }
+}
+
+function _certRaiz(cnpj) { return String(cnpj || '').replace(/\D/g, '').slice(0, 8); }
+
+function _certCnpjFmt(c) {
+  var s = String(c || '').replace(/\D/g, '');
+  if (s.length !== 14) return s;
+  return s.slice(0, 2) + '.' + s.slice(2, 5) + '.' + s.slice(5, 8) + '/' +
+         s.slice(8, 12) + '-' + s.slice(12);
+}
+
+/* Faixa de cor por dias restantes. O corte em 30 dias existe porque emitir um A1
+   novo leva alguns dias uteis: avisar no dia do vencimento nao serve pra nada. */
+function _certFaixa(dias) {
+  if (dias == null) return { cor: '#6B7280', rotulo: 'validade não lida' };
+  if (dias < 0) return { cor: '#9B1C1C', rotulo: 'VENCIDO há ' + Math.abs(dias) + ' dia(s)' };
+  if (dias === 0) return { cor: '#9B1C1C', rotulo: 'vence HOJE' };
+  if (dias <= 30) return { cor: '#C62828', rotulo: 'vence em ' + dias + ' dia(s)' };
+  if (dias <= 60) return { cor: '#B45309', rotulo: 'vence em ' + dias + ' dia(s)' };
+  return { cor: '#2E7D32', rotulo: 'válido por ' + dias + ' dia(s)' };
+}
+
+function renderConfigCertificado(d) {
+  var lista = d.cnpjs || [];
+
+  var h = '<h2 style="margin-top:0">Certificado digital da SEFAZ (A1)</h2>'
+    + '<div class="view-sub">O certificado A1 vence a cada 12 meses. Troque aqui, sem '
+    + 'depender de alteração de código nem de acesso ao Azure.</div>';
+
+  (d.avisos || []).forEach(function (a) {
+    h += '<div class="alert alert-warn" style="margin-bottom:12px"><span class="ico">!</span>'
+      + '<div>' + _npEsc(a) + '</div></div>';
+  });
+
+  if (!lista.length) {
+    return h + '<div class="card"><div class="small muted">Nenhum CNPJ configurado para a SEFAZ.</div></div>';
+  }
+
+  /* Quantas filiais compartilham cada raiz — a SEFAZ autentica pela raiz, entao o
+     MESMO arquivo serve para todas. Sem dizer isso, o administrador acha que
+     precisa de um certificado por filial. */
+  var porRaiz = {};
+  lista.forEach(function (c) {
+    var raiz = _certRaiz(c.cnpj);
+    porRaiz[raiz] = (porRaiz[raiz] || 0) + 1;
+  });
+
+  lista.forEach(function (c) {
+    var faixa = _certFaixa(c.diasRestantes);
+    var irmas = porRaiz[_certRaiz(c.cnpj)] - 1;
+    var id = 'cert-' + c.cnpj;
+
+    h += '<div class="card" style="border-left:4px solid ' + faixa.cor + ';max-width:900px">'
+      + '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start;justify-content:space-between">'
+      + '<div style="flex:1;min-width:260px">'
+      + '<h3 style="margin:0 0 2px">' + _npEsc(c.apelido || c.cnpj) + '</h3>'
+      + '<div class="small muted" style="font-variant-numeric:tabular-nums">'
+      + _certCnpjFmt(c.cnpj) + (c.unidade ? ' · ' + _npEsc(c.unidade) : '') + '</div>'
+      + '</div>'
+      + '<div style="text-align:right">'
+      + '<div style="font-weight:700;color:' + faixa.cor + '">' + faixa.rotulo + '</div>'
+      + (c.validadeFim ? '<div class="small muted">até ' + _npEsc(c.validadeFim) + '</div>' : '')
+      + '</div></div>';
+
+    if (!c.temArquivo) {
+      h += '<div class="alert alert-warn" style="margin:12px 0"><span class="ico">!</span>'
+        + '<div>Nenhum certificado enviado para este CNPJ.</div></div>';
+    } else {
+      h += '<div class="small muted" style="margin:10px 0 0;line-height:1.7">';
+      if (c.titular) h += '<div>Titular: <b>' + _npEsc(c.titular) + '</b></div>';
+      if (c.bytes) h += '<div>Arquivo: ' + Math.round(c.bytes / 1024) + ' KB</div>';
+      if (c.atualizadoEm) {
+        h += '<div>Trocado em ' + _npEsc(String(c.atualizadoEm).slice(0, 10))
+          + (c.atualizadoPor ? ' por ' + _npEsc(c.atualizadoPor) : '') + '</div>';
+      }
+      if (!c.temSenhaNoBlob && c.temSenhaEmAppSetting) {
+        h += '<div style="color:#B45309">A senha deste CNPJ ainda está numa configuração do '
+          + 'Azure. Ao enviar aqui, ela passa a ser gerenciada por esta tela.</div>';
+      }
+      if (c.avisoValidade) {
+        h += '<div style="color:#B45309">' + _npEsc(c.avisoValidade) + '</div>';
+      }
+      h += '</div>';
+    }
+
+    /* Formulario. type="file" e type="password" ficam em atributos — o
+       scripts/verificar-front.js confere isso. */
+    h += '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--cinza-borda)">'
+      + '<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">'
+      + '<div style="flex:1;min-width:230px">'
+      + '<label class="small" style="font-weight:600;display:block;margin-bottom:4px">'
+      + 'Arquivo .pfx / .p12 <span class="muted">(deixe vazio para trocar só a senha)</span></label>'
+      + '<input type="file" id="' + id + '-arq" accept=".pfx,.p12" style="width:100%">'
+      + '</div>'
+      + '<div style="flex:1;min-width:200px">'
+      + '<label class="small" style="font-weight:600;display:block;margin-bottom:4px">Senha do certificado</label>'
+      + '<input type="password" id="' + id + '-senha" autocomplete="new-password" '
+      + 'placeholder="digite a senha" style="width:100%;padding:8px 10px;border:1px solid var(--cinza-borda);border-radius:6px">'
+      + '</div>'
+      + '<button class="btn btn-primary" onclick="enviarCertificadoA1(\'' + c.cnpj + '\')"'
+      + (d.prontoParaGravar ? '' : ' disabled title="CONFIG_CRYPTO_KEY não configurada"')
+      + '>Enviar</button>'
+      + '</div>';
+
+    if (irmas > 0) {
+      h += '<label class="small" style="display:flex;align-items:center;gap:8px;margin-top:10px;cursor:pointer">'
+        + '<input type="checkbox" id="' + id + '-raiz" checked>'
+        + '<span>Aplicar também às outras ' + irmas + ' filial(is) do CNPJ '
+        + _certRaiz(c.cnpj) + ' — a SEFAZ autentica pela raiz, então o mesmo arquivo serve.</span>'
+        + '</label>';
+    }
+
+    h += '<div class="small muted" style="margin-top:8px">A senha é conferida contra o arquivo '
+      + 'antes de gravar e é guardada cifrada. Ela nunca é exibida de volta.</div>'
+      + '</div></div>';
+  });
+
+  return h;
+}
+
+async function enviarCertificadoA1(cnpj) {
+  var elArq = document.getElementById('cert-' + cnpj + '-arq');
+  var elSenha = document.getElementById('cert-' + cnpj + '-senha');
+  var elRaiz = document.getElementById('cert-' + cnpj + '-raiz');
+  if (!elSenha) return;
+
+  var senha = elSenha.value || '';
+  if (!senha) { toast('Digite a senha do certificado.', 'error'); return; }
+
+  var arquivo = elArq && elArq.files && elArq.files[0] ? elArq.files[0] : null;
+  var b64 = null;
+
+  if (arquivo) {
+    var buf = await arquivo.arrayBuffer();
+    var cab = new Uint8Array(buf.slice(0, 2));
+    /* PKCS#12 sempre comeca com 0x30 0x82. Barrar aqui evita subir 9 KB para
+       receber uma recusa que da para dar na hora. */
+    if (cab[0] !== 0x30 || cab[1] !== 0x82) {
+      toast('Este arquivo não parece um .pfx/.p12. Confira se não selecionou o arquivo errado.', 'error');
+      return;
+    }
+    var bytes = new Uint8Array(buf);
+    var pedacos = [];
+    /* Em pedacos: String.fromCharCode com 9 mil argumentos de uma vez estoura a
+       pilha em alguns navegadores. */
+    for (var i = 0; i < bytes.length; i += 8192) {
+      pedacos.push(String.fromCharCode.apply(null, bytes.subarray(i, i + 8192)));
+    }
+    b64 = btoa(pedacos.join(''));
+  }
+
+  /* Alvos: este CNPJ e, se pedido, as demais filiais da mesma raiz. */
+  var alvos = [cnpj];
+  if (elRaiz && elRaiz.checked) {
+    var raiz = _certRaiz(cnpj);
+    (window._certLista || []).forEach(function (c) {
+      if (c.cnpj !== cnpj && _certRaiz(c.cnpj) === raiz) alvos.push(c.cnpj);
+    });
+  }
+
+  mostrarSalvandoOverlay(alvos.length > 1
+    ? 'Enviando para ' + alvos.length + ' CNPJs…'
+    : 'Conferindo a senha e enviando…');
+
+  var okCount = 0;
+  var erros = [];
+  try {
+    for (var k = 0; k < alvos.length; k++) {
+      var corpo = { cnpj: alvos[k], senha: senha };
+      /* Sem arquivo novo, o servidor confere a senha contra o que ja esta gravado. */
+      if (b64) corpo.pfxBase64 = b64;
+      var r = await fetch('/api/ConfigCertificadoSefaz', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(corpo)
+      });
+      var d = await _npLerJson(r);
+      if (r.ok) { okCount++; } else { erros.push(alvos[k] + ': ' + (d.error || ('HTTP ' + r.status))); }
+    }
+  } catch (e) {
+    erros.push(e && e.message);
+  } finally {
+    esconderSalvandoOverlay();
+    /* Limpa os dois campos SEMPRE, inclusive no erro: senha que fica na tela
+       acaba em screenshot. */
+    if (elSenha) elSenha.value = '';
+    if (elArq) elArq.value = '';
+  }
+
+  if (erros.length) {
+    toast((okCount ? okCount + ' enviado(s). ' : '') + 'Falhou: ' + erros.join(' | '), 'error');
+  } else {
+    toast(okCount > 1 ? 'Certificado atualizado em ' + okCount + ' CNPJs.' : 'Certificado atualizado.', 'success');
+  }
+  carregarConfigCertificado();
 }
 
 async function alternarIntegracaoSefaz(ligar) {

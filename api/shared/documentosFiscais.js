@@ -1082,13 +1082,44 @@ async function lerCertificado(cnpj) {
   } catch (e) {
     throw new Error('Certificado do CNPJ ' + doc + ' indisponivel: ' + e.message);
   }
-  return { pfx: pfx, passphrase: senha || '', origem: 'blob' };
+
+  /* Senha do blob VENCE a App Setting quando o certificado tambem veio do blob.
+     Motivo: depois de uma renovacao feita pela tela, a App Setting guarda a senha
+     do certificado ANTIGO — usa-la aqui daria "mac verify failure" num arquivo
+     perfeitamente valido, e o rastro apontaria para o lugar errado.
+     Quando o .pfx vem da App Setting (caminho legado, acima), a senha da App
+     Setting continua valendo: certificado e senha ficam sempre da mesma geracao. */
+  const senhaBlob = await lerSenhaDoBlob(doc);
+  return {
+    pfx: pfx,
+    passphrase: senhaBlob || senha || '',
+    origem: 'blob',
+    origemSenha: senhaBlob ? 'blob' : (senha ? 'appsetting' : 'ausente')
+  };
+}
+
+/**
+ * Le a senha cifrada que a tela de Configuracoes gravou. Devolve null (nunca lanca)
+ * quando nao existe ou nao da para decifrar — a falta de senha no blob e uma
+ * situacao normal, e derrubar a consulta a SEFAZ por causa dela seria pior do que
+ * cair no fallback da App Setting.
+ */
+async function lerSenhaDoBlob(cnpj) {
+  const doc = soDigitos(cnpj);
+  try {
+    const { lerTexto } = require('./blobCert');
+    const pacote = await lerTexto(doc + '.senha');
+    if (!pacote) return null;
+    return require('./segredos').decifrar(pacote.trim());
+  } catch (e) {
+    return null;
+  }
 }
 
 module.exports = {
   LIST_DOCFIS, LIST_SEFAZ, LIST_NOTAS,
   COLUNAS_DOCFIS, COLUNAS_SEFAZ, COLUNAS_NOTAS_EXTRA,
-  resolveListId, soDigitos, chaveValida, chaveFraca,
+  resolveListId, soDigitos, chaveValida, chaveFraca, lerSenhaDoBlob,
   buscarPorChave, gravarDocumento, vincularNota, casarNotaComDocumento,
   acharCodigoOmieDaNota, casarDocumentosPendentes,
   gravarContaOmie, indexarPorCodigoOmie, gravarEmLote, prepararContaOmie,
