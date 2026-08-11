@@ -92,6 +92,28 @@ try {
   const r4 = await certA1.inspecionar(pdfFalso, SENHA);
   ok(r4.ok === false && r4.causa === 'arquivo', 'recusou pelo cabecalho', JSON.stringify(r4));
 
+  /* Os dois casos que a regra antiga ("comeca com 0x30 0x82") errava. Ambos vieram de
+     um certificado real recusado em producao, nao de imaginacao. */
+  console.log('\n4b. .cer sem chave privada (comeca com 0x30 0x82, e NAO serve)');
+  const cer = path.join(dir, 'so-cert.cer');
+  openssl(['x509', '-in', crt, '-outform', 'DER', '-out', cer]);
+  const bufCer = fs.readFileSync(cer);
+  ok(bufCer[0] === 0x30 && bufCer[1] === 0x82, 'o .cer realmente comeca com 30 82');
+  ok(certA1.pareceCertificado(bufCer) === false,
+     'recusado: nao tem o OID do pkcs-12');
+  const r4b = await certA1.inspecionar(bufCer, SENHA);
+  ok(r4b.ok === false && r4b.causa === 'arquivo', 'inspecionar tambem recusa',
+     JSON.stringify(r4b));
+
+  console.log('\n4c. PKCS#12 em BER, comprimento indefinido (0x30 0x80)');
+  /* Reescreve o comprimento do SEQUENCE externo para a forma indefinida, que e o
+     que a certificadora emitiu no A1 real. O conteudo continua o mesmo arquivo. */
+  const ber = Buffer.from(bufAtual);
+  ber[1] = 0x80;
+  ok(ber[0] === 0x30 && ber[1] === 0x80, 'fixture em 30 80');
+  ok(certA1.pareceCertificado(ber) === true,
+     'ACEITO: comprimento indefinido e PKCS#12 valido');
+
   console.log('\n5. arquivo minusculo');
   const r5 = await certA1.inspecionar(Buffer.from([0x30, 0x82, 0x01]), SENHA);
   ok(r5.ok === false && r5.causa === 'arquivo', 'recusou por tamanho', JSON.stringify(r5));

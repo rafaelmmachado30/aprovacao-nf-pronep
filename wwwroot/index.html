@@ -4409,6 +4409,22 @@ function renderConfigCertificado(d) {
   return h;
 }
 
+/* OID 1.2.840.113549.1.12 (pkcs-12): presente em todo PKCS#12 e ausente num .cer.
+   O servidor confere de novo — isto aqui so evita subir 9 KB para receber recusa. */
+function _certParecePfx(bytes) {
+  if (!bytes || bytes.length < 300 || bytes[0] !== 0x30) return false;
+  var alvo = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x0c];
+  var fim = bytes.length - alvo.length;
+  for (var i = 0; i <= fim; i++) {
+    var bate = true;
+    for (var j = 0; j < alvo.length; j++) {
+      if (bytes[i + j] !== alvo[j]) { bate = false; break; }
+    }
+    if (bate) return true;
+  }
+  return false;
+}
+
 async function enviarCertificadoA1(cnpj) {
   var elArq = document.getElementById('cert-' + cnpj + '-arq');
   var elSenha = document.getElementById('cert-' + cnpj + '-senha');
@@ -4423,14 +4439,16 @@ async function enviarCertificadoA1(cnpj) {
 
   if (arquivo) {
     var buf = await arquivo.arrayBuffer();
-    var cab = new Uint8Array(buf.slice(0, 2));
-    /* PKCS#12 sempre comeca com 0x30 0x82. Barrar aqui evita subir 9 KB para
-       receber uma recusa que da para dar na hora. */
-    if (cab[0] !== 0x30 || cab[1] !== 0x82) {
-      toast('Este arquivo não parece um .pfx/.p12. Confira se não selecionou o arquivo errado.', 'error');
+    var bytes = new Uint8Array(buf);
+    /* Checagem por OID do pkcs-12 (1.2.840.113549.1.12), NAO por "comeca com
+       0x30 0x82" como antes. Aquela regra errava nos dois sentidos: recusava A1
+       codificado em BER (0x30 0x80), que e legitimo, e aceitava um .cer sem chave
+       privada, que e o arquivo errado mais facil de enviar. */
+    if (!_certParecePfx(bytes)) {
+      toast('Este arquivo não é um .pfx/.p12 com chave privada. Um .cer ou .crt tem só '
+          + 'o certificado e não serve para autenticar na SEFAZ.', 'error');
       return;
     }
-    var bytes = new Uint8Array(buf);
     var pedacos = [];
     /* Em pedacos: String.fromCharCode com 9 mil argumentos de uma vez estoura a
        pilha em alguns navegadores. */

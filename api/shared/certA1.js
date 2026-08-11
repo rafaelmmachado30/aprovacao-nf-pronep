@@ -24,9 +24,26 @@
 
 const tls = require('tls');
 
-/** Um PKCS#12 e um SEQUENCE DER longo: sempre comeca com 0x30 0x82. */
+/* OID 1.2.840.113549.1.12 (pkcs-12), em DER. Todo PKCS#12 o contem: os tipos de bag
+   (keyBag, pkcs8ShroudedKeyBag, certBag) vivem embaixo dele. */
+const OID_PKCS12 = Buffer.from([0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x0c]);
+
+/**
+ * E um PKCS#12 de verdade?
+ *
+ * A REGRA ANTERIOR ("comeca com 0x30 0x82") ERRAVA NOS DOIS SENTIDOS, e foi ela que
+ * barrou o primeiro A1 real de um cliente:
+ *   · FALSO NEGATIVO — 0x30 0x82 e SEQUENCE de comprimento DEFINIDO. Certificadora
+ *     emite A1 com 0x30 0x80, comprimento INDEFINIDO (BER), que o PKCS#12 permite e
+ *     o OpenSSL le sem reclamar. Arquivo legitimo, recusado na porta.
+ *   · FALSO POSITIVO — um .cer/.crt (so o certificado, SEM a chave privada) tambem
+ *     comeca com 0x30 0x82. Passava, e a falta da chave so aparecia na conversa com
+ *     a SEFAZ. E e o arquivo errado mais facil de enviar por engano.
+ * Conferir o OID resolve os dois: aceita qualquer codificacao e recusa .cer.
+ */
 function pareceCertificado(buf) {
-  return Buffer.isBuffer(buf) && buf.length > 300 && buf[0] === 0x30 && buf[1] === 0x82;
+  return Buffer.isBuffer(buf) && buf.length > 300 && buf[0] === 0x30 &&
+         buf.indexOf(OID_PKCS12) >= 0;
 }
 
 /** Traduz o erro do OpenSSL para algo que o administrador consiga agir. */

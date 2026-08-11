@@ -1069,7 +1069,10 @@ async function lerCertificado(cnpj) {
   const { b64 } = lerBase64Certificado(doc);
   if (b64) {
     const buf = Buffer.from(b64, 'base64');
-    if (buf.length > 2 && buf[0] === 0x30 && buf[1] === 0x82) {
+    /* Antes este teste era "comeca com 0x30 0x82", que recusava A1 codificado em BER
+       (0x30 0x80) e aceitava um .cer sem chave. Agora e o mesmo criterio do
+       certA1: primeiro byte de SEQUENCE mais o OID do pkcs-12. */
+    if (require('./certA1').pareceCertificado(buf)) {
       return { pfx: buf, passphrase: senha || '', origem: 'appsetting' };
     }
     /* Nao explode: cai para o blob, que e a fonte principal. */
