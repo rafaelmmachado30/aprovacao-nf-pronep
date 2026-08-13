@@ -14,78 +14,193 @@
     }
   },
   "routes": [
-    { "route": "/login", "rewrite": "/.auth/login/aad" },
-    { "route": "/logout", "redirect": "/.auth/logout" },
-    { "route": "/sem-acesso", "allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/sem-acesso.html", "allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/teams-login.html", "allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/teams-auth-callback.html", "allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/vendor/*", "allowedRoles": ["anonymous", "authenticated"] },
+    {
+      "route": "/login",
+      "rewrite": "/.auth/login/aad"
+    },
+    {
+      "route": "/logout",
+      "redirect": "/.auth/logout"
+    },
+    {
+      "route": "/sem-acesso",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/sem-acesso.html",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/teams-login.html",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/teams-auth-callback.html",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/vendor/*",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
     {
       "route": "/manifest.webmanifest",
-      "allowedRoles": ["anonymous", "authenticated"],
-      "headers": { "Content-Type": "application/manifest+json", "Cache-Control": "no-cache" }
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ],
+      "headers": {
+        "Content-Type": "application/manifest+json",
+        "Cache-Control": "no-cache"
+      }
     },
     {
       "route": "/sw.js",
-      "allowedRoles": ["anonymous", "authenticated"],
-      "headers": { "Content-Type": "application/javascript", "Cache-Control": "no-cache", "Service-Worker-Allowed": "/" }
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ],
+      "headers": {
+        "Content-Type": "application/javascript",
+        "Cache-Control": "no-cache",
+        "Service-Worker-Allowed": "/"
+      }
     },
-    { "route": "/offline.html", "allowedRoles": ["anonymous", "authenticated"] },
-    { "route": "/icon-*.png", "allowedRoles": ["anonymous", "authenticated"] },
+    {
+      "route": "/offline.html",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "route": "/icon-*.png",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
     {
       "comment": "Cron do GitHub Actions: autenticado por secret no proprio endpoint (X-Alerta-Secret).",
       "route": "/api/AlertaDiario",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "comment": "Cron do GitHub Actions: autenticado por secret no proprio endpoint.",
       "route": "/api/AlertaContratosDiario",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "comment": "Warm-up contra cold start: cron pinga com X-Alerta-Secret. Endpoint minimo, sem efeito colateral.",
       "route": "/api/Aquecer",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "comment": "Link de aprovacao por e-mail: autenticado por JWT no token da query.",
       "route": "/api/AprovacaoViaLink",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "comment": "Pagina de botoes (link do WhatsApp): autenticada por JWT no token 'ver'. Token vai no caminho (/api/AprovacaoPagina/<token>) pra o WhatsApp nao quebrar a URL.",
       "route": "/api/AprovacaoPagina",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "route": "/api/AprovacaoPagina/*",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "comment": "Curadoria em background: runner do GitHub Actions chama com X-Curadoria-Secret. O endpoint ainda exige admin quando chamado sem o secret (navegador).",
       "route": "/api/CurarContratos",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "comment": "Automacao de NF por e-mail: cron/workflow chama com X-Automacao-Secret. O endpoint ainda exige admin quando chamado sem o secret (navegador).",
       "route": "/api/VarrerEmailsNF",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "comment": "Busca de NF-e na SEFAZ: cron do GitHub Actions chama com X-Automacao-Secret. Sem o secret o endpoint exige admin. CriarListaDocumentosFiscais NAO entra aqui de proposito — so admin logado.",
       "route": "/api/BuscarNFeSefaz",
-      "allowedRoles": ["anonymous", "authenticated"]
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "comment": "Cron do GitHub Actions (sincronizar-omie.yml): chama com X-Automacao-Secret. Sem o secret o endpoint exige admin logado. SEM esta linha a plataforma do SWA recusa com 401 ANTES de a Function rodar, e o secret nunca e sequer lido.",
+      "route": "/api/SincronizarOmie",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
+      "comment": "Mesmo cron: casa os documentos do Omie com as NFs lancadas. Mesma regra de secret.",
+      "route": "/api/CasarDocumentosPendentes",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
     },
     {
       "comment": "Demais endpoints exigem sessao Entra ID. Fecha spoofing de x-ms-client-principal (C2).",
       "route": "/api/*",
-      "allowedRoles": ["authenticated"]
+      "allowedRoles": [
+        "authenticated"
+      ]
     },
-    { "route": "/*", "allowedRoles": ["anonymous", "authenticated"] }
+    {
+      "route": "/*",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    }
   ],
   "responseOverrides": {
-    "403": { "rewrite": "/sem-acesso.html", "statusCode": 403 }
+    "403": {
+      "rewrite": "/sem-acesso.html",
+      "statusCode": 403
+    }
   },
   "globalHeaders": {
     "Content-Security-Policy": "frame-ancestors 'self' https://teams.microsoft.com https://*.teams.microsoft.com https://teams.cloud.microsoft https://*.teams.cloud.microsoft https://teams.live.com https://*.teams.live.com https://*.skype.com https://*.microsoftonline.com https://*.office.com",

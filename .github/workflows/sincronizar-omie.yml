@@ -70,6 +70,8 @@ jobs:
           BASE="https://purple-forest-09588fe10.7.azurestaticapps.net/api"
           FALHAS=0
 
+          OKS=0
+          HTTP401=0
           # Uma chamada. Ecoa a resposta e devolve o corpo em /tmp/resp.json.
           # --max-time 290: a Function fecha sozinha em ~40s; o teto aqui e so
           # para nao pendurar o job se a plataforma engasgar.
@@ -94,7 +96,16 @@ jobs:
           for a in (d.get('avisos') or []):
               print('  aviso: ' + str(a))
           PY
+            if [ "$code" = "401" ]; then
+              # 401 NAO e transitorio: e a plataforma do SWA recusando ANTES de a
+              # Function rodar, porque a rota nao esta liberada para anonimo em
+              # wwwroot/staticwebapp.config.json. Nesse caso o secret nem chega a ser
+              # lido, e repetir nos proximos ciclos nao muda nada. Aconteceu de
+              # verdade com SincronizarOmie e CasarDocumentosPendentes.
+              HTTP401=$((HTTP401+1))
+            fi
             [ "$code" = "200" ] || return 1
+            OKS=$((OKS+1))
             return 0
           }
 
@@ -180,6 +191,23 @@ jobs:
           # Falha parcial vira warning, nao erro: o proximo ciclo retoma de onde
           # parou e derrubar o job faria o alerta perder o sentido de urgencia.
           # Erro so quando NADA funcionou — a e sinal de secret ou app fora do ar.
+          echo "chamadas com sucesso: $OKS   falhas: $FALHAS   401: $HTTP401"
+
+          # O comentario acima prometia "erro so quando NADA funcionou" e o codigo
+          # nunca implementou isso: o job ficava VERDE com todas as chamadas em 401,
+          # ou seja, anunciava sucesso sem ter sincronizado nada. Job verde e o unico
+          # sinal que alguem olha; verde mentindo e pior que vermelho.
+          if [ "$HTTP401" -gt 0 ]; then
+            echo "::error::$HTTP401 chamada(s) com HTTP 401. Isso NAO e transitorio: a rota"
+            echo "::error::precisa estar liberada para 'anonymous' em wwwroot/staticwebapp.config.json"
+            echo "::error::(o secret e conferido dentro da Function). Se as rotas ja estiverem la,"
+            echo "::error::o valor do secret SEFAZ_SECRET no repo difere da App Setting no Azure."
+            exit 1
+          fi
+          if [ "$OKS" -eq 0 ]; then
+            echo "::error::Nenhuma chamada teve sucesso. Nada foi sincronizado."
+            exit 1
+          fi
           if [ "$FALHAS" -gt 0 ]; then
             echo "::warning::$FALHAS etapa(s) com falha — o proximo ciclo retoma."
           else
