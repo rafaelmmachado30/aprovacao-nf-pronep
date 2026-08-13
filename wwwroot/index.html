@@ -4687,7 +4687,10 @@ function renderColunasNFPagar(data) {
     var todos = (data.colunas && data.colunas[c.k]) || [];
     var itens = temFiltro ? todos.filter(filtra) : todos;
     var soma = itens.reduce(function (s, x) { return s + (Number(x.valor) || 0); }, 0);
-    html += '<div class="card" style="padding:12px;border-top:3px solid ' + c.cor + '">'
+    html += '<div class="card np-coluna" data-np-col="' + c.k + '"'
+      + ' ondragover="_npArrastarSobre(event)" ondragleave="_npArrastarSaiu(event)"'
+      + ' ondrop="_npSoltar(event)"'
+      + ' style="padding:12px;border-top:3px solid ' + c.cor + '">'
       + '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">'
       + '<b style="color:' + c.cor + '">' + c.titulo + '</b>'
       + '<span class="tag" style="background:#EEF2F5;color:#42525E">' + itens.length
@@ -4708,6 +4711,125 @@ function renderColunasNFPagar(data) {
     html += '</div>';
   }
   return html + '</div>';
+}
+
+/* ======================= ARRASTAR CARD NO QUADRO =======================
+   O quadro passa a ser kanban de verdade — mas SO para os movimentos que
+   correspondem a algo real.
+
+   AS COLUNAS NAO SAO UM CAMPO DE STATUS. Elas sao derivadas: "Lançadas" quer dizer
+   que existe uma NF lancada vinculada ao documento; "Aprovadas", que alguem aprovou;
+   "Processadas pelo Financeiro" vem do status NO OMIE. Entao arrastar de Novas para
+   Aprovadas nao poderia "aprovar" — fabricaria uma aprovacao que ninguem deu — e
+   soltar em Processadas nao muda o Omie, que e a fonte da verdade do pagamento.
+
+   O que o arraste faz, portanto:
+     Novas  -> Lançadas   abre a escolha da NF ja lancada (o mesmo vinculo do botao)
+     * -> Novas           desfaz o vinculo
+     resto               recusa, dizendo por que
+   Recusar explicando e melhor que aceitar e mentir: card no lugar errado faz o
+   financeiro pagar pelo que a tela diz, nao pelo que aconteceu. */
+
+var _npArrastando = null;
+
+function _npPodeMover(de, para) {
+  if (!de || !para || de === para) return { ok: false, silencioso: true };
+  if (de === 'novas' && para === 'lancadas') {
+    return { ok: true, acao: 'vincular' };
+  }
+  if (para === 'novas') {
+    return { ok: true, acao: 'desvincular' };
+  }
+  if (de === 'novas') {
+    return { ok: false, motivo: 'Para chegar em "' + _npRotuloColuna(para) + '", a nota '
+      + 'precisa primeiro ser lançada e aprovada no sistema. Arraste para "Lançadas" '
+      + 'para vincular a uma NF já lançada.' };
+  }
+  if (para === 'quitadas') {
+    return { ok: false, motivo: 'Quem marca a conta como paga é o Omie — esta coluna '
+      + 'reflete o que o financeiro processou lá. Mover o card aqui não pagaria nada e '
+      + 'faria a tela discordar do Omie.' };
+  }
+  if (para === 'aprovadas') {
+    return { ok: false, motivo: 'Aprovação acontece na fila de aprovação, por quem tem '
+      + 'alçada — não por arraste. Mover o card aqui registraria uma aprovação que '
+      + 'ninguém deu.' };
+  }
+  if (para === 'lancadas') {
+    /* aprovadas/quitadas -> lancadas seria "desfazer a decisao", e decisao desfeita
+       tem rastro proprio (rejeicao, estorno) — nao um card mudando de coluna. */
+    return { ok: false, motivo: 'Voltar de "' + _npRotuloColuna(de) + '" para "Lançadas" '
+      + 'significaria desfazer a decisão já tomada. Isso tem rastro próprio no sistema '
+      + 'e não se faz arrastando card. Para soltar o vínculo com a NF, arraste para '
+      + '"Novas".' };
+  }
+  return { ok: false, motivo: 'Este movimento não corresponde a nenhuma ação real.' };
+}
+
+function _npRotuloColuna(k) {
+  return k === 'novas' ? 'Novas'
+    : k === 'lancadas' ? 'Lançadas'
+    : k === 'aprovadas' ? 'Aprovadas'
+    : k === 'quitadas' ? 'Processadas pelo Financeiro' : k;
+}
+
+function _npArrastarInicio(ev) {
+  var card = ev.currentTarget;
+  _npArrastando = { id: card.getAttribute('data-np-id'), de: card.getAttribute('data-np-col') };
+  card.style.opacity = '.45';
+  try {
+    /* setData e obrigatorio no Firefox, senao o drop nunca dispara. */
+    ev.dataTransfer.setData('text/plain', _npArrastando.id);
+    ev.dataTransfer.effectAllowed = 'move';
+  } catch (e) { /* navegador sem dataTransfer completo */ }
+  /* Marca as colunas que aceitam, para o alvo ser visivel ANTES de soltar. */
+  var cols = document.querySelectorAll('.np-coluna');
+  for (var i = 0; i < cols.length; i++) {
+    var k = cols[i].getAttribute('data-np-col');
+    if (_npPodeMover(_npArrastando.de, k).ok) cols[i].classList.add('np-aceita');
+  }
+}
+
+function _npArrastarFim(ev) {
+  ev.currentTarget.style.opacity = '';
+  _npArrastando = null;
+  var cols = document.querySelectorAll('.np-coluna');
+  for (var i = 0; i < cols.length; i++) {
+    cols[i].classList.remove('np-aceita');
+    cols[i].classList.remove('np-alvo');
+  }
+}
+
+function _npArrastarSobre(ev) {
+  if (!_npArrastando) return;
+  var col = ev.currentTarget.getAttribute('data-np-col');
+  var v = _npPodeMover(_npArrastando.de, col);
+  /* preventDefault é o que autoriza o drop. Sem ele o navegador recusa e o
+     cursor mostra "proibido" — que aqui é exatamente o comportamento desejado
+     para um movimento invalido. */
+  if (v.ok) {
+    ev.preventDefault();
+    ev.currentTarget.classList.add('np-alvo');
+  }
+}
+
+function _npArrastarSaiu(ev) {
+  ev.currentTarget.classList.remove('np-alvo');
+}
+
+function _npSoltar(ev) {
+  ev.preventDefault();
+  var col = ev.currentTarget.getAttribute('data-np-col');
+  var arr = _npArrastando;
+  ev.currentTarget.classList.remove('np-alvo');
+  if (!arr) return;
+  var v = _npPodeMover(arr.de, col);
+  if (!v.ok) {
+    if (!v.silencioso) toast(v.motivo, 'error');
+    return;
+  }
+  if (v.acao === 'vincular') abrirVinculoNF(arr.id);
+  else if (v.acao === 'desvincular') desvincularNF(arr.id);
 }
 
 // Casa fornecedor (razao), CNPJ ou numero da NF.
@@ -5016,8 +5138,12 @@ function renderCardNFPagar(d, coluna) {
      cadastro sem ler card por card. */
   var pendencia = (coluna === 'novas') && (!d.fornecedorCadastrado || d.cadastroIncompleto);
 
+  /* draggable + data-* : o arraste precisa saber QUEM esta indo e DE ONDE saiu.
+     A coluna de origem decide o que o movimento significa (ver _npPodeMover). */
   var h = '<div onclick="abrirDetalheNF(\'' + _npEsc(d.id) + '\')"'
-    + ' style="cursor:pointer;border:1px solid ' + (pendencia ? '#EF6C00' : 'var(--cinza-borda)')
+    + ' draggable="true" data-np-id="' + _npEsc(d.id) + '" data-np-col="' + _npEsc(coluna) + '"'
+    + ' ondragstart="_npArrastarInicio(event)" ondragend="_npArrastarFim(event)"'
+    + ' style="cursor:grab;border:1px solid ' + (pendencia ? '#EF6C00' : 'var(--cinza-borda)')
     + ';border-left-width:' + (pendencia ? '3px' : '1px')
     + ';border-radius:6px;padding:9px;margin-bottom:8px;transition:box-shadow .12s;'
     + 'background:' + (cinza ? '#F7F8F9' : '#fff') + (cinza ? ';opacity:.75' : '') + '"'

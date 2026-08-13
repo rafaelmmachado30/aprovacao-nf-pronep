@@ -969,3 +969,20 @@
   }
   .sol-export-btn:hover { background:#CFD8DC; color:#1F4E79; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ===== ARRASTAR CARD NO QUADRO DE NFs A PAGAR =====
+     Duas pistas visuais, com papeis diferentes:
+     .np-aceita  aparece em TODAS as colunas que aceitam o card, no instante em que o
+                 arraste comeca — mostra para onde da, antes de tentar;
+     .np-alvo    e a coluna sob o cursor agora.
+     Sem a primeira, o usuario descobre o que e proibido por tentativa e erro. */
+  .np-coluna { transition: background .12s, box-shadow .12s, outline-color .12s; }
+  .np-coluna.np-aceita {
+    outline: 2px dashed #27AAE1; outline-offset: -4px; background: #F7FBFE;
+  }
+  .np-coluna.np-alvo {
+    outline: 2px solid #1565C0; outline-offset: -4px; background: #EAF4FC;
+    box-shadow: 0 4px 16px rgba(21,101,192,.18);
+  }
+  /* cursor:grabbing no card em movimento reforca que o gesto esta ativo. */
+  .np-coluna [draggable="true"]:active { cursor: grabbing; }
