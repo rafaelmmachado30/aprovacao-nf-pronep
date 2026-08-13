@@ -13,7 +13,7 @@
  * IMPORTANTE: pra atualizar o SW a cada deploy, bumpa CACHE_VERSION.
  */
 
-const CACHE_VERSION = 'pronep-nf-v3-fixdesconhecido-20260603';
+const CACHE_VERSION = 'pronep-nf-v4-css-network-first-20260813';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const SHELL_ASSETS = [
   '/',
@@ -96,19 +96,49 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Assets estaticos (vendor, icones, css): cache-first com fallback pra rede
+  /* CACHE-FIRST SO PARA O QUE E IMUTAVEL NA PRATICA.
+     Antes TODO asset do mesmo origem era cache-first, styles.css incluso. Efeito:
+     enquanto CACHE_VERSION nao mudasse, o navegador servia o CSS antigo PARA SEMPRE,
+     ignorando qualquer header do servidor. O CACHE_VERSION ficou parado em 03/06/2026
+     e, com ele, o CSS de junho — o cabecalho azul do modal, o modal horizontal, o
+     total em vermelho e o botao desabilitado nunca chegaram a quem ja tinha aberto o
+     app. O usuario relatou como "algo se perdeu"; nada se perdeu, o SW nao entregava.
+
+     Um ritual manual ("bumpa a versao a cada deploy") que ninguem executa por dois
+     meses nao e mecanismo. Agora a regra depende do TIPO de arquivo, e nao da memoria
+     de quem faz deploy:
+       /vendor/ e icones -> cache-first (bibliotecas e imagens, trocam junto com versao)
+       o resto (css, js) -> network-first com fallback no cache (offline continua vivo) */
+  const imutavel = url.pathname.startsWith('/vendor/') ||
+                   /\.(png|jpg|jpeg|svg|webp|woff2?|ttf)$/i.test(url.pathname);
+
+  if (imutavel) {
+    event.respondWith(
+      caches.match(req).then((cached) => {
+        if (cached) return cached;
+        return fetch(req).then((resp) => {
+          if (resp && resp.ok && resp.type === 'basic') {
+            const copy = resp.clone();
+            caches.open(SHELL_CACHE).then(c => c.put(req, copy));
+          }
+          return resp;
+        }).catch(() => undefined);
+      })
+    );
+    return;
+  }
+
+  /* Network-first: o servidor manda max-age=30 com must-revalidate, entao a rede
+     responde 304 quase sempre — custa poucos bytes e mantem a tela sincronizada com
+     o deploy. Sem rede, cai no cache e o app continua abrindo. */
   event.respondWith(
-    caches.match(req).then((cached) => {
-      if (cached) return cached;
-      return fetch(req).then((resp) => {
-        // Cacheia se for resposta ok do mesmo origem
-        if (resp && resp.ok && resp.type === 'basic') {
-          const copy = resp.clone();
-          caches.open(SHELL_CACHE).then(c => c.put(req, copy));
-        }
-        return resp;
-      }).catch(() => undefined);
-    })
+    fetch(req).then((resp) => {
+      if (resp && resp.ok && resp.type === 'basic') {
+        const copy = resp.clone();
+        caches.open(SHELL_CACHE).then(c => c.put(req, copy));
+      }
+      return resp;
+    }).catch(() => caches.match(req))
   );
 });
 
