@@ -168,7 +168,93 @@ function conferirIdentidade(d, chavePedida) {
   return { ok: voltou === chavePedida, chaveDevolvida: voltou || '(vazia)' };
 }
 
+/* ------------------------------------------------- o documento fiscal de fato */
+/* O XML AUTORIZADO E A DANFE EXISTEM NO OMIE. Isso foi medido, depois de eu ter
+   afirmado o contrario: /produtos/dfedocsfiscais/ deu 404 numa sonda antiga e eu
+   li isso como "o Omie nao tem o XML". O servico real chama /contador/xml/, e
+   404 em endpoint chutado e evidencia sobre o chute, nao sobre o dado.
+   Medido em 14/08/2026 na PRONEP RJ: 3.605 documentos de ENTRADA, saida vazia.
+   A nota 14469 voltou com cStatus 00 e cXml de 10.500 bytes comecando em
+   <nfeProc versao="4.00"> — o envelope que carrega o protocolo de autorizacao. */
+
+/* cOperacao "0" e ENTRADA. O default da API e "1" (saida), e foi por isso que a
+   busca pela chave sem esse campo nao achou nada: procurava uma nota de
+   fornecedor no conjunto das emissoes da empresa. */
+const OPERACAO_ENTRADA = '0';
+const MODELO_NFE = '55';
+
+async function buscarXmlAutorizado(chave, creds) {
+  const d = await callContador('ListarDocumentos', {
+    nPagina: 1, nRegPorPagina: 5, cModelo: MODELO_NFE,
+    cOperacao: OPERACAO_ENTRADA, nChave: chave
+  }, creds);
+  const lista = (d && d.documentosEncontrados) || [];
+  const arr = Array.isArray(lista) ? lista : [lista];
+  /* Confere a chave do registro, nao so que veio registro. Um filtro que a API
+     ignorasse devolveria a primeira nota da base, e a DANFE errada na tela de
+     quem aprova pagamento e pior do que nenhuma. */
+  const alvo = arr.find(function (r) { return soDigitos(r && r.nChave) === chave; });
+  if (!alvo) return null;
+  return {
+    xml: alvo.cXml || '',
+    nIdNF: alvo.nIdNF || null,
+    nIdReceb: alvo.nIdReceb || null,
+    numero: alvo.nNumero, serie: alvo.cSerie,
+    emissao: alvo.dEmissao, valor: alvo.nValor,
+    /* cStatus: 00 autorizado, 10 cancelado, 20 denegado. Quem chama PRECISA olhar:
+       nota cancelada continua com XML valido e bonito, e pagar uma delas e o
+       erro que este campo existe para evitar. */
+    status: String(alvo.cStatus == null ? '' : alvo.cStatus)
+  };
+}
+
+async function callContador(call, param, creds) {
+  const resp = await fetch(OMIE_BASE + '/contador/xml/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
+               'User-Agent': 'PronepNF/1.0 (Azure SWA Functions)' },
+    body: JSON.stringify({ call: call, app_key: creds.appKey,
+                           app_secret: creds.appSecret, param: [param] })
+  });
+  const texto = await resp.text();
+  let data;
+  try { data = JSON.parse(texto); }
+  catch (e) { throw new Error('Omie respondeu em formato inesperado (HTTP ' + resp.status + ')'); }
+  if (data && data.faultstring) {
+    const err = new Error(String(data.faultstring).slice(0, 200));
+    /* "Nao existem registros" e RESPOSTA, nao falha — e foi confundir isso com
+       erro que me fez descartar este caminho uma vez. */
+    err.semRegistro = /n[aã]o existem registros|nenhum registro/i.test(err.message);
+    if (err.semRegistro) return { documentosEncontrados: [] };
+    throw err;
+  }
+  if (!resp.ok) throw new Error('Omie HTTP ' + resp.status);
+  return data;
+}
+
+/* Devolve a URL do PDF da DANFE renderizada pelo proprio Omie. Gerada sob demanda
+   ("Documentos gerados com sucesso!") e assinada com validade de 24h — medido.
+   Por isso nunca e gravada: um link guardado hoje quebra amanha, e quebraria
+   calado, virando um botao que nao abre. */
+async function obterPdfDaNfe(nIdNF, creds) {
+  const resp = await fetch(OMIE_BASE + '/produtos/dfedocs/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
+               'User-Agent': 'PronepNF/1.0 (Azure SWA Functions)' },
+    body: JSON.stringify({ call: 'ObterNfe', app_key: creds.appKey,
+                           app_secret: creds.appSecret,
+                           param: [{ nIdNfe: Number(nIdNF) }] })
+  });
+  const texto = await resp.text();
+  let d;
+  try { d = JSON.parse(texto); } catch (e) { return null; }
+  if (!d || d.faultstring || !d.cPdf) return null;
+  return { url: d.cPdf, chave: soDigitos(d.nChaveNfe), numero: d.cNumNfe || '',
+           status: String(d.cCodStatus == null ? '' : d.cCodStatus) };
+}
+
 module.exports = {
   OMIE_BASE, fornecedorPorCnpj, fornecedorNoOmie, consultarRecebimento,
-  resolverDocumento, fichaFornecedor, conferirIdentidade
+  resolverDocumento, fichaFornecedor, conferirIdentidade,
+  buscarXmlAutorizado, obterPdfDaNfe
 };

@@ -5382,11 +5382,17 @@ function abrirDetalheNF(docId) {
      e espelho, e a propria pagina traz a tarja dizendo isso. */
   if (d.chaveAcesso) {
     var lenteEsp = window._viewAsDiretoria || '';
-    h += '<a class="btn btn-secondary" target="_blank" rel="noopener"'
-      + ' style="text-decoration:none"'
-      + ' href="/api/EspelhoDaNota?docId=' + encodeURIComponent(d.id)
-      + (lenteEsp ? '&verComo=' + encodeURIComponent(lenteEsp) : '') + '">'
-      + 'Ver espelho da nota</a>';
+    var qsEsp = 'docId=' + encodeURIComponent(d.id)
+      + (lenteEsp ? '&verComo=' + encodeURIComponent(lenteEsp) : '');
+    /* DANFE primeiro, e em destaque: e o documento fiscal de verdade, com
+       protocolo. O espelho continua existindo como rede — vale quando a NF-e nao
+       passou pelo modulo de recebimento do Omie e nao ha documento original. */
+    h += '<a class="btn btn-primary" target="_blank" rel="noopener"'
+      + ' style="text-decoration:none" href="/api/DanfeDaNota?' + qsEsp + '">'
+      + 'Ver DANFE</a>'
+      + '<a class="btn btn-secondary" target="_blank" rel="noopener"'
+      + ' style="text-decoration:none" href="/api/DanfeDaNota?' + qsEsp + '&xml=1">'
+      + 'Baixar XML</a>';
   }
 
   /* NF ja lancada: abre o PDF que esta no SharePoint.
