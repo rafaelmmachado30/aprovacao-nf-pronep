@@ -130,9 +130,24 @@ async function sondar(endpoint, call, param, creds) {
        - endpoint/call inexistente  => o caminho esta errado, nada se conclui do dado
        - tag recusada               => o caminho esta CERTO, so o campo tem outro nome
        - registro nao encontrado    => caminho e campo certos, a nota e que nao esta la */
-      const tipo = /m[eé]todo|method|servi[cç]o|n[aã]o (existe|encontrado|dispon)/i.test(fs) && !m
-        ? 'call_ou_endpoint_inexistente'
-        : m ? 'tag_recusada' : 'outro';
+    /* A ORDEM DOS TESTES IMPORTA, e a rodada 2 provou isso do jeito ruim:
+       "Nao existem registros para a pagina [1]" foi classificado como call
+       inexistente, porque o regex de "nao existe" veio antes. E o oposto — e o
+       call RESPONDENDO que nao achou, que e o resultado mais informativo que
+       existe aqui. Entao o caso especifico e testado primeiro, e o generico
+       depois. */
+    let tipo;
+    if (/n[aã]o existem registros|nenhum registro (foi )?encontrado/i.test(fs)) {
+      tipo = 'sem_registro';           /* o caminho funciona; a nota nao esta ali */
+    } else if (m) {
+      tipo = 'tag_recusada';           /* caminho certo, campo com outro nome */
+    } else if (/obrigat[oó]rio|n[aã]o informado|nenhum par[aâ]metro/i.test(fs)) {
+      tipo = 'falta_parametro';        /* caminho certo, faltou preencher */
+    } else if (/m[eé]todo|method|servi[cç]o/i.test(fs)) {
+      tipo = 'call_ou_endpoint_inexistente';
+    } else {
+      tipo = 'outro';
+    }
     return { aceito: false, erro: fs.slice(0, 200), tagCitada: m ? m[1] : null, tipo: tipo };
   }
   /* Medido na rodada 1: o Omie devolve HTTP 500 SEM corpo util quando o call nao
@@ -185,30 +200,74 @@ module.exports = async function (context, req) {
        `cXml` e o XML do documento fiscal. E `nIdNF` alimenta o segundo passo:
        /produtos/dfedocs/ ObterNfe recebe nIdNfe e devolve cPdf — o link da DANFE
        ja renderizada, que e o mesmo arquivo que o botao da tela do Omie abre. */
-    const alvos = [
-      /* --- passo 1: o XML, por chave --- */
-      ['contador__porChave',   '/contador/xml/', 'ListarDocumentos',
-        { nPagina: 1, nRegPorPagina: 5, nChave: chave }],
-      /* Sem cModelo: filtrar por 55 antes de saber se a nota esta na base
-         confundiria "nao e modelo 55" com "nao esta la". */
-      ['contador__porChave_55', '/contador/xml/', 'ListarDocumentos',
-        { nPagina: 1, nRegPorPagina: 5, nChave: chave, cModelo: '55' }],
-      /* cOperacao decide se a base do contador cobre ENTRADA. Se so houver saida,
-         nenhuma nota de fornecedor aparece e o caminho morre aqui. */
-      ['contador__entrada',    '/contador/xml/', 'ListarDocumentos',
-        { nPagina: 1, nRegPorPagina: 3, cOperacao: 'E' }],
-      ['contador__saida',      '/contador/xml/', 'ListarDocumentos',
-        { nPagina: 1, nRegPorPagina: 3, cOperacao: 'S' }],
+    /* RODADA 3. A rodada 2 respondeu a estrutura: cModelo e obrigatorio, e com
+       cModelo 55 + nChave o call rodou e devolveu "nao existem registros". Isso
+       nao decide nada sozinho — pode ser que a nota nao esteja la, ou que a base
+       do contador so guarde o que a Pronep EMITIU. Nossas notas sao todas de
+       fornecedor, entao essa distincao decide o caminho inteiro.
+       A pergunta central desta rodada e uma so: cOperacao=E devolve alguma coisa?
+       Se sim, a base cobre entrada e e questao de achar o filtro certo. Se nao,
+       /contador/xml/ nao serve para nos e o proximo candidato e outro. */
 
-      /* --- passo 2: o PDF da DANFE, pelos calls que a doc REALMENTE lista --- */
-      ['dfedocs__ObterNfe_id0', '/produtos/dfedocs/', 'ObterNfe', { nIdNfe: 0 }]
+    /* Busca o nIdReceb e a data de emissao no proprio Omie, em vez de exigir que
+       o Rafael colete e cole. Uma URL responde tudo; duas viram chance de eu
+       comparar rodadas com parametros diferentes sem perceber. */
+    let dEmissao = null;
+    if (!nIdReceb) {
+      try {
+        const r = await fetch(OMIE_BASE + '/produtos/recebimentonfe/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify({ call: 'ConsultarRecebimento', app_key: creds.appKey,
+                                 app_secret: creds.appSecret, param: [{ cChaveNFe: chave }] })
+        });
+        const d = JSON.parse(await r.text());
+        const cab = (d && d.cabec) || {};
+        if (cab.nIdReceb) nIdReceb = String(cab.nIdReceb);
+        if (cab.dEmissaoNFe) dEmissao = String(cab.dEmissaoNFe);
+        out.doRecebimento = { nIdReceb: nIdReceb || null, dEmissaoNFe: dEmissao,
+                             numeroNF: cab.cNumeroNFe || null };
+      } catch (e) {
+        out.doRecebimento = { erro: (e && e.message) || String(e) };
+      }
+      await dorme(PAUSA_MS);
+    }
+
+    const alvos = [
+      /* --- A PERGUNTA QUE DECIDE: a base do contador tem entrada? ---
+         Sem filtro de chave nem de data: quero saber se existe QUALQUER documento
+         de entrada, nao se existe este. Filtrar demais aqui transformaria
+         "a base nao cobre entrada" em "esta nota nao esta la", que sao coisas
+         diferentes e levam a decisoes opostas. */
+      ['P1_entrada_existe',  '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 3, cModelo: '55', cOperacao: 'E' }],
+      /* Controle. Se a saida vier cheia e a entrada vazia, a resposta e clara e
+         nao depende de eu ter acertado nenhum outro parametro. */
+      ['P2_saida_existe',    '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 3, cModelo: '55', cOperacao: 'S' }],
+      /* Sem cOperacao: se este vier cheio e o de entrada vazio, o default e saida. */
+      ['P3_sem_operacao',    '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 3, cModelo: '55' }],
+
+      /* --- passo 2, agora com id valido em vez de zero ---
+         ObterNfe ja confirmou existir e exigir nIdNfe. Mandar 1 nao deve achar
+         nada, mas a MENSAGEM diz se o call aceita o id e apenas nao encontrou —
+         e ai o passo 2 esta provado, faltando so o nIdNF verdadeiro, que a
+         propria listagem do contador devolve. */
+      ['P6_ObterNfe_id1',    '/produtos/dfedocs/', 'ObterNfe', { nIdNfe: 1 }]
     ];
 
-    /* nIdReceb vem no cabec do ConsultarRecebimento que ja usamos. Se a chave nao
-       achar, o id do recebimento e o filtro mais direto que existe para entrada. */
+    /* nIdReceb e o filtro mais direto que existe para nota de entrada. */
     if (nIdReceb) {
-      alvos.push(['contador__porIdReceb', '/contador/xml/', 'ListarDocumentos',
-                  { nPagina: 1, nRegPorPagina: 5, nIdReceb: Number(nIdReceb) }]);
+      alvos.splice(3, 0, ['P4_porIdReceb', '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 5, cModelo: '55', nIdReceb: Number(nIdReceb) }]);
+    }
+    /* Chave + janela de emissao: a listagem pode exigir periodo, e sem ele a
+       chave sozinha cairia em "sem registro" mesmo com a nota presente. */
+    if (dEmissao && /^\d{2}\/\d{2}\/\d{4}$/.test(dEmissao)) {
+      alvos.splice(nIdReceb ? 4 : 3, 0, ['P5_chave_com_janela', '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 5, cModelo: '55', nChave: chave,
+          dEmiInicial: dEmissao, dEmiFinal: dEmissao }]);
     }
 
     const endpointsMortos = {};
@@ -234,13 +293,36 @@ module.exports = async function (context, req) {
     out.comArquivo = vivos.filter(function (k) {
       return /"tipo":"(URL|XML|BASE64\?)"/.test(JSON.stringify(out.sondas[k].resumo || {}));
     });
+    /* O veredito nao pode depender de eu reler dezoito campos: a decisao e uma so
+       e sai escrita. */
+    const s = out.sondas;
+    const ent = s.P1_entrada_existe || {};
+    const sai = s.P2_saida_existe || {};
+    if (ent.aceito) {
+      out.veredito = 'A BASE DO CONTADOR COBRE ENTRADA. O XML das notas de ' +
+        'fornecedor esta no Omie e sai por /contador/xml/. Proximo passo: achar a ' +
+        'nota pela chave (P4/P5) e pegar cXml + nIdNF.';
+    } else if (ent.tipo === 'sem_registro' && sai.aceito) {
+      out.veredito = 'SO SAIDA. A entrada veio vazia e a saida veio cheia, no MESMO ' +
+        'formato de chamada — entao a diferenca e o conteudo da base, nao o meu ' +
+        'parametro. /contador/xml/ guarda o que a Pronep emitiu, e nossas notas sao ' +
+        'todas de fornecedor. Este caminho nao serve; o proximo candidato e outro.';
+    } else if (ent.tipo === 'sem_registro' && sai.tipo === 'sem_registro') {
+      out.veredito = 'AS DUAS VAZIAS. Nao da para separar "base sem entrada" de ' +
+        '"filtro errado" — os dois lados falharam igual, e concluir qualquer coisa ' +
+        'aqui seria chute. Olhe P3 (sem cOperacao) antes de decidir.';
+    } else {
+      out.veredito = 'Inconclusivo: veja o tipo de cada sonda antes de concluir.';
+    }
+
     out.leitura =
-      'comArquivo e a resposta: qualquer entrada ali devolveu URL, XML cru ou base64 — ' +
-      'e entao a DANFE sai do documento ORIGINAL, com protocolo, e o espelho vira ' +
-      'desnecessario. Se comArquivo vier vazio mas `responderam` nao, o caminho existe ' +
-      'e falta o parametro certo: olhe tagCitada em cada sonda recusada, que e o Omie ' +
-      'dizendo o nome real do campo. tipo=call_ou_endpoint_inexistente significa que ' +
-      'aquele chute morreu e nao diz NADA sobre o dado existir.';
+      'veredito ja resolve. Nos detalhes: comArquivo lista quem devolveu URL, XML cru ' +
+      'ou base64 — qualquer um ali significa DANFE do documento ORIGINAL, com ' +
+      'protocolo, e o espelho vira desnecessario. Os tipos sao quatro e nao devem ser ' +
+      'confundidos: sem_registro = o call funcionou e nao achou (e resposta, nao ' +
+      'falha); tag_recusada = campo com outro nome, e tagCitada entrega o certo; ' +
+      'falta_parametro = faltou preencher; call_ou_endpoint_inexistente = o chute ' +
+      'morreu e nao diz NADA sobre o dado existir.';
 
     out.timeMs = Date.now() - t0;
     context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
