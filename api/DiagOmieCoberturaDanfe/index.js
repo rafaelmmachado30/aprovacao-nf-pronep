@@ -35,7 +35,6 @@ require('isomorphic-fetch');
 const { getGraphClient } = require('../shared/graph');
 const { getCredentials } = require('../shared/omie');
 const { LIST_DOCFIS, resolveListId, soDigitos } = require('../shared/documentosFiscais');
-const { todosItens } = require('../shared/escopoNF');
 
 const OMIE_BASE = 'https://app.omie.com.br/api/v1';
 const EP = '/produtos/recebimentonfe/';
@@ -44,11 +43,34 @@ const CALL = 'ConsultarRecebimento';
 /* O Omie limita ~60 req/min por app_key e derruba rajada com "Consumo redundante".
    400ms e o mesmo espacamento que o DiagOmieRecebimento usa e que se mostrou
    suficiente. O orcamento existe porque o SWA corta a execucao: melhor devolver
-   uma amostra menor DIZENDO que foi menor do que morrer no timeout sem resposta. */
+   uma amostra menor DIZENDO que foi menor do que morrer no timeout sem resposta.
+   38s deixa folga sob o teto do SWA e ainda cabe amostra util. */
 const PAUSA_MS = 400;
-const ORCAMENTO_MS = 25000;
+const ORCAMENTO_MS = 38000;
+
+/* Na primeira medicao o SharePoint comeu mais da metade do orcamento e sobrou
+   tempo para 7 de 20 consultas. O culpado era o `expand=fields` sem recorte:
+   1895 linhas com TODAS as colunas para usar tres delas. Pedindo so as tres, a
+   leitura deixa de disputar tempo com a pergunta que a sonda existe para fazer. */
+const CAMPOS_NECESSARIOS = 'ChaveAcesso,UnidadeOmie,Descartado';
 
 function dorme(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+async function lerDocumentosEnxuto(client, siteId, listId) {
+  const out = [];
+  let url = '/sites/' + siteId + '/lists/' + listId + '/items' +
+            '?$expand=' + encodeURIComponent('fields($select=' + CAMPOS_NECESSARIOS + ')') +
+            '&$top=999';
+  let p = 0;
+  while (url && p < 20) {
+    const r = await client.api(url).get();
+    out.push.apply(out, r.value || []);
+    p++;
+    const nl = r['@odata.nextLink'];
+    url = nl ? nl.replace('https://graph.microsoft.com/v1.0', '') : null;
+  }
+  return out;
+}
 
 function readClientPrincipal(req) {
   const h = req.headers && req.headers['x-ms-client-principal'];
@@ -139,29 +161,71 @@ function conferirBlocos(d, chavePedida) {
   const it = temItem ? (itens[0].itensCabec || {}) : {};
   const icms = temItem ? (itens[0].itensICMS || {}) : {};
 
+  /* Registra QUAL campo faltou, nao so que o bloco falhou. Na primeira medicao
+     dois registros vieram sem `impostosItem` e sem `totais` e eu nao tinha como
+     saber se era campo ausente ou nota sem ICMS — sao coisas opostas: a primeira
+     e buraco de dado, a segunda e a nota ser assim mesmo, e a DANFE dela tambem
+     nao mostra imposto. Sem este detalhe eu estaria adivinhando. */
+  const nulos = [];
+  function exige(bloco, obj, campos, teste) {
+    let inteiro = true;
+    for (const c of campos) {
+      const v = obj[c];
+      const bom = teste === 'texto' ? !!v : (v != null);
+      if (!bom) { nulos.push(bloco + '.' + c); inteiro = false; }
+    }
+    return inteiro;
+  }
+
+  /* `&` e nao `&&`, de proposito. Com `&&` o curto-circuito pula o segundo exige
+     assim que o primeiro falha — e camposNulos, que existe justamente para dizer
+     TUDO que faltou, sairia contando so o primeiro. Eu leria "faltou o CST"
+     quando faltaram quatro campos, e consertaria um buraco achando que era o
+     unico. Os dois lados precisam rodar; so o veredito e conjuncao. */
+  /* nao basta ter item: a linha da DANFE precisa de descricao, NCM, CFOP,
+     unidade, quantidade, unitario e total. */
+  const bItens = temItem &&
+    (exige('item', it, ['cDescricaoProduto', 'cNCM', 'cCFOP', 'cUnidadeNfe'], 'texto') &
+     exige('item', it, ['nQtdeNFe', 'nPrecoUnit', 'vTotalItem'], 'valor')) === 1;
+  if (!temItem) nulos.push('itensRecebimento(vazio)');
+
+  /* coluna de imposto por item: CST, aliquota, base e valor do ICMS. */
+  const bImpostos = temItem &&
+    (exige('icms', icms, ['cSitTrib'], 'texto') &
+     exige('icms', icms, ['nAliq', 'nBC', 'nValor'], 'valor')) === 1;
+
+  /* quadro "calculo do imposto" no rodape. */
+  const bTotais = exige('totais', tot, ['vTotalNFe', 'vTotalProdutos', 'bcICMS', 'vICMS'], 'valor');
+
+  /* quadro do transportador. Ausencia aqui nao invalida a nota — venda sem
+     frete existe — mas muda o que da para imprimir, entao e medido a parte. */
+  const bTransporte = !!tr.cNomeTransp || !!tr.cRazaoTransp;
+  if (!bTransporte) nulos.push('transporte.cNomeTransp');
+
+  /* identificacao do emitente NO TOPO da DANFE. O Omie da razao social e CNPJ;
+     endereco e IE nao vem aqui (ficam no cadastro de fornecedor). */
+  const bEmitente = !!(cab.cRazaoSocial || cab.cNome) && !!cab.cCNPJ_CPF;
+
+  /* identificacao do documento: numero, serie, modelo e emissao. */
+  const bIdent = exige('cabec', cab, ['cNumeroNFe', 'cSerieNFe', 'dEmissaoNFe'], 'texto');
+
   return {
     divergente: false,
     qtdItens: itens.length,
+    camposNulos: nulos,
+    /* O CST decide a leitura de um ICMS zerado ou ausente: 40/41/50/51/60 sao
+       isencao/nao-tributado/suspensao/ST-ja-recolhida, e nessas a nota REALMENTE
+       nao tem ICMS proprio. Sem carregar o CST junto, "impostosItem incompleto"
+       seria lido como falha do Omie quando pode ser a natureza da operacao. */
+    cstPrimeiroItem: icms.cSitTrib != null ? String(icms.cSitTrib) : null,
+    cnpjEmitente: soDigitos(cab.cCNPJ_CPF) || null,
     blocos: {
-      /* nao basta ter item: a linha da DANFE precisa de descricao, NCM, CFOP,
-         unidade, quantidade, unitario e total. */
-      itens: temItem && !!it.cDescricaoProduto && !!it.cNCM && !!it.cCFOP &&
-             !!it.cUnidadeNfe && it.nQtdeNFe != null && it.nPrecoUnit != null &&
-             it.vTotalItem != null,
-      /* coluna de imposto por item: CST, aliquota, base e valor do ICMS. */
-      impostosItem: temItem && icms.cSitTrib != null && icms.nAliq != null &&
-                    icms.nBC != null && icms.nValor != null,
-      /* quadro "calculo do imposto" no rodape. */
-      totais: tot.vTotalNFe != null && tot.vTotalProdutos != null &&
-              tot.bcICMS != null && tot.vICMS != null,
-      /* quadro do transportador. Ausencia aqui nao invalida a nota — venda sem
-         frete existe — mas muda o que da para imprimir, entao e medido a parte. */
-      transporte: !!tr.cNomeTransp || !!tr.cRazaoTransp,
-      /* identificacao do emitente NO TOPO da DANFE. O Omie da razao social e CNPJ;
-         endereco e IE nao vem aqui (ficam no cadastro de fornecedor). */
-      emitenteBasico: !!(cab.cRazaoSocial || cab.cNome) && !!cab.cCNPJ_CPF,
-      /* identificacao do documento: numero, serie, modelo e emissao. */
-      identificacao: !!cab.cNumeroNFe && !!cab.cSerieNFe && !!cab.dEmissaoNFe
+      itens: bItens,
+      impostosItem: bImpostos,
+      totais: bTotais,
+      transporte: bTransporte,
+      emitenteBasico: bEmitente,
+      identificacao: bIdent
     },
     /* Existe para a resposta nao parecer que a DANFE sai completa daqui: estes
        campos sao obrigatorios na DANFE e o Omie nao tem nenhum deles. */
@@ -205,7 +269,11 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const docs = await todosItens(client, site.id, idDoc);
+    const docs = await lerDocumentosEnxuto(client, site.id, idDoc);
+    /* Medir a leitura a parte foi o que revelou o gargalo da primeira rodada.
+       Fica na resposta: se a amostra truncar de novo, este numero diz se a culpa
+       e do SharePoint ou da latencia do Omie. */
+    out.tempos = { sharePointMs: Date.now() - t0 };
 
     /* Uma NF parcelada e N linhas com a MESMA chave. Sem deduplicar, a amostra
        gastaria chamadas na mesma nota e a taxa sairia enviesada para os
@@ -239,7 +307,11 @@ module.exports = async function (context, req) {
                     consultadas: 0, ok: 0, semRecebimento: 0, erro: 0, divergente: 0,
                     blocosCompletos: { itens: 0, impostosItem: 0, totais: 0,
                                        transporte: 0, emitenteBasico: 0, identificacao: 0 },
-                    itensTotal: 0, comIdFornecedor: 0 };
+                    itensTotal: 0, comIdFornecedor: 0,
+                    /* Agregado das CAUSAS. "impostosItem: 5 de 7" nao diz o que fazer;
+                       "icms.nAliq ausente em 2" diz. E o cruzamento CST x emitente
+                       responde se o buraco e do Omie ou da natureza da nota. */
+                    camposNulosFrequencia: {}, cstPorSituacao: {}, emitentesIncompletos: {} };
       if (detalhe) res.linhas = [];
 
       let creds;
@@ -275,10 +347,24 @@ module.exports = async function (context, req) {
             for (const k of Object.keys(res.blocosCompletos)) {
               if (c.blocos[k]) res.blocosCompletos[k]++;
             }
+            for (const campo of c.camposNulos) {
+              res.camposNulosFrequencia[campo] = (res.camposNulosFrequencia[campo] || 0) + 1;
+            }
+            /* CST agrupado so entre os itens: se todo "incompleto" cair em CST de
+               isencao, nao ha buraco nenhum a tapar — a nota e assim. */
+            const cst = c.cstPrimeiroItem == null ? '(ausente)' : c.cstPrimeiroItem;
+            res.cstPorSituacao[cst] = (res.cstPorSituacao[cst] || 0) + 1;
+            /* Emitente so entra na lista quando algo faltou: e ai que se ve se a
+               falha se concentra em poucos fornecedores ou esta espalhada. */
+            const faltando = Object.keys(c.blocos).filter(function (k) { return !c.blocos[k]; });
+            if (faltando.length && c.cnpjEmitente) {
+              res.emitentesIncompletos[c.cnpjEmitente] =
+                (res.emitentesIncompletos[c.cnpjEmitente] || 0) + 1;
+            }
             if (detalhe) {
-              const faltando = Object.keys(c.blocos).filter(function (k) { return !c.blocos[k]; });
               res.linhas.push({ chave: ch, estado: 'ok', itens: c.qtdItens,
-                                blocosFaltando: faltando });
+                                blocosFaltando: faltando, camposNulos: c.camposNulos,
+                                cst: c.cstPrimeiroItem, emitente: c.cnpjEmitente });
             }
           }
         }
@@ -302,14 +388,21 @@ module.exports = async function (context, req) {
       ? Math.round((soma.ok / soma.consultadas) * 100) + '%' : null;
     out.consolidado = soma;
 
+    out.tempos.omieMs = Date.now() - t0 - out.tempos.sharePointMs;
+
     out.leitura =
       'taxaResposta = das notas com chave, quantas o Omie detalha. ' +
       'blocosCompletos conta, DENTRE as que responderam, em quantas o bloco veio ' +
       'inteiro — taxa alta com bloco baixo significa endpoint que responde e nao ' +
-      'serve. divergente > 0 invalida o caminho: seria DANFE de outra nota. ' +
-      'faltaEstruturalNoOmie (protocolo, endereco/IE do emitente, natureza da ' +
-      'operacao) nao e medida porque o Omie nao tem: o que sai daqui e espelho ' +
-      'fiel da nota, nao DANFE com valor fiscal.';
+      'serve. camposNulosFrequencia diz QUAL campo faltou, que e o que se conserta; ' +
+      'cruze com cstPorSituacao antes de concluir: CST 40/41/50/51/60 e isencao/ ' +
+      'nao-tributado/ST, e nessas a nota nao tem ICMS proprio — bloco incompleto ' +
+      'ali e a natureza da operacao, nao buraco do Omie. emitentesIncompletos ' +
+      'mostra se a falha se concentra em poucos fornecedores. divergente > 0 ' +
+      'invalida o caminho: seria DANFE de outra nota. faltaEstruturalNoOmie ' +
+      '(protocolo, endereco/IE do emitente, natureza da operacao) nao e medida ' +
+      'porque o Omie nao tem: o que sai daqui e espelho fiel da nota, nao DANFE ' +
+      'com valor fiscal.';
 
     out.timeMs = Date.now() - t0;
     context.res = { status: 200, headers: { 'Content-Type': 'application/json' }, body: out };
