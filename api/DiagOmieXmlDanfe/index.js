@@ -135,6 +135,13 @@ async function sondar(endpoint, call, param, creds) {
         : m ? 'tag_recusada' : 'outro';
     return { aceito: false, erro: fs.slice(0, 200), tagCitada: m ? m[1] : null, tipo: tipo };
   }
+  /* Medido na rodada 1: o Omie devolve HTTP 500 SEM corpo util quando o call nao
+     existe naquele endpoint. Nomear isso evita a leitura que ja me custou uma
+     conclusao errada — 500 aqui nao e "o Omie caiu" nem "o dado nao existe", e
+     "esse call que eu inventei nao existe". */
+  if (resp.status === 500) {
+    return { aceito: false, erro: 'HTTP 500', tipo: 'call_ou_endpoint_inexistente' };
+  }
   if (!resp.ok) return { aceito: false, erro: 'HTTP ' + resp.status };
   return { aceito: true, chaves: Object.keys(data || {}), resumo: resumir(data),
            bytes: JSON.stringify(data || {}).length };
@@ -167,40 +174,41 @@ module.exports = async function (context, req) {
        O `{}` vazio vem primeiro em cada endpoint de proposito: sem campo nenhum o
        Omie tende a reclamar do que FALTA, e a reclamacao entrega o nome certo do
        parametro sem eu precisar adivinhar — foi assim que o recebimentonfe caiu. */
+    /* RODADA 2 — agora com os nomes lidos na documentacao, nao chutados.
+       A rodada 1 levou HTTP 500 em quase tudo, e 500 aqui significa CALL
+       INEXISTENTE: eu tinha inventado ObterDocumentos, ObterXML, ExibirDANFE.
+       Sobreviveu um: /contador/xml/ ListarDocumentos, que recusou a tag citando
+       o tipo [xmlListarDocumentosRequest] — ou seja, o call existe e so o campo
+       tinha outro nome. Na doc do servico:
+         request  nChave (string44), nIdReceb (integer), cOperacao, cModelo
+         resposta documentosEncontrados[] com cXml, nIdNF, nIdReceb, nChave
+       `cXml` e o XML do documento fiscal. E `nIdNF` alimenta o segundo passo:
+       /produtos/dfedocs/ ObterNfe recebe nIdNfe e devolve cPdf — o link da DANFE
+       ja renderizada, que e o mesmo arquivo que o botao da tela do Omie abre. */
     const alvos = [
-      /* --- dfedocs: o que a doc descreve como "disponibiliza PDF e XML" --- */
-      ['dfedocs__vazio',        '/produtos/dfedocs/', 'ListarDocumentos', {}],
-      ['dfedocs__Listar_chave', '/produtos/dfedocs/', 'ListarDocumentos', { cChaveNFe: chave }],
-      ['dfedocs__Obter_chave',  '/produtos/dfedocs/', 'ObterDocumentos',  { cChaveNFe: chave }],
-      ['dfedocs__Consultar',    '/produtos/dfedocs/', 'ConsultarDocumento', { cChaveNFe: chave }],
-      ['dfedocs__Obter_nChave', '/produtos/dfedocs/', 'ObterDocumentos',  { nChaveNFe: chave }],
+      /* --- passo 1: o XML, por chave --- */
+      ['contador__porChave',   '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 5, nChave: chave }],
+      /* Sem cModelo: filtrar por 55 antes de saber se a nota esta na base
+         confundiria "nao e modelo 55" com "nao esta la". */
+      ['contador__porChave_55', '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 5, nChave: chave, cModelo: '55' }],
+      /* cOperacao decide se a base do contador cobre ENTRADA. Se so houver saida,
+         nenhuma nota de fornecedor aparece e o caminho morre aqui. */
+      ['contador__entrada',    '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 3, cOperacao: 'E' }],
+      ['contador__saida',      '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 3, cOperacao: 'S' }],
 
-      /* --- notafiscalutil: "recupera URL da NF-e (XML), do Danfe" --- */
-      ['util__vazio',        '/produtos/notafiscalutil/', 'ObterXMLNFe', {}],
-      ['util__ObterXML',     '/produtos/notafiscalutil/', 'ObterXMLNFe', { cChaveNFe: chave }],
-      ['util__ObterDanfe',   '/produtos/notafiscalutil/', 'ObterDanfe',  { cChaveNFe: chave }],
-      ['util__ObterUrlNFe',  '/produtos/notafiscalutil/', 'ObterUrlNFe', { cChaveNFe: chave }],
-
-      /* --- contador/xml: o unico que cobre ENTRADA, que e o nosso caso --- */
-      ['contador__vazio',    '/contador/xml/', 'ListarDocumentos', {}],
-      ['contador__Listar',   '/contador/xml/', 'ListarDocumentos', { cChaveNFe: chave }],
-      ['contador__Obter',    '/contador/xml/', 'ObterDocumentos',  { cChaveNFe: chave }],
-
-      /* --- recebimentonfe: o modulo que ja responde, agora pedindo o ARQUIVO --- */
-      ['receb__ObterXML',    '/produtos/recebimentonfe/', 'ObterXML',      { cChaveNFe: chave }],
-      ['receb__ExibirXML',   '/produtos/recebimentonfe/', 'ExibirXML',     { cChaveNFe: chave }],
-      ['receb__ObterDANFE',  '/produtos/recebimentonfe/', 'ObterDANFE',    { cChaveNFe: chave }],
-      ['receb__ExibirDANFE', '/produtos/recebimentonfe/', 'ExibirDANFE',   { cChaveNFe: chave }],
-      ['receb__ListarAnexos','/produtos/recebimentonfe/', 'ListarAnexos',  { cChaveNFe: chave }]
+      /* --- passo 2: o PDF da DANFE, pelos calls que a doc REALMENTE lista --- */
+      ['dfedocs__ObterNfe_id0', '/produtos/dfedocs/', 'ObterNfe', { nIdNfe: 0 }]
     ];
 
-    /* nIdReceb e a chave interna do recebimento e vem no cabec. Se a chave de
-       acesso nao abrir o arquivo, o id interno e o proximo candidato natural. */
+    /* nIdReceb vem no cabec do ConsultarRecebimento que ja usamos. Se a chave nao
+       achar, o id do recebimento e o filtro mais direto que existe para entrada. */
     if (nIdReceb) {
-      alvos.push(['receb__ObterXML_porId', '/produtos/recebimentonfe/', 'ObterXML',
-                  { nIdReceb: Number(nIdReceb) }]);
-      alvos.push(['dfedocs__Obter_porId', '/produtos/dfedocs/', 'ObterDocumentos',
-                  { nIdReceb: Number(nIdReceb) }]);
+      alvos.push(['contador__porIdReceb', '/contador/xml/', 'ListarDocumentos',
+                  { nPagina: 1, nRegPorPagina: 5, nIdReceb: Number(nIdReceb) }]);
     }
 
     const endpointsMortos = {};
