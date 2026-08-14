@@ -99,12 +99,25 @@ async function isAdmin(req) {
    notas mais antigas ou mais novas — que e justamente onde a cobertura tende a
    ser diferente. Ordenar por chave antes espalha por emitente e por data, porque
    os 6 primeiros digitos da chave sao UF + AAMM. */
-function amostrar(chaves, quantas) {
+/* `pagina` desloca a amostra dentro de cada balde, sem reordenar nada: pagina 1
+   pega o primeiro de cada faixa, pagina 2 o segundo, e assim por diante. Serve
+   para acumular amostra em rodadas — a latencia do Omie e de ~2,4s por nota, e
+   uma execucao so nunca vai fechar 40. A alternativa seria disparar consultas em
+   paralelo, mas isto roda contra a producao e o teto e 60/min por app_key:
+   arriscar o rate limit para medir mais rapido estragaria a propria medicao. */
+function amostrar(chaves, quantas, pagina) {
   const ordenadas = chaves.slice().sort();
-  if (ordenadas.length <= quantas) return ordenadas;
+  const desloc = Math.max(0, (pagina || 1) - 1);
+  if (ordenadas.length <= quantas) return desloc ? [] : ordenadas;
   const passo = ordenadas.length / quantas;
   const out = [];
-  for (let i = 0; i < quantas; i++) out.push(ordenadas[Math.floor(i * passo)]);
+  for (let i = 0; i < quantas; i++) {
+    const idx = Math.floor(i * passo) + desloc;
+    /* Nao deixa a pagina vazar para o balde seguinte: repetir chave ja medida
+       inflaria a amostra com a mesma nota contada duas vezes. */
+    if (idx >= Math.floor((i + 1) * passo) || idx >= ordenadas.length) continue;
+    out.push(ordenadas[idx]);
+  }
   return out;
 }
 
@@ -160,6 +173,16 @@ function conferirBlocos(d, chavePedida) {
   const temItem = itens.length > 0;
   const it = temItem ? (itens[0].itensCabec || {}) : {};
   const icms = temItem ? (itens[0].itensICMS || {}) : {};
+  /* O ST mora fundo: itensAjustes > itensSitTribEnt > itensSitTribICMSSTEnt.
+     Ele importa porque na rodada anterior TODAS as notas com imposto "incompleto"
+     eram CST 60 — ICMS ja recolhido por substituicao. Concluir "nao falta nada,
+     e a natureza da operacao" sem olhar o ST seria deducao, nao medicao: se o
+     Omie tambem nao tiver BC e valor do ST, a DANFE dessas notas sai SEM imposto
+     nenhum, e imposto errado na tela de quem aprova pagamento e o pior defeito
+     possivel aqui. */
+  const ajustes = temItem ? (itens[0].itensAjustes || {}) : {};
+  const sitTrib = ajustes.itensSitTribEnt || {};
+  const st = sitTrib.itensSitTribICMSSTEnt || {};
 
   /* Registra QUAL campo faltou, nao so que o bloco falhou. Na primeira medicao
      dois registros vieram sem `impostosItem` e sem `totais` e eu nao tinha como
@@ -209,10 +232,33 @@ function conferirBlocos(d, chavePedida) {
   /* identificacao do documento: numero, serie, modelo e emissao. */
   const bIdent = exige('cabec', cab, ['cNumeroNFe', 'cSerieNFe', 'dEmissaoNFe'], 'texto');
 
+  /* ---- ICMS ST ----
+     CST 10/30/60/70 sao as situacoes com substituicao tributaria. So nelas o
+     quadro de ST da DANFE tem o que mostrar; cobrar BC/valor de ST numa nota CST
+     00 acusaria falta onde nao ha operacao. Por isso o bloco so e JULGADO quando
+     e aplicavel — nas demais fica null, que e diferente de false. */
+  const cstTxt = icms.cSitTrib != null ? String(icms.cSitTrib).padStart(2, '0') : null;
+  const stAplicavel = ['10', '30', '60', '70'].indexOf(cstTxt) >= 0;
+  let bST = null;
+  if (stAplicavel) {
+    bST = (exige('st', st, ['nBCSTE', 'nValorST'], 'valor')) === true;
+  }
+
+  /* Descoberta, nao julgamento: eu nao conheco o shape completo do Omie e nao vou
+     inventar. Listar as chaves que REALMENTE vieram deixa o proximo passo apoiado
+     no que existe, em vez de num campo que eu supus que existisse. */
+  const chavesVistas = {
+    totais: Object.keys(tot).sort(),
+    st: Object.keys(st).sort(),
+    icmsItem: Object.keys(icms).sort()
+  };
+
   return {
     divergente: false,
     qtdItens: itens.length,
     camposNulos: nulos,
+    stAplicavel: stAplicavel,
+    chavesVistas: chavesVistas,
     /* O CST decide a leitura de um ICMS zerado ou ausente: 40/41/50/51/60 sao
        isencao/nao-tributado/suspensao/ST-ja-recolhida, e nessas a nota REALMENTE
        nao tem ICMS proprio. Sem carregar o CST junto, "impostosItem incompleto"
@@ -225,7 +271,11 @@ function conferirBlocos(d, chavePedida) {
       totais: bTotais,
       transporte: bTransporte,
       emitenteBasico: bEmitente,
-      identificacao: bIdent
+      identificacao: bIdent,
+      /* null = nao se aplica a esta nota. Contar null como falha rebaixaria toda
+         nota tributada normalmente; contar como acerto inflaria a cobertura do
+         ST com notas que nunca o tiveram. As duas leituras enganam. */
+      impostoST: bST
     },
     /* Existe para a resposta nao parecer que a DANFE sai completa daqui: estes
        campos sao obrigatorios na DANFE e o Omie nao tem nenhum deles. */
@@ -247,9 +297,11 @@ module.exports = async function (context, req) {
   let amostra = parseInt(q.amostra, 10);
   if (!isFinite(amostra) || amostra < 1) amostra = 8;
   if (amostra > 40) amostra = 40;
+  let pagina = parseInt(q.pagina, 10);
+  if (!isFinite(pagina) || pagina < 1) pagina = 1;
 
   const out = { ok: true, call: CALL, endpoint: EP, amostraPedidaPorUnidade: amostra,
-                unidades: {}, timeMs: 0 };
+                pagina: pagina, unidades: {}, timeMs: 0 };
 
   try {
     if (!(await isAdmin(req))) {
@@ -302,7 +354,7 @@ module.exports = async function (context, req) {
     /* ---------- consulta ---------- */
     for (const u of Object.keys(porUnidade).sort()) {
       const chaves = porUnidade[u];
-      const alvo = amostrar(chaves, amostra);
+      const alvo = amostrar(chaves, amostra, pagina);
       const res = { comChaveNaUnidade: chaves.length, sorteadas: alvo.length,
                     consultadas: 0, ok: 0, semRecebimento: 0, erro: 0, divergente: 0,
                     blocosCompletos: { itens: 0, impostosItem: 0, totais: 0,
@@ -311,7 +363,12 @@ module.exports = async function (context, req) {
                     /* Agregado das CAUSAS. "impostosItem: 5 de 7" nao diz o que fazer;
                        "icms.nAliq ausente em 2" diz. E o cruzamento CST x emitente
                        responde se o buraco e do Omie ou da natureza da nota. */
-                    camposNulosFrequencia: {}, cstPorSituacao: {}, emitentesIncompletos: {} };
+                    camposNulosFrequencia: {}, cstPorSituacao: {}, emitentesIncompletos: {},
+                    /* ST contado sobre a base certa: so as notas em que ele se
+                       aplica. Diluir no total daria um percentual que nao responde
+                       pergunta nenhuma. */
+                    stAplicaveis: 0, stCompletos: 0,
+                    chavesVistas: { totais: {}, st: {}, icmsItem: {} } };
       if (detalhe) res.linhas = [];
 
       let creds;
@@ -347,6 +404,15 @@ module.exports = async function (context, req) {
             for (const k of Object.keys(res.blocosCompletos)) {
               if (c.blocos[k]) res.blocosCompletos[k]++;
             }
+            if (c.stAplicavel) {
+              res.stAplicaveis++;
+              if (c.blocos.impostoST) res.stCompletos++;
+            }
+            for (const grupo of Object.keys(res.chavesVistas)) {
+              for (const campo of c.chavesVistas[grupo]) {
+                res.chavesVistas[grupo][campo] = (res.chavesVistas[grupo][campo] || 0) + 1;
+              }
+            }
             for (const campo of c.camposNulos) {
               res.camposNulosFrequencia[campo] = (res.camposNulosFrequencia[campo] || 0) + 1;
             }
@@ -356,7 +422,11 @@ module.exports = async function (context, req) {
             res.cstPorSituacao[cst] = (res.cstPorSituacao[cst] || 0) + 1;
             /* Emitente so entra na lista quando algo faltou: e ai que se ve se a
                falha se concentra em poucos fornecedores ou esta espalhada. */
-            const faltando = Object.keys(c.blocos).filter(function (k) { return !c.blocos[k]; });
+            /* `=== false`, nao `!valor`: um bloco null e "nao se aplica a esta
+               nota", e !null seria true — o ST apareceria como faltando em toda
+               nota tributada normalmente, inventando um defeito inexistente em
+               quase toda a amostra. */
+            const faltando = Object.keys(c.blocos).filter(function (k) { return c.blocos[k] === false; });
             if (faltando.length && c.cnpjEmitente) {
               res.emitentesIncompletos[c.cnpjEmitente] =
                 (res.emitentesIncompletos[c.cnpjEmitente] || 0) + 1;
@@ -364,7 +434,8 @@ module.exports = async function (context, req) {
             if (detalhe) {
               res.linhas.push({ chave: ch, estado: 'ok', itens: c.qtdItens,
                                 blocosFaltando: faltando, camposNulos: c.camposNulos,
-                                cst: c.cstPrimeiroItem, emitente: c.cnpjEmitente });
+                                cst: c.cstPrimeiroItem, emitente: c.cnpjEmitente,
+                                stAplicavel: c.stAplicavel, stCompleto: c.blocos.impostoST });
             }
           }
         }
@@ -397,7 +468,12 @@ module.exports = async function (context, req) {
       'serve. camposNulosFrequencia diz QUAL campo faltou, que e o que se conserta; ' +
       'cruze com cstPorSituacao antes de concluir: CST 40/41/50/51/60 e isencao/ ' +
       'nao-tributado/ST, e nessas a nota nao tem ICMS proprio — bloco incompleto ' +
-      'ali e a natureza da operacao, nao buraco do Omie. emitentesIncompletos ' +
+      'ali e a natureza da operacao, nao buraco do Omie — MAS entao o quadro de ' +
+      'ST precisa ter o que mostrar: compare stCompletos com stAplicaveis. Se ' +
+      'stCompletos < stAplicaveis, a DANFE dessas notas sai sem imposto nenhum, ' +
+      'e ai o caminho tem um furo de verdade. chavesVistas lista os campos que o ' +
+      'Omie realmente devolveu, para o proximo passo se apoiar no que existe. ' +
+      'emitentesIncompletos ' +
       'mostra se a falha se concentra em poucos fornecedores. divergente > 0 ' +
       'invalida o caminho: seria DANFE de outra nota. faltaEstruturalNoOmie ' +
       '(protocolo, endereco/IE do emitente, natureza da operacao) nao e medida ' +
