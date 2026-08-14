@@ -5371,6 +5371,24 @@ function abrirDetalheNF(docId) {
 
   h += '<div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap;align-items:center">';
 
+  /* ESPELHO DA NOTA — o documento montado a partir do que o Omie guarda.
+     Aparece sempre que ha chave de acesso, inclusive (e principalmente) em card
+     de "Novas", que e onde estao os ~1.140 cartoes sem PDF nenhum: ate agora o
+     unico botao de documento era o "Abrir NF em PDF", que exige nota ja lancada.
+     Medido antes de construir: 49 notas nas tres unidades, 100% de resposta do
+     ConsultarRecebimento, zero divergente. E como o Omie nao tem janela de
+     retencao, alcanca o backlog inteiro — a SEFAZ perde o XML em 90 dias.
+     NAO se chama DANFE de proposito: sem o protocolo de autorizacao de uso, isto
+     e espelho, e a propria pagina traz a tarja dizendo isso. */
+  if (d.chaveAcesso) {
+    var lenteEsp = window._viewAsDiretoria || '';
+    h += '<a class="btn btn-secondary" target="_blank" rel="noopener"'
+      + ' style="text-decoration:none"'
+      + ' href="/api/EspelhoDaNota?docId=' + encodeURIComponent(d.id)
+      + (lenteEsp ? '&verComo=' + encodeURIComponent(lenteEsp) : '') + '">'
+      + 'Ver espelho da nota</a>';
+  }
+
   /* NF ja lancada: abre o PDF que esta no SharePoint.
      Card lancado nao oferecia acao nenhuma — o modal terminava numa faixa vazia,
      justamente quando o documento existe e e o que a pessoa quer conferir.

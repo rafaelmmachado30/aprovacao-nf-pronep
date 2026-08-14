@@ -34,95 +34,14 @@
 
 require('isomorphic-fetch');
 const { getGraphClient, resolveSiteId } = require('../shared/graph');
-const { resolveListId, LIST_DOCFIS, soDigitos } = require('../shared/documentosFiscais');
-const { montarEscopo, podeVer, todosItens } = require('../shared/escopoNF');
+const { montarEscopo, podeVer } = require('../shared/escopoNF');
 const { getCredentials } = require('../shared/omie');
-
-const OMIE_BASE = 'https://app.omie.com.br/api/v1';
-
-/* O cadastro de fornecedores muda raramente e a lista inteira custa segundos.
-   Sem cache, abrir cinco cards seguidos releria tudo cinco vezes. TTL curto para
-   um cadastro corrigido agora aparecer no proximo card, nao so amanha. */
-const TTL_FORN_MS = 5 * 60 * 1000;
-let _fornCache = { em: 0, mapa: null };
-
-async function fornecedorPorCnpj(client, siteId) {
-  if (_fornCache.mapa && (Date.now() - _fornCache.em) < TTL_FORN_MS) return _fornCache.mapa;
-  const mapa = {};
-  const idForn = await resolveListId(client, siteId, 'PRONEP-NF-Fornecedores');
-  if (idForn) {
-    for (const it of await todosItens(client, siteId, idForn)) {
-      const f = it.fields || {};
-      /* Title=razao, field_1=tipoDoc, field_2=documento, field_3=fantasia,
-         field_4=unidade, field_5=diretoria, field_6=uf, field_7=ativo,
-         field_8=telefone, field_9=email, field_10=cidade, field_11=cep
-         (mesmo mapa de ListarFornecedores — se um mudar, os dois mudam). */
-      const doc = soDigitos(f.field_2);
-      /* 11 digitos tambem entram: fornecedor pessoa fisica existe e hoje ficava
-         de fora do cabecalho por causa de um teste de tamanho. */
-      if ((doc.length !== 14 && doc.length !== 11) || mapa[doc]) continue;
-      mapa[doc] = {
-        razao: f.Title || '', fantasia: f.field_3 || '',
-        tipoDocumento: f.field_1 || '', documento: doc,
-        unidade: f.field_4 || '', diretoria: f.field_5 || '',
-        uf: f.field_6 || '', cidade: f.field_10 || '', cep: f.field_11 || '',
-        telefone: f.field_8 || '', email: f.field_9 || '',
-        ativo: String(f.field_7 || '').toLowerCase() === 'sim'
-      };
-    }
-  }
-  _fornCache = { em: Date.now(), mapa: mapa };
-  return mapa;
-}
-
-/* Cadastro do fornecedor no Omie — SO quando nao temos o nosso.
-   O cadastro local vem primeiro por tres motivos: e instantaneo, e curado pela
-   Pronep (unidade e diretoria so existem la) e nao gasta chamada numa API com
-   limite de ~60/min. O Omie entra exatamente onde o local falha: fornecedor que
-   ainda nao foi cadastrado — que e tambem quando esses dados mais servem, porque
-   e deles que sai o cadastro. */
-async function fornecedorNoOmie(codigoClienteOmie, unidade) {
-  if (!codigoClienteOmie) return null;
-  const creds = getCredentials(unidade);
-  const resp = await fetch(OMIE_BASE + '/geral/clientes/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
-               'User-Agent': 'PronepNF/1.0 (Azure SWA Functions)' },
-    body: JSON.stringify({ call: 'ConsultarCliente', app_key: creds.appKey,
-                           app_secret: creds.appSecret,
-                           param: [{ codigo_cliente_omie: Number(codigoClienteOmie) }] })
-  });
-  const texto = await resp.text();
-  let d;
-  try { d = JSON.parse(texto); } catch (e) { return null; }
-  if (!d || d.faultstring) return null;
-  const partes = [d.endereco, d.endereco_numero, d.complemento].filter(Boolean);
-  return {
-    razao: d.razao_social || '', fantasia: d.nome_fantasia || '',
-    documento: soDigitos(d.cnpj_cpf), tipoDocumento: soDigitos(d.cnpj_cpf).length === 11 ? 'CPF' : 'CNPJ',
-    logradouro: partes.join(', '), bairro: d.bairro || '',
-    cidade: d.cidade || '', uf: d.estado || '', cep: d.cep || '',
-    telefone: [d.telefone1_ddd, d.telefone1_numero].filter(Boolean).join(' '),
-    email: d.email || '', inscricaoEstadual: d.inscricao_estadual || ''
-  };
-}
-
-async function consultarRecebimento(chave, creds) {
-  const resp = await fetch(OMIE_BASE + '/produtos/recebimentonfe/', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json',
-               'User-Agent': 'PronepNF/1.0 (Azure SWA Functions)' },
-    body: JSON.stringify({ call: 'ConsultarRecebimento', app_key: creds.appKey,
-                           app_secret: creds.appSecret, param: [{ cChaveNFe: chave }] })
-  });
-  const texto = await resp.text();
-  let data;
-  try { data = JSON.parse(texto); }
-  catch (e) { throw new Error('Omie respondeu em formato inesperado (HTTP ' + resp.status + ')'); }
-  if (data && data.faultstring) throw new Error(String(data.faultstring).slice(0, 200));
-  if (!resp.ok) throw new Error('Omie HTTP ' + resp.status);
-  return data;
-}
+/* Resolucao, escopo, consulta e trava de identidade sairam daqui para o shared
+   quando o EspelhoDaNota precisou do mesmo caminho. Ficaram identicas — o que
+   mudou e que agora ha uma copia so, e as duas telas erram ou acertam juntas. */
+const {
+  resolverDocumento, consultarRecebimento, fichaFornecedor, conferirIdentidade
+} = require('../shared/recebimentoOmie');
 
 function num(v) { const n = Number(v); return isFinite(n) ? n : 0; }
 
@@ -166,8 +85,6 @@ module.exports = async function (context, req) {
 
     const client = await getGraphClient();
     const siteId = await resolveSiteId(client);
-    const listId = await resolveListId(client, siteId, LIST_DOCFIS);
-    if (!listId) throw new Error('Lista de documentos nao existe');
 
     const escopo = await montarEscopo(client, siteId, req, verComo);
     if (!escopo.autenticado) {
@@ -176,20 +93,8 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const item = await client.api('/sites/' + siteId + '/lists/' + listId + '/items/' + docId)
-      .expand('fields').get();
-    const f = (item && item.fields) || {};
-    const cnpj = soDigitos(f.EmitenteCNPJ);
-    const forn = cnpj ? (await fornecedorPorCnpj(client, siteId))[cnpj] : null;
-
-    /* Mesmo formato que podeVer espera no quadro — nao um parecido. */
-    const card = {
-      unidade: (forn && forn.unidade) || f.UnidadeOmie || '',
-      diretoria: (forn && forn.diretoria) || '',
-      fornecedorCadastrado: !!forn,
-      cadastroIncompleto: !!forn && !(forn.unidade && forn.diretoria)
-    };
-    if (!podeVer(card, escopo)) {
+    const res = await resolverDocumento(client, siteId, docId);
+    if (!podeVer(res.card, escopo)) {
       /* 404, nao 403: dizer "existe mas voce nao pode ver" ja entrega que aquela
          NF existe naquele id. */
       context.res = { status: 404, headers: { 'Content-Type': 'application/json' },
@@ -197,28 +102,14 @@ module.exports = async function (context, req) {
       return;
     }
 
-    const unidade = String(f.UnidadeOmie || 'RJ').toUpperCase();
+    const unidade = res.unidade;
 
     /* Cabecalho do fornecedor. Vem ANTES do desvio de "sem chave" porque nao
        depende de NF-e nenhuma: e justamente na NFS-e, que nao tem itens para
        mostrar, que a ficha do fornecedor sustenta a tela sozinha. */
-    let fornecedor = null;
-    if (forn) {
-      fornecedor = Object.assign({ origem: 'cadastro' }, forn);
-    } else if (f.CodigoClienteOmie) {
-      try {
-        const noOmie = await fornecedorNoOmie(f.CodigoClienteOmie, unidade);
-        if (noOmie) fornecedor = Object.assign({ origem: 'omie' }, noOmie);
-      } catch (e) { /* cabecalho incompleto nao invalida o resto da tela */ }
-    }
-    /* Ultimo recurso: o que o proprio documento guarda. Sem isto, um fornecedor
-       nao cadastrado e sem codigo do Omie abriria um modal sem nome nenhum. */
-    if (!fornecedor && (f.EmitenteNome || cnpj)) {
-      fornecedor = { origem: 'documento', razao: f.EmitenteNome || '', documento: cnpj,
-                     tipoDocumento: cnpj.length === 11 ? 'CPF' : 'CNPJ' };
-    }
+    const fornecedor = await fichaFornecedor(res, unidade);
 
-    const chave = soDigitos(f.ChaveAcesso);
+    const chave = res.chave;
     if (chave.length !== 44) {
       context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
         body: { ok: true, semChave: true, fornecedor: fornecedor,
@@ -231,13 +122,13 @@ module.exports = async function (context, req) {
     const d = await consultarRecebimento(chave, getCredentials(unidade));
 
     const cab = (d && d.cabec) || {};
-    const voltou = soDigitos(cab.cChaveNFe);
-    if (voltou !== chave) {
+    const ident = conferirIdentidade(d, chave);
+    if (!ident.ok) {
       /* Trava 2. Nao renderiza nada quando a identidade nao fecha. */
       context.res = { status: 502, headers: { 'Content-Type': 'application/json' },
         body: { error: 'O Omie devolveu uma nota diferente da solicitada. ' +
                        'Nada foi exibido por seguranca.',
-                chavePedida: chave, chaveDevolvida: voltou || '(vazia)' } };
+                chavePedida: chave, chaveDevolvida: ident.chaveDevolvida } };
       return;
     }
 
