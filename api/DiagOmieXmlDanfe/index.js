@@ -302,6 +302,33 @@ module.exports = async function (context, req) {
     out.comArquivo = vivos.filter(function (k) {
       return /"tipo":"(URL|XML|BASE64\?)"/.test(JSON.stringify(out.sondas[k].resumo || {}));
     });
+    /* ULTIMO PASSO, encadeado: a listagem devolveu o nIdNF real desta nota, e e
+       ele que o ObterNfe pede. Encadear aqui em vez de pedir outra rodada evita
+       o erro classico de comparar duas execucoes com parametros diferentes.
+       A pergunta que sobra e uma so: o cPdf vem, e vem utilizavel? O link que o
+       Rafael viu na tela do Omie era .../resources/temp/<sessao>/... com SrvCheck
+       — se for esse mesmo, e temporario e preso a sessao web, e nao serve para o
+       nosso botao. Se vier outro, a DANFE oficial e um redirect. */
+    let idNF = null;
+    for (const k of ['P3_chave_entrada', 'P4_porIdReceb', 'P5_chave_com_janela']) {
+      const r = out.sondas[k];
+      const p = r && r.aceito && r.resumo && r.resumo.documentosEncontrados &&
+                r.resumo.documentosEncontrados.primeiro;
+      if (p && p.nIdNF) { idNF = p.nIdNF; break; }
+    }
+    if (idNF && Date.now() - t0 < ORCAMENTO_MS) {
+      out.nIdNFEncontrado = idNF;
+      await dorme(PAUSA_MS);
+      const r = await sondar('/produtos/dfedocs/', 'ObterNfe', { nIdNfe: Number(idNF) }, creds);
+      /* O XML tambem volta aqui (cXmlNfe). Nao interessa despejar dois XMLs no
+         diagnostico — o que decide e o cPdf. */
+      if (r.resumo && typeof r.resumo === 'object' && r.resumo.cXmlNfe) {
+        r.resumo.cXmlNfe = '[omitido no diagnostico — ja provado em P3]';
+      }
+      out.sondas.P7_ObterNfe_idReal = Object.assign(
+        { endpoint: '/produtos/dfedocs/', call: 'ObterNfe', nIdNfe: idNF }, r);
+    }
+
     /* O veredito nao pode depender de eu reler dezoito campos: a decisao e uma so
        e sai escrita. */
     const s = out.sondas;
@@ -312,11 +339,18 @@ module.exports = async function (context, req) {
     const achouAChave = ['P3_chave_entrada', 'P4_porIdReceb', 'P5_chave_com_janela']
       .filter(function (k) { return s[k] && s[k].aceito; });
     if (achouAChave.length) {
-      out.veredito = 'ACHOU A NOTA. ' + achouAChave.join(', ') + ' devolveu registro. ' +
-        'Se o resumo mostrar cXml com tipo XML, o documento ORIGINAL esta ao nosso ' +
-        'alcance — com protocolo — e o espelho vira desnecessario. O nIdNF que vier ' +
-        'junto alimenta o /produtos/dfedocs/ ObterNfe, que ja respondeu e devolve cPdf: ' +
-        'a DANFE renderizada, o mesmo arquivo que o botao da tela do Omie abre.';
+      const p7 = out.sondas.P7_ObterNfe_idReal || {};
+      const pdf = p7.aceito && p7.resumo && p7.resumo.cPdf;
+      const urlPdf = pdf && pdf.tipo === 'URL' ? pdf.valor : (typeof pdf === 'string' ? pdf : '');
+      out.veredito = 'ACHOU A NOTA (' + achouAChave.join(', ') + '), e o cXml veio como ' +
+        'nfeProc — o documento ORIGINAL, com protocolo. O espelho vira desnecessario.' +
+        (urlPdf
+          ? ' E O PDF TAMBEM VEIO: ' + (/\/resources\/temp\/|SrvCheck/.test(urlPdf)
+              ? 'mas e um link temporario de sessao web (/resources/temp/ + SrvCheck), ' +
+                'entao NAO serve para gravar num botao — gerar a DANFE do XML e o caminho.'
+              : 'e o link nao parece temporario. Vale testar se abre fora da sessao antes ' +
+                'de confiar nele.')
+          : ' O cPdf veio vazio, entao a DANFE sai do XML — que e o que temos garantido.');
     } else if (ent.aceito) {
       out.veredito = 'A BASE DO CONTADOR COBRE ENTRADA, mas esta nota nao apareceu ' +
         'pelos filtros testados. O caminho existe; falta o filtro certo. Compare o que ' +
