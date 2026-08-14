@@ -167,7 +167,11 @@ module.exports = async function (context, req) {
   const q = req.query || {};
   const u = String(q.unidade || 'RJ').toUpperCase();
   const chave = String(q.chave || '').replace(/\D/g, '');
-  const nIdReceb = String(q.nIdReceb || '').replace(/\D/g, '');
+  /* `let`, nao `const`: a sonda descobre o nIdReceb sozinha quando ele nao vem na
+     query. Com const, a atribuicao lancava "Assignment to constant variable"
+     dentro do try, o erro virava um campo discreto na resposta e a busca
+     automatica simplesmente nao acontecia — sem nada na tela dizendo isso. */
+  let nIdReceb = String(q.nIdReceb || '').replace(/\D/g, '');
   const out = { unidade: u, chave: chave, sondas: {}, timeMs: 0 };
 
   try {
@@ -239,15 +243,19 @@ module.exports = async function (context, req) {
          de entrada, nao se existe este. Filtrar demais aqui transformaria
          "a base nao cobre entrada" em "esta nota nao esta la", que sao coisas
          diferentes e levam a decisoes opostas. */
+      /* cOperacao e "0" (Entrada) e "1" (Saida), lido na doc do servico — nao
+         "E"/"S", que a rodada 3 mandou e levou "Tipo de Operacao invalido".
+         E o DEFAULT e Saida: por isso a busca pela chave sem cOperacao nao achou
+         nada. Ela procurou uma nota de fornecedor no conjunto de emissoes. */
       ['P1_entrada_existe',  '/contador/xml/', 'ListarDocumentos',
-        { nPagina: 1, nRegPorPagina: 3, cModelo: '55', cOperacao: 'E' }],
+        { nPagina: 1, nRegPorPagina: 3, cModelo: '55', cOperacao: '0' }],
       /* Controle. Se a saida vier cheia e a entrada vazia, a resposta e clara e
          nao depende de eu ter acertado nenhum outro parametro. */
       ['P2_saida_existe',    '/contador/xml/', 'ListarDocumentos',
-        { nPagina: 1, nRegPorPagina: 3, cModelo: '55', cOperacao: 'S' }],
-      /* Sem cOperacao: se este vier cheio e o de entrada vazio, o default e saida. */
-      ['P3_sem_operacao',    '/contador/xml/', 'ListarDocumentos',
-        { nPagina: 1, nRegPorPagina: 3, cModelo: '55' }],
+        { nPagina: 1, nRegPorPagina: 3, cModelo: '55', cOperacao: '1' }],
+      /* A nota do Rafael, por chave, agora dizendo que e ENTRADA. */
+      ['P3_chave_entrada',   '/contador/xml/', 'ListarDocumentos',
+        { nPagina: 1, nRegPorPagina: 5, cModelo: '55', cOperacao: '0', nChave: chave }],
 
       /* --- passo 2, agora com id valido em vez de zero ---
          ObterNfe ja confirmou existir e exigir nIdNfe. Mandar 1 nao deve achar
@@ -260,13 +268,14 @@ module.exports = async function (context, req) {
     /* nIdReceb e o filtro mais direto que existe para nota de entrada. */
     if (nIdReceb) {
       alvos.splice(3, 0, ['P4_porIdReceb', '/contador/xml/', 'ListarDocumentos',
-        { nPagina: 1, nRegPorPagina: 5, cModelo: '55', nIdReceb: Number(nIdReceb) }]);
+        { nPagina: 1, nRegPorPagina: 5, cModelo: '55', cOperacao: '0',
+          nIdReceb: Number(nIdReceb) }]);
     }
     /* Chave + janela de emissao: a listagem pode exigir periodo, e sem ele a
        chave sozinha cairia em "sem registro" mesmo com a nota presente. */
     if (dEmissao && /^\d{2}\/\d{2}\/\d{4}$/.test(dEmissao)) {
       alvos.splice(nIdReceb ? 4 : 3, 0, ['P5_chave_com_janela', '/contador/xml/', 'ListarDocumentos',
-        { nPagina: 1, nRegPorPagina: 5, cModelo: '55', nChave: chave,
+        { nPagina: 1, nRegPorPagina: 5, cModelo: '55', cOperacao: '0', nChave: chave,
           dEmiInicial: dEmissao, dEmiFinal: dEmissao }]);
     }
 
@@ -298,10 +307,21 @@ module.exports = async function (context, req) {
     const s = out.sondas;
     const ent = s.P1_entrada_existe || {};
     const sai = s.P2_saida_existe || {};
-    if (ent.aceito) {
-      out.veredito = 'A BASE DO CONTADOR COBRE ENTRADA. O XML das notas de ' +
-        'fornecedor esta no Omie e sai por /contador/xml/. Proximo passo: achar a ' +
-        'nota pela chave (P4/P5) e pegar cXml + nIdNF.';
+    /* A vitoria de verdade nao e "a base tem entrada", e "achei ESTA nota com o
+       XML dentro". Testar isso primeiro evita comemorar o passo intermediario. */
+    const achouAChave = ['P3_chave_entrada', 'P4_porIdReceb', 'P5_chave_com_janela']
+      .filter(function (k) { return s[k] && s[k].aceito; });
+    if (achouAChave.length) {
+      out.veredito = 'ACHOU A NOTA. ' + achouAChave.join(', ') + ' devolveu registro. ' +
+        'Se o resumo mostrar cXml com tipo XML, o documento ORIGINAL esta ao nosso ' +
+        'alcance — com protocolo — e o espelho vira desnecessario. O nIdNF que vier ' +
+        'junto alimenta o /produtos/dfedocs/ ObterNfe, que ja respondeu e devolve cPdf: ' +
+        'a DANFE renderizada, o mesmo arquivo que o botao da tela do Omie abre.';
+    } else if (ent.aceito) {
+      out.veredito = 'A BASE DO CONTADOR COBRE ENTRADA, mas esta nota nao apareceu ' +
+        'pelos filtros testados. O caminho existe; falta o filtro certo. Compare o que ' +
+        'P1 devolveu (nChave, nIdNF, nIdReceb dos registros reais) com o que estamos ' +
+        'pedindo.';
     } else if (ent.tipo === 'sem_registro' && sai.aceito) {
       out.veredito = 'SO SAIDA. A entrada veio vazia e a saida veio cheia, no MESMO ' +
         'formato de chamada — entao a diferenca e o conteudo da base, nao o meu ' +
