@@ -5114,7 +5114,35 @@ function _npRoteamento(d) {
 // Uma NF em 3x gera tres contas no Omie e o quadro mostra UM card — mas esconder
 // isso enganaria: o valor exibido e o total da nota, nao o do proximo boleto.
 // A barra existe para o financeiro ver de relance quanto da nota ja saiu do caixa.
+// Aviso de duplicidade. Medido: 10 notas do quadro tem DUAS contas a pagar que o
+// Omie marcou como "001/001" cada uma — parcela unica da mesma nota, o que nao
+// existe. Oito foram conferidas contra o XML autorizado e as oito somam
+// exatamente o dobro do que a nota vale: R$ 7.882,77 de excesso.
+//
+// Sem isto o card mostra o dobro e nada denuncia — o numero parece so um total, e
+// quem aprova nao tem como desconfiar. O aviso e vermelho e vem ANTES do
+// parcelamento de proposito: e a informacao que muda a decisao de pagar.
+//
+// Nao corrige nada, e nao deve: as duas contas existem no Omie de verdade
+// (codigos de lancamento distintos). Sumir com uma aqui esconderia do financeiro
+// um problema que so ele pode resolver, no Omie.
+function _npDuplicidade(d) {
+  var a = d.alertaDuplicidade;
+  if (!a) return '';
+  return '<div style="margin-top:5px;background:#FDECEA;border-left:3px solid #C62828;'
+    + 'padding:5px 7px;border-radius:3px">'
+    + '<div style="font-size:10px;color:#8E1B16;font-weight:600;line-height:1.35">'
+    + '⚠ Possível duplicidade — ' + a.contas + ' cobranças de '
+    + (a.mesmoValor ? 'mesmo valor' : 'valores diferentes') + '</div>'
+    + '<div class="small" style="font-size:9.5px;color:#8E1B16;line-height:1.35">'
+    + 'Confira no Omie antes de aprovar.</div></div>';
+}
+
 function _npParcelas(d) {
+  /* Grupo marcado como duplicidade nao mostra barra de parcelamento: chamar de
+     "0 de 2 parcelas pagas" o que sao duas cobrancas integrais da mesma nota
+     legitimaria justamente o que o aviso acima esta denunciando. */
+  if (d.alertaDuplicidade) return '';
   if (!d.totalParcelas || d.totalParcelas < 2) return '';
   var pagas = d.parcelasPagas || 0;
   var pct = Math.round((pagas / d.totalParcelas) * 100);
@@ -5162,6 +5190,7 @@ function renderCardNFPagar(d, coluna) {
        aberto — nao a da primeira parcela, que pode estar paga ha meses. */
     + (d.totalParcelas > 1 && !d.todasPagas ? ' <span class="small muted" style="font-size:9.5px">(próxima)</span>' : '')
     + '</div>'
+    + _npDuplicidade(d)
     + _npParcelas(d)
     + _npRoteamento(d);
 
@@ -5325,8 +5354,24 @@ function abrirDetalheNF(docId) {
     + '</div>';
 
   if (d.parcelas && d.parcelas.length) {
-    h += '<h3>Parcelas</h3>'
-      + '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+    /* Chamar de "Parcelas" duas cobrancas integrais da mesma nota seria o proprio
+       sistema afirmando que esta tudo certo. O titulo muda junto com o aviso. */
+    h += '<h3>' + (d.alertaDuplicidade ? 'Cobranças desta nota' : 'Parcelas') + '</h3>';
+    if (d.alertaDuplicidade) {
+      var ad = d.alertaDuplicidade;
+      h += '<div style="background:#FDECEA;border-left:3px solid #C62828;padding:9px 12px;'
+        + 'border-radius:4px;margin-bottom:8px;line-height:1.5;font-size:12.5px;color:#8E1B16">'
+        + '<b>⚠ Possível duplicidade — confira antes de aprovar.</b><br>'
+        + _npEsc(ad.motivo) + ' '
+        + (ad.mesmoValor
+            ? 'As ' + ad.contas + ' têm o mesmo valor, e a soma abaixo é o dobro do que a '
+              + 'nota vale.'
+            : 'Os valores diferem entre si.')
+        + '<br><span style="font-size:11.5px">As duas contas existem no Omie (códigos de '
+        + 'lançamento distintos), então a correção é lá — o sistema não pode escondê-las. '
+        + 'Compare com a DANFE pelo botão abaixo.</span></div>';
+    }
+    h += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
       + '<thead><tr style="text-align:left;border-bottom:2px solid var(--cinza-borda)">'
       + '<th style="padding:6px 8px">Parcela</th><th style="padding:6px 8px">Vencimento</th>'
       + '<th style="padding:6px 8px;text-align:right">Valor</th><th style="padding:6px 8px">Situação</th>'

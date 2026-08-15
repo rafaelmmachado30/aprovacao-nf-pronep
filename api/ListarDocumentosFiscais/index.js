@@ -213,6 +213,47 @@ module.exports = async function (context, req) {
         card.unidadeOmie = f.UnidadeOmie || '';
         card.codigoBarras = (emAberto[0] || pcs[0] || {}).codigoBarras || '';
         card.todasPagas = emAberto.length === 0;
+
+        /* ALERTA DE DUPLICIDADE.
+           Medido em 14/08/2026 (DiagParcelasDuplicadas): 10 grupos do quadro tem
+           duas contas que o Omie marcou "001/001" — cada uma se declarando parcela
+           UNICA da mesma nota. Oito foram conferidas contra o XML autorizado e as
+           oito somam EXATAMENTE o dobro do que a nota vale. R$ 7.882,77 de excesso,
+           nas tres unidades, com sete fornecedores diferentes.
+
+           Sem este aviso o card exibe o dobro em silencio, e quem aprova autoriza o
+           dobro sem ter como desconfiar — o valor parece so um total.
+
+           A regra e a MESMA da sonda, de proposito: todas as linhas dizendo "de 1".
+           Nota parcelada de verdade traz 001/003, 002/003... e nao entra aqui.
+           Linha sem rotulo tambem nao entra: nao saber quantas parcelas existem e
+           diferente de saber que ha uma so, e acusar no escuro faria o aviso virar
+           ruido que todo mundo aprende a ignorar.
+
+           Isto NAO corrige nada — a origem e o Omie, que tem duas contas de fato
+           (os codigos de lancamento sao distintos). O aviso existe para a conferencia
+           acontecer antes do pagamento, nao depois. */
+        if (pcs.length > 1) {
+          const rotulos = pcs.map(function (p) {
+            const m = /^(\d+)\s*\/\s*(\d+)$/.exec(String(p.numero || '').trim());
+            return m ? Number(m[2]) : null;
+          });
+          const todasDizemUnica = rotulos.every(function (d) { return d === 1; });
+          if (todasDizemUnica) {
+            card.alertaDuplicidade = {
+              contas: pcs.length,
+              /* Centavos inteiros: somar 956.50 duas vezes em float produziria
+                 uma diferenca de centavo, e centavo sobrando vira desconfianca
+                 no aviso inteiro. */
+              valorUnitario: pcs[0].valor,
+              mesmoValor: new Set(pcs.map(function (p) {
+                return Math.round(Number(p.valor || 0) * 100);
+              })).size === 1,
+              motivo: pcs.length + ' contas a pagar desta nota, cada uma marcada ' +
+                      'no Omie como parcela unica (001/001). Isso nao e parcelamento.'
+            };
+          }
+        }
       }
 
       const forn = fornecedorPorCnpj[soDigitos(f.EmitenteCNPJ)] || null;
