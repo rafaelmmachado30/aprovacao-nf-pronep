@@ -3433,13 +3433,15 @@ function animateKPIs() {
 // ============== VIEWS ==============
 const views = {
   dashboard: () => {
-    if (!window._filtroDashboard) window._filtroDashboard = { unidade: 'TODAS' };
+    if (!window._filtroDashboard) window._filtroDashboard = { unidade: 'TODAS', meses: null };
     const uf = window._filtroDashboard.unidade;
     const matchUnit = (n) => uf === 'TODAS' || n.unidade === uf;
     const aprovadas = notas.filter(n => n.status === 'aprovada' && matchUnit(n));
     const pendentes = notas.filter(n => n.status === 'pendente' && matchUnit(n));
     const rejeitadas = notas.filter(n => (n.status === 'rejeitada' || n.status === 'duplicada') && matchUnit(n));
-    const totalMes = aprovadas.reduce((s, n) => s + n.valor, 0);
+    /* Soma de TODAS as aprovadas, de todos os meses. O nome era `totalMes` e nao era do mes
+       nenhum — nome mentiroso e como se perde a diferenca entre este numero e o do periodo. */
+    const totalTodosOsMeses = aprovadas.reduce((s, n) => s + n.valor, 0);
     const notasNoEscopo = notas.filter(matchUnit);
     const taxaDup = (notasNoEscopo.filter(n => n.status === 'duplicada').length / Math.max(notasNoEscopo.length,1) * 100).toFixed(1);
 
@@ -3459,30 +3461,92 @@ const views = {
     const _hojeBRT = new Date(Date.now() - 3 * 60 * 60 * 1000);
     const _mesesComAprov = aprovadas.map(n => _mesKeyDe(n.aprovadoEm)).filter(k => k != null);
     const mesRef = _mesesComAprov.length ? Math.max.apply(null, _mesesComAprov) : (_hojeBRT.getUTCFullYear() * 12 + _hojeBRT.getUTCMonth());
-    const _somaMes = (mk) => aprovadas.reduce((s, n) => (_mesKeyDe(n.aprovadoEm) === mk ? s + (Number(n.valor) || 0) : s), 0);
-    const totalMesRef = _somaMes(mesRef);
-    const totalMesAnt = _somaMes(mesRef - 1);
-    const nfsMesRef = aprovadas.filter(n => _mesKeyDe(n.aprovadoEm) === mesRef).length;
-    const _refMi = ((mesRef % 12) + 12) % 12, _refAno = Math.floor(mesRef / 12);
-    const _antMi = (((mesRef - 1) % 12) + 12) % 12;
-    const labelMesRef = _mNomes[_refMi] + '/' + _refAno;
+    const _rotuloMes = (mk) => _mNomes[((mk % 12) + 12) % 12] + '/' + Math.floor(mk / 12);
+    const _abrevMes  = (mk) => _mAbrev[((mk % 12) + 12) % 12];
+
+    /* ================= FILTRO DE PERIODO =================================
+       POR QUE ISTO EXISTE: o card somava SO o mes de referencia e os graficos somavam TODO o
+       historico — com o selo do mes em cima. R$ 7,9M no card contra R$ 26,4M no grafico, e o
+       selo dizendo "Agosto/2026" nos dois. Numero que nao fecha com o de cima faz duvidar dos
+       dois, e nada na tela explicava a diferenca.
+
+       A correcao nao e escolher um dos dois: e o periodo passar a ser UMA escolha, aplicada a
+       tudo. Card, graficos e tabela leem a MESMA lista. Assim eles nao podem divergir por
+       construcao, em vez de dependerem de alguem lembrar de filtrar nos dois lugares. */
+    const mesesDisponiveis = Array.from(new Set(_mesesComAprov)).sort((x, y) => y - x);
+
+    /* Default = mes mais recente, e nao "todos". O subtitulo da tela e o card ja prometiam o
+       mes; abrir em "todos" mudaria o significado do card sem ninguem pedir. */
+    let mesesSel = (window._filtroDashboard.meses || []).filter(mk => mesesDisponiveis.indexOf(mk) >= 0);
+    if (!mesesSel.length) mesesSel = mesesDisponiveis.length ? [mesRef] : [];
+    mesesSel.sort((x, y) => x - y);
+
+    const _noPeriodo = (n) => mesesSel.indexOf(_mesKeyDe(n.aprovadoEm)) >= 0;
+    const aprovadasPeriodo = aprovadas.filter(_noPeriodo);
+    const totalPeriodo = aprovadasPeriodo.reduce((s, n) => s + (Number(n.valor) || 0), 0);
+    const nfsPeriodo = aprovadasPeriodo.length;
+
+    /* COMPARACAO com a janela IMEDIATAMENTE ANTERIOR do MESMO tamanho. Com um mes escolhido
+       isso da exatamente o comportamento antigo (mes vs mes anterior); com tres meses, compara
+       com os tres meses de antes. Comparar um trimestre com um mes seria um numero sem
+       sentido travestido de indicador. */
+    const _janela = mesesSel.length || 1;
+    const _iniSel = mesesSel.length ? mesesSel[0] : mesRef;
+    const _mesesAnt = [];
+    for (let i = 1; i <= _janela; i++) _mesesAnt.push(_iniSel - i);
+    const totalAnterior = aprovadas.reduce((s, n) => {
+      const mk = _mesKeyDe(n.aprovadoEm);
+      return _mesesAnt.indexOf(mk) >= 0 ? s + (Number(n.valor) || 0) : s;
+    }, 0);
+
+    /* Rotulo do periodo. Um mes: "Agosto/2026". Varios: "jun–ago/2026". E o rotulo e a MESMA
+       string usada no selo do grafico, no subtitulo e no card — se cada lugar montasse o seu,
+       voltariamos ao problema de origem, que era justamente rotulo divergindo do dado. */
+    let labelPeriodo;
+    if (!mesesSel.length) {
+      labelPeriodo = 'sem aprovações';
+    } else if (mesesSel.length === 1) {
+      labelPeriodo = _rotuloMes(mesesSel[0]);
+    } else {
+      const _a = mesesSel[0], _z = mesesSel[mesesSel.length - 1];
+      const _mesmoAno = Math.floor(_a / 12) === Math.floor(_z / 12);
+      labelPeriodo = _mesmoAno
+        ? _abrevMes(_a) + '–' + _abrevMes(_z) + '/' + Math.floor(_z / 12)
+        : _abrevMes(_a) + '/' + Math.floor(_a / 12) + '–' + _abrevMes(_z) + '/' + Math.floor(_z / 12);
+    }
+    /* Meses NAO contiguos escolhidos a dedo: o intervalo mentiria. Diz a contagem. */
+    const _contiguo = mesesSel.length < 2 ||
+      (mesesSel[mesesSel.length - 1] - mesesSel[0] + 1) === mesesSel.length;
+    if (!_contiguo) labelPeriodo = mesesSel.length + ' meses selecionados';
+
+    /* O handler de clique roda FORA deste escopo (e um onclick global), entao precisa da lista
+       de meses e do mes de referencia. Publicados aqui, no unico lugar que os calcula — se o
+       handler tivesse a sua propria copia dessa logica, as duas divergiriam. */
+    window._dashMesesDisponiveis = mesesDisponiveis;
+    window._dashMesRefAtual = mesRef;
+
+    const labelMesRef = labelPeriodo;   /* o resto da tela ja usava este nome */
+
     let deltaMesTxt, deltaMesClass;
-    if (totalMesAnt > 0) {
-      const pct = Math.round((totalMesRef - totalMesAnt) / totalMesAnt * 100);
-      // Semantica de DESPESA: gastar MENOS que o mes anterior e BOM (verde);
+    const _rotAnt = _janela === 1 ? _abrevMes(_iniSel - 1) : (_janela + ' meses anteriores');
+    if (totalAnterior > 0) {
+      const pct = Math.round((totalPeriodo - totalAnterior) / totalAnterior * 100);
+      // Semantica de DESPESA: gastar MENOS que o periodo anterior e BOM (verde);
       // gastar mais e ruim (vermelho). A seta indica a direcao, a cor o sentido.
       const seta = pct < 0 ? '&#9660; ' : (pct > 0 ? '&#9650; ' : '');
       deltaMesClass = pct < 0 ? 'delta up' : (pct > 0 ? 'delta down' : 'delta');
-      deltaMesTxt = seta + Math.abs(pct) + '% vs ' + _mAbrev[_antMi];
+      deltaMesTxt = seta + Math.abs(pct) + '% vs ' + _rotAnt;
     } else {
-      deltaMesClass = 'delta'; deltaMesTxt = 'sem base de ' + _mAbrev[_antMi];
+      deltaMesClass = 'delta'; deltaMesTxt = 'sem base de ' + _rotAnt;
     }
 
     // Dados pros graficos
     // Diretoria x Unidade (barras empilhadas) — pq o gestor ja ve so a propria diretoria,
     // e a quebra por unidade da contexto util
     const byDirUnit = {};
-    aprovadas.forEach(n => {
+    /* aprovadasPeriodo, nao aprovadas: era exatamente aqui que o grafico somava todo o
+       historico com o selo do mes em cima. */
+    aprovadasPeriodo.forEach(n => {
       const dir = n.diretoria || '—';
       if (!byDirUnit[dir]) byDirUnit[dir] = { SP: 0, RJ: 0, ES: 0 };
       const u = n.unidade || '';
@@ -3493,11 +3557,11 @@ const views = {
       .sort(function(a,b) { return b.total - a.total; });
 
     const byUnit = {};
-    aprovadas.forEach(n => byUnit[n.unidade] = (byUnit[n.unidade]||0) + n.valor);
+    aprovadasPeriodo.forEach(n => byUnit[n.unidade] = (byUnit[n.unidade]||0) + n.valor);
 
     // Fornecedor x Unidade (barras empilhadas) — slice de top 8/20 acontece no mount
     const byFornUnit = {};
-    aprovadas.forEach(n => {
+    aprovadasPeriodo.forEach(n => {
       const forn = (fornecedorOf(n)||{}).razao || n.fornecedorRazao || '—';
       if (!byFornUnit[forn]) byFornUnit[forn] = { SP: 0, RJ: 0, ES: 0 };
       const u = n.unidade || '';
@@ -3508,7 +3572,7 @@ const views = {
       .sort(function(a,b) { return b.total - a.total; });
 
     // Guarda dados pra mountDashboardCharts() consumir apos innerHTML
-    window._dashData = { dirStacked, byUnit, fornStackedAll, totalMes };
+    window._dashData = { dirStacked, byUnit, fornStackedAll, totalTodosOsMeses };
 
     return `
       <h2>Dashboard Analitico</h2>
@@ -3524,9 +3588,31 @@ const views = {
         ${uf !== 'TODAS' ? `<span class="small muted" style="margin-left:auto">Exibindo apenas <b>${uf}</b></span>` : ''}
       </div>
 
+      <!-- FILTRO DE PERIODO. Mesmo padrao visual do de unidade, de proposito: dois filtros com
+           aparencias diferentes na mesma barra ensinam que um deles e "outra coisa".
+           Os meses sao os que TEM aprovacao, mais recente primeiro — oferecer mes vazio e
+           oferecer um clique que nao faz nada. -->
+      <div class="filter-bar" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <span class="small muted" style="font-weight:600;letter-spacing:.4px;text-transform:uppercase">Período:</span>
+        ${mesesDisponiveis.slice(0, 12).map(mk => `
+          <button class="btn ${mesesSel.indexOf(mk) >= 0 ? 'btn-primary' : 'btn-secondary'}" style="padding:6px 12px;font-size:13px"
+                  onclick="filtrarDashboardMes(${mk})"
+                  title="Clique para somar ou remover este mês da análise">${_abrevMes(mk)}/${Math.floor(mk / 12)}</button>
+        `).join('')}
+        ${mesesDisponiveis.length > 1 ? `
+          <button class="btn btn-secondary" style="padding:6px 12px;font-size:13px"
+                  onclick="filtrarDashboardMes('TODOS')" title="Somar todos os meses com aprovação">Todos</button>` : ''}
+        <span class="small muted" style="margin-left:auto">
+          ${mesesSel.length > 1
+            ? `Somando <b>${mesesSel.length} meses</b> · ${labelPeriodo}`
+            : `Analisando <b>${labelPeriodo}</b>`}
+          ${mesesSel.length === 1 ? ' · clique em outro mês para somar' : ''}
+        </span>
+      </div>
+
       <div class="kpi-row">
-        <div class="kpi"><div class="label">Aprovado no Mês (${labelMesRef})</div><div class="value" data-count="${totalMesRef}" data-fmt="brl">R$ 0</div><div class="${deltaMesClass}">${deltaMesTxt}</div></div>
-        <div class="kpi"><div class="label">NFs Aprovadas</div><div class="value" data-count="${aprovadas.length}" data-fmt="int">0</div><div class="delta up">${nfsMesRef} no mês</div></div>
+        <div class="kpi"><div class="label">Aprovado no ${mesesSel.length > 1 ? 'Período' : 'Mês'} (${labelPeriodo})</div><div class="value" data-count="${totalPeriodo}" data-fmt="brl">R$ 0</div><div class="${deltaMesClass}">${deltaMesTxt}</div></div>
+        <div class="kpi"><div class="label">NFs Aprovadas</div><div class="value" data-count="${nfsPeriodo}" data-fmt="int">0</div><div class="delta small muted">${aprovadas.length} no total do escopo</div></div>
         <div class="kpi"><div class="label">Pendentes</div><div class="value" data-count="${pendentes.length}" data-fmt="int">0</div><div class="delta small muted">Tempo medio: 6,4h</div></div>
         <div class="kpi"><div class="label">Duplicidade Evitada</div><div class="value" id="kpi-dup-value">…</div><div class="delta up" id="kpi-dup-delta">carregando…</div></div>
       </div>
@@ -3549,7 +3635,7 @@ const views = {
 
       <div class="card data-hide-mobile">
         <h3>Detalhamento Analitico (top 10)</h3>
-        ${analyticsTable(aprovadas.slice(0, 10))}
+        ${analyticsTable(aprovadasPeriodo.slice(0, 10))}
         <div style="margin-top:12px;text-align:right">
           <button class="btn btn-secondary" onclick="exportXlsxStub()">&#10515; Exportar Excel</button>
         </div>
@@ -9067,7 +9153,34 @@ function limpaFiltroAprovadas() {
 
 // Filtro de unidade do Dashboard — re-renderiza a view inteira pra recalcular KPIs+graficos
 function filtrarDashboard(unidade) {
-  window._filtroDashboard = { unidade: unidade };
+  /* PRESERVA o periodo. Antes esta linha SUBSTITUIA o objeto inteiro; com o filtro de periodo
+     no ar, trocar de unidade apagaria os meses escolhidos em silencio — o usuario veria os
+     numeros mudarem mais do que pediu e nao teria como saber por que. */
+  var f = window._filtroDashboard || {};
+  window._filtroDashboard = { unidade: unidade, meses: f.meses || null };
+  showView('dashboard');
+}
+
+/* Filtro de PERIODO. Clique alterna o mes: soma se estiver fora, remove se estiver dentro.
+   'TODOS' soma todos os meses com aprovacao. */
+function filtrarDashboardMes(mk) {
+  var f = window._filtroDashboard || { unidade: 'TODAS', meses: null };
+  if (mk === 'TODOS') {
+    /* null = "deixe o padrao decidir" e NAO "todos" — sao coisas diferentes, e confundir as
+       duas faria "Todos" cair de volta em um mes so. Aqui a lista e explicita. */
+    f.meses = (window._dashMesesDisponiveis || []).slice();
+  } else {
+    var lista = (f.meses && f.meses.length) ? f.meses.slice() : [];
+    if (!lista.length) lista = (window._dashMesRefAtual != null) ? [window._dashMesRefAtual] : [];
+    var i = lista.indexOf(mk);
+    if (i >= 0) lista.splice(i, 1); else lista.push(mk);
+    /* Desmarcar o ultimo mes deixaria a tela sem periodo nenhum e todos os graficos vazios,
+       sem explicacao. Nesse caso o clique nao faz nada — e o mes segue marcado, mostrando que
+       o estado nao mudou. */
+    if (!lista.length) return;
+    f.meses = lista;
+  }
+  window._filtroDashboard = f;
   showView('dashboard');
 }
 
