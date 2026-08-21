@@ -1328,6 +1328,12 @@ function confirmarAcao(opts) {
   const tipo         = opts.tipo         || 'danger';
   const confirmLabel = opts.confirmLabel || 'Confirmar';
   const cancelLabel  = opts.cancelLabel  || 'Cancelar';
+  /* ACAO EXTRA opcional: { rotulo, url }. Abre em nova aba e NAO resolve a promessa — o
+     dialogo continua aberto, porque o objetivo e consultar antes de decidir, nao decidir.
+     Entrou como parametro proprio porque `mensagem` e escapada e so libera b/i/br/strong/em:
+     enfiar um link por la exigiria abrir a whitelist, e whitelist de HTML aberta num dialogo
+     generico e como se ganha um XSS depois. */
+  const acaoExtra = opts.acaoExtra || null;
   const corMap = {
     danger:  { borda: '#FCA5A5', fundo: '#FEE2E2', icoCor: '#DC2626', btn: '#DC2626', btnTxt: '#fff', icone: '⚠' },
     success: { borda: '#A7F3D0', fundo: '#D1FAE5', icoCor: '#10B981', btn: '#10B981', btnTxt: '#fff', icone: '✓' },
@@ -1335,6 +1341,12 @@ function confirmarAcao(opts) {
     info:    { borda: '#93C5FD', fundo: '#DBEAFE', icoCor: '#2563EB', btn: '#2563EB', btnTxt: '#fff', icone: 'i' }
   };
   const c = corMap[tipo] || corMap.danger;
+  /* So caminho do PROPRIO site. Sem isto, um `url` vindo de dado (nome de arquivo, campo do
+     SharePoint) poderia virar `javascript:` ou um dominio de terceiro — e este dialogo e
+     generico, entao a proxima pessoa que usar `acaoExtra` nao teria como saber do risco.
+     Um caminho relativo comecando com / e a unica forma aceita. */
+  const urlExtra = (acaoExtra && typeof acaoExtra.url === 'string' &&
+                    /^\/[^\/]/.test(acaoExtra.url)) ? acaoExtra.url : null;
   // Escape basico HTML pra evitar XSS
   function esc(s) {
     return String(s == null ? '' : s)
@@ -1364,7 +1376,16 @@ function confirmarAcao(opts) {
       '      <div style="color:#374151;font-size:14px;line-height:1.5">' + mensagemHTML + '</div>' +
       '    </div>' +
       '  </div>' +
-      '  <div style="display:flex;gap:10px;justify-content:flex-end;padding:14px 20px;background:#fff;border-radius:0 0 6px 6px">' +
+      '  <div style="display:flex;gap:10px;align-items:center;padding:14px 20px;background:#fff;border-radius:0 0 6px 6px">' +
+      /* A acao de CONSULTA fica na esquerda, longe dos botoes de decisao. Ao lado do
+         "Confirmar" ela convidaria ao clique errado justamente em quem esta com pressa. */
+      (urlExtra
+        ? '    <a href="' + urlExtra + '" target="_blank" rel="noopener noreferrer" ' +
+          'style="padding:8px 16px;border:1px solid #D1D5DB;background:#fff;color:#1F4E79;' +
+          'border-radius:6px;font-size:14px;font-weight:600;text-decoration:none">' +
+          esc(acaoExtra.rotulo || 'Abrir documento') + '</a>'
+        : '') +
+      '    <span style="flex:1 1 auto"></span>' +
       '    <button id="btnConfirmCancel" type="button" style="padding:8px 18px;border:1px solid #D1D5DB;background:#fff;color:#374151;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500" onclick="window._confirmacaoResolve(false)">' + esc(cancelLabel) + '</button>' +
       '    <button id="btnConfirmOk" type="button" style="padding:8px 18px;border:none;background:' + c.btn + ';color:' + c.btnTxt + ';border-radius:6px;cursor:pointer;font-size:14px;font-weight:600" onclick="window._confirmacaoResolve(true)">' + esc(confirmLabel) + '</button>' +
       '  </div>' +
@@ -3661,8 +3682,13 @@ const views = {
     const linhas = lista.map(n => {
       const alinhado = (n.gestorFinanceiroAlinhado || '').split('@')[0] || '—';
       const aprovador = (n.aprovadoPor || '').split('@')[0] || (n.lancadoPor || '—');
+      /* PDF na LINHA tambem, e nao so no dialogo de confirmar. Motivo: "Rejeitar" abre um
+         prompt() NATIVO do navegador, onde nao cabe botao nenhum — sem isto, quem vai rejeitar
+         nao teria como ver o documento antes. Fica primeiro, antes das acoes: consultar vem
+         antes de decidir. */
       const acao = podeAgir
-        ? `<button class="btn btn-success" style="padding:5px 12px;font-size:12px" onclick="confirmarAlinhamento('${n.spId || n.id}')">✓ Confirmar</button>
+        ? `<a href="/api/AbrirPdfDaNota?id=${encodeURIComponent(n.spId || String(n.id||'').replace(/^NF-/,''))}" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="padding:5px 10px;font-size:12px;text-decoration:none" title="Abrir o PDF desta NF em nova aba">📄 PDF</a>
+           <button class="btn btn-success" style="padding:5px 12px;font-size:12px;margin-left:6px" onclick="confirmarAlinhamento('${n.spId || n.id}')">✓ Confirmar</button>
            <button class="btn btn-danger" style="padding:5px 12px;font-size:12px;margin-left:6px" onclick="rejeitarAlinhamento('${n.spId || n.id}')">✕ Rejeitar</button>`
         : `<span class="tag" style="background:#FFF8E1;color:#8a6d00">aguardando financeiro</span>`;
       return `<tr>
@@ -10558,10 +10584,37 @@ function _modalAlinhErro(acaoLabel, data, httpStatus) {
 
 async function confirmarAlinhamento(id) {
   const spId = String(id).replace(/^ID-/, '').replace(/^NF-/, '');
+
+  /* IDENTIFICA A NOTA NO DIALOGO. Rafael, 14/08/2026: o financeiro precisa "verificar qual
+     documento esta sendo solicitada a confirmacao". A mensagem antiga era generica — "a NF
+     sera aprovada" — sem dizer QUAL. Com duas linhas na fila, um clique na linha errada
+     produzia um dialogo identico ao certo, e a aprovacao saia sem ninguem ter como notar.
+     Aqui a nota e nomeada, e o PDF fica a um clique. */
+  const _n = notas.find(x => String(x.spId) === spId || x.id === id) || null;
+  /* SEM escHtml aqui: confirmarAcao ja escapa a mensagem inteira e restaura a whitelist
+     (b/i/br/strong/em). Escapar antes produziria escape DUPLO — um fornecedor "A & B"
+     apareceria como "A &amp;amp; B". Quem escapa e quem imprime, e um lugar so. */
+  /* Sem o artigo aqui: a frase abaixo ja diz "da". Antes o texto saia "o alinhamento DE A NF
+     NF-1042" — e o id ja carrega o "NF-", entao repetir era duplo. */
+  let _quem = '<b>' + id + '</b>';
+  if (_n) {
+    const _forn = (typeof fornecedorOf === 'function' ? (fornecedorOf(_n) || {}).razao : '') || '';
+    _quem = '<b>' + (_n.id || id) + '</b>' +
+            (_n.numero ? ' (nº ' + _n.numero + ')' : '') +
+            (_forn ? '\n<b>' + _forn + '</b>' : '') +
+            (typeof _n.valor === 'number' ? ' — <b>' + fmtBRL(_n.valor) + '</b>' : '') +
+            (_n.vencimento ? '\nVencimento ' + fmtDate(_n.vencimento) : '');
+  }
+
   const ok = await confirmarAcao({
     titulo: 'Confirmar alinhamento?',
-    mensagem: 'Ao confirmar, a NF será <b>aprovada</b> (o carimbo continua sendo o do gestor aprovador) e seguirá para pagamento.',
-    tipo: 'info', confirmLabel: 'Confirmar e aprovar', cancelLabel: 'Cancelar'
+    mensagem: 'Você está confirmando o alinhamento da ' + _quem + '.\n\n' +
+              'Ao confirmar, a NF será <b>aprovada</b> (o carimbo continua sendo o do gestor ' +
+              'aprovador) e seguirá para pagamento.',
+    tipo: 'info', confirmLabel: 'Confirmar e aprovar', cancelLabel: 'Cancelar',
+    /* Mesmo endpoint que o resto do sistema usa para abrir a nota. Nova aba de proposito: o
+       dialogo continua aberto atras, entao conferir o documento nao custa refazer o caminho. */
+    acaoExtra: { rotulo: '📄 Abrir PDF', url: '/api/AbrirPdfDaNota?id=' + encodeURIComponent(spId) }
   });
   if (!ok) return;
   _modalAlinhLoading('Confirmando alinhamento e aprovando a NF (gerando o carimbo)…');
