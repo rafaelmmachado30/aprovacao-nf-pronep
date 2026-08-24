@@ -13,8 +13,72 @@
  * IMPORTANTE: pra atualizar o SW a cada deploy, bumpa CACHE_VERSION.
  */
 
-const CACHE_VERSION = 'pronep-nf-v4-css-network-first-20260813';
+const CACHE_VERSION = 'pronep-nf-v5-html-integro-20260824';
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
+
+/* ============================================================================
+   HTML TRUNCADO NO CACHE — o defeito que este bloco existe para impedir.
+
+   Em 24/08/2026 o Rafael abriu o sistema e viu uma pagina TOTALMENTE BRANCA. O
+   DevTools mostrou o documento terminando depois do </head>: sem <body>, altura
+   zero, e o console VAZIO — porque sem body nao ha script para rodar nem erro para
+   reportar. O arquivo no servidor estava intacto (589.582 bytes, identico ao
+   repositorio); o que estava truncado era a copia no cache do navegador.
+
+   A CAUSA: `resp.ok` e verdadeiro num HTTP 200 mesmo que o CORPO chegue cortado no
+   meio (queda de conexao, proxy, rede instavel). O codigo antigo era:
+
+       if (resp && resp.ok) c.put('/index.html', resp.clone());
+
+   ou seja, guardava o pedaco que chegou. Depois, no primeiro `fetch` que falhasse, o
+   `.catch` servia esse pedaco — e continuava servindo PARA SEMPRE, porque nada
+   invalida um cache que "existe". O usuario nao tem como diagnosticar: pagina branca,
+   sem erro, e recarregar nao resolve.
+
+   A REGRA AGORA: HTML so entra no cache se estiver COMPLETO, e so sai do cache se
+   estiver completo. Um documento sem `</html>` no fim, ou sem `<body`, e descartado
+   nas duas direcoes. Guardar so o que esta inteiro e mais importante que guardar.
+   ========================================================================== */
+const HTML_TERMINA = /<\/html>\s*$/i;
+
+async function htmlCompleto(resp) {
+  try {
+    const txt = await resp.clone().text();
+    return (HTML_TERMINA.test(txt) && txt.indexOf('<body') >= 0) ? txt : null;
+  } catch (e) {
+    /* Corpo ilegivel (stream abortado) tambem e HTML incompleto. */
+    return null;
+  }
+}
+
+/* Guarda o TEXTO VALIDADO, e nao a resposta original: assim o que fica no cache e
+   exatamente o que foi conferido, sem chance de a stream ser consumida pela metade
+   entre a checagem e a gravacao. */
+async function guardarHtmlSeCompleto(chave, resp) {
+  const txt = await htmlCompleto(resp);
+  if (!txt) {
+    console.warn('[SW] HTML incompleto recusado pelo cache:', chave);
+    return false;
+  }
+  const cache = await caches.open(SHELL_CACHE);
+  await cache.put(chave, new Response(txt, {
+    status: 200,
+    headers: { 'Content-Type': resp.headers.get('content-type') || 'text/html; charset=utf-8' }
+  }));
+  return true;
+}
+
+/* Le do cache SO se estiver completo. Se achar truncado, APAGA — senao um cache
+   envenenado por uma queda de rede antiga sobreviveria a todas as visitas futuras. */
+async function lerHtmlDoCacheSeCompleto(chave) {
+  const achado = await caches.match(chave);
+  if (!achado) return null;
+  const txt = await htmlCompleto(achado);
+  if (txt) return achado;
+  console.warn('[SW] cache tinha HTML truncado — descartando:', chave);
+  try { const c = await caches.open(SHELL_CACHE); await c.delete(chave); } catch (e) {}
+  return null;
+}
 const SHELL_ASSETS = [
   '/',
   '/index.html',
@@ -36,7 +100,17 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(SHELL_CACHE).then((cache) => {
       // Best-effort: se algum asset falhar, continua mesmo assim
-      return Promise.allSettled(SHELL_ASSETS.map(url => cache.add(url).catch(() => null)));
+      /* index.html sai do cache.add e passa pela validacao: cache.add usa fetch+put por
+         dentro e guardaria um corpo truncado do mesmo jeito — era a segunda porta para o
+         mesmo defeito. */
+      return Promise.allSettled(SHELL_ASSETS.map(function (url) {
+        if (url === '/index.html') {
+          return fetch(url, { cache: 'reload' })
+            .then(r => (r && r.ok) ? guardarHtmlSeCompleto('/index.html', r) : null)
+            .catch(() => null);
+        }
+        return cache.add(url).catch(() => null);
+      }));
     }).then(() => self.skipWaiting())
   );
 });
@@ -84,14 +158,17 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((resp) => {
-          // Cacheia copia fresca do index pra futuro fallback offline
+          /* Clone EXPLICITO aqui, antes de a resposta seguir para o browser: a validacao
+             precisa de um corpo proprio para ler, e a stream original nao pode ser tocada. */
           if (resp && resp.ok) {
-            const copy = resp.clone();
-            caches.open(SHELL_CACHE).then(c => c.put('/index.html', copy));
+            const copia = resp.clone();
+            guardarHtmlSeCompleto('/index.html', copia);
           }
           return resp;
         })
-        .catch(() => caches.match('/index.html').then(c => c || caches.match('/offline.html')))
+        .catch(() =>
+          lerHtmlDoCacheSeCompleto('/index.html')
+            .then(c => c || caches.match('/offline.html')))
     );
     return;
   }
