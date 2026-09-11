@@ -139,12 +139,42 @@ module.exports = async function (context, req) {
 
     // Determina pasta baseado no Status
     const aprovadoEm = fields.AprovadoEm || '';
-    const dataAprovada = aprovadoEm ? String(aprovadoEm).substring(0, 10) : '';
+
+    // BUG CORRIGIDO (11/09/2026): a pasta e nomeada pela data BRT (UTC-3) da aprovacao — ver
+    // AprovarNota, que faz `agora - 3h` antes de montar `dataPasta` — mas AprovadoEm e
+    // gravado em UTC (`new Date().toISOString()`). Tomar `substring(0,10)` dele devolve a
+    // data UTC. A partir das 21h BRT as duas datas divergem, e a busca ia para a pasta do dia
+    // seguinte: achava a pasta (que existe e tem arquivos), nao achava a NF la dentro e
+    // parava com "PDF nao encontrado". O fallback de pasta inexistente nao salvava, porque a
+    // pasta errada EXISTE.
+    // Caso real: NF 6, RJ, aprovada 08/09/2026 21:25 BRT = 09/09 00:25 UTC. Arquivo gravado
+    // em .../RJ/2026-09-08/, busca feita em .../RJ/2026-09-09/.
+    // Esta e a MESMA correcao que IntegrarOmie ja tinha desde antes — la o comentario descreve
+    // o mesmo defeito. As duas funcoes leem a mesma pasta e so uma sabia disso.
+    function _fmtDataUtc(d) {
+      return d.getUTCFullYear() + '-' +
+             String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+             String(d.getUTCDate()).padStart(2, '0');
+    }
+    const datasCandidatas = [];
+    if (aprovadoEm) {
+      const dUtc = new Date(aprovadoEm);
+      if (!isNaN(dUtc.getTime())) {
+        datasCandidatas.push(_fmtDataUtc(new Date(dUtc.getTime() - 3 * 60 * 60 * 1000))); // BRT: a correta
+        const utcStr = String(aprovadoEm).substring(0, 10);
+        if (datasCandidatas.indexOf(utcStr) < 0) datasCandidatas.push(utcStr);           // nomes antigos
+      } else {
+        datasCandidatas.push(String(aprovadoEm).substring(0, 10));
+      }
+    }
+    const dataAprovada = datasCandidatas[0] || '';
+
     let folder;
     if (status === 'Aprovada' && dataAprovada) {
       // Vai DIRETO na pasta da data de aprovacao (otimizacao - evita listar todas as subpastas)
       folder = `Notas Fiscais/Notas Aprovadas/${unidade}/${dataAprovada}`;
     } else if (status === 'Aprovada') {
+
       // Sem data de aprovacao - fallback: lista todas as subpastas (mais lento)
       folder = `Notas Fiscais/Notas Aprovadas/${unidade}`;
     } else if (status === 'Rejeitada') {
@@ -169,11 +199,29 @@ module.exports = async function (context, req) {
             for (const f of (filesResp.value || [])) { if (f.file) arquivos.push(f); }
           } catch (e) { /* ignora pastas vazias */ }
         }
+      } else if (status === 'Aprovada') {
+        // Le TODAS as datas candidatas (BRT e, se diferente, UTC) e junta os arquivos.
+        // Ler so a primeira reintroduziria o bug pela porta dos fundos em qualquer nota
+        // aprovada antes da correcao, cujo arquivo esta na pasta da data UTC.
+        const lidas = [];
+        let ultimoErro = null;
+        for (const d of datasCandidatas) {
+          const p = `Notas Fiscais/Notas Aprovadas/${unidade}/${d}`;
+          try {
+            const resp = await client.api(`/sites/${siteId}/drive/root:/${p}:/children`).get();
+            for (const a of (resp.value || [])) { if (a.file) arquivos.push(a); }
+            lidas.push(p);
+          } catch (eDia) { ultimoErro = eDia; }
+        }
+        // Nenhuma das candidatas existe -> deixa o catch abaixo cair na varredura da unidade.
+        if (!lidas.length) throw (ultimoErro || new Error('nenhuma pasta de data encontrada'));
+        folder = lidas.join(' + ');
       } else {
         // Caminho rapido: direto na pasta especifica
         const resp = await client.api(`/sites/${siteId}/drive/root:/${folder}:/children`).get();
         arquivos = (resp.value || []).filter(x => x.file);
       }
+
     } catch (e) {
       // Pasta nao encontrada - se for Rejeitada, tenta fallback pra estrutura ANTIGA (pasta raiz).
       // Nfs rejeitadas antes da correcao ficaram em "Notas Fiscais/Rejeitadas" sem subpastas.
@@ -215,10 +263,16 @@ module.exports = async function (context, req) {
     // PADRAO atual: {data_venc}_{numero}_{FORNECEDOR}_{unidade}_{valor_com_virgula}_APROVADA_{data}.pdf
     // Ex: 2026-06-11_1_PERELLO-SOCIEDADE-DE-ADVOGADOS_SP_4,30_APROVADA_2026-06-03.pdf
     // SEGURANCA: SEM fallback "mais recente" — retorna erro se ambiguidade.
-    let target = null;
     const valorNum = (typeof fields.Valor === 'number' ? fields.Valor : Number(fields.Valor)) || 0;
     const valorStr = valorNum > 0 ? valorNum.toFixed(2).replace('.', ',') : null;
+
+    // A BUSCA VIROU FUNCAO para poder ser repetida depois da varredura de seguranca abaixo.
+    // Ela le `arquivos` do escopo de fora a cada chamada, entao enxerga o que a varredura
+    // acrescentar. O criterio de casamento NAO mudou: continua exigindo valor unico.
+    function acharAlvo() {
+    let target = null;
     if (numero) {
+
       const numStr = String(numero);
       const numClean = numStr.replace(/[^A-Za-z0-9]/g, '');
       const numUnpadded = /^\d+$/.test(numClean) ? (numClean.replace(/^0+/, '') || '0') : numClean;
@@ -252,7 +306,38 @@ module.exports = async function (context, req) {
         if (candidatos.length === 1) { target = candidatos[0]; break; }
       }
     }
+    return target;
+    }
+
+    let target = acharAlvo();
+
+    // REDE DE SEGURANCA: nao achou nas datas candidatas -> varre TODAS as subpastas de data
+    // da unidade e tenta de novo. E lento (uma chamada por subpasta), mas so roda quando o
+    // caminho rapido ja falhou, e e o que transforma "PDF nao encontrado" em "achei" quando o
+    // arquivo existe numa pasta de data que nao conseguimos prever — arquivo movido a mao,
+    // aprovacao reprocessada, ou qualquer divergencia de fuso que ainda nao conhecemos.
+    // O criterio de casamento continua o mesmo, entao a varredura NAO afrouxa a seguranca:
+    // ela so aumenta o conjunto onde o mesmo criterio estrito e aplicado.
+    if (!target && status === 'Aprovada') {
+      try {
+        const pastaUnidade = `Notas Fiscais/Notas Aprovadas/${unidade}`;
+        const subResp = await client.api(`/sites/${siteId}/drive/root:/${pastaUnidade}:/children`).get();
+        const vistos = new Set(arquivos.map(a => a.id));
+        for (const sub of (subResp.value || []).filter(x => x.folder)) {
+          try {
+            const filesResp = await client.api(`/sites/${siteId}/drive/items/${sub.id}/children`).get();
+            for (const a of (filesResp.value || [])) {
+              if (a.file && !vistos.has(a.id)) { arquivos.push(a); vistos.add(a.id); }
+            }
+          } catch (eSub) { /* pasta vazia ou sem permissao: segue */ }
+        }
+        target = acharAlvo();
+        if (target) folder = pastaUnidade + ' (varredura)';
+      } catch (eVar) { /* sem a pasta da unidade nao ha o que varrer */ }
+    }
+
     if (!target) {
+
       const filenames = arquivos.map(a => a.name).slice(0, 10);
       context.res = { status: 404, headers: { 'Content-Type': 'text/html; charset=utf-8' },
         body: htmlErro(
