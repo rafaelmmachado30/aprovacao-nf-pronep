@@ -103,6 +103,13 @@
       ]
     },
     {
+      "route": "/api/AlertaRecorrentes",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
       "comment": "Cron do GitHub Actions: autenticado por secret no proprio endpoint.",
       "route": "/api/AlertaContratosDiario",
       "allowedRoles": [
