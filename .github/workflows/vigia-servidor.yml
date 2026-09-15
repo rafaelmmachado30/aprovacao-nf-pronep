@@ -12,11 +12,21 @@ name: Vigia do Servidor (os agentes deram sinal?)
 # aconteceu. E' o inverso de tudo o que ele fazia aqui, e e' o papel que ele
 # desempenha bem: estar de pe quando o resto nao esta'.
 #
-# POR QUE OS HORARIOS SAO ESTES, e nao "de hora em hora":
+# POR QUE OS HORARIOS SAO ESTES, e a conta importa:
 #   os agentes rodam em horario comercial, dia util. Conferir de madrugada
 #   acusaria "mudo" toda noite, e alerta que toca toda noite deixa de ser lido —
 #   que e' o mesmo defeito do `::warning::` verde que nos trouxe ate' aqui.
-#   As 09h e as 16h de Brasilia, um agente horario JA' TEM de ter rodado.
+#
+#   As 11h de Brasilia todo agente ja' rodou pelo menos uma vez no dia (o de
+#   alerta as 09h, a varredura as 06h30, o snapshot as 07h). As 09h nao servia:
+#   o alerta roda as 09h EM PONTO e daria empate com a conferencia.
+#
+#   ⚠ E A CONFERENCIA DA MANHA NAO RODA NA SEGUNDA. Na segunda as 11h, o ultimo
+#   alerta foi na sexta as 17h — 66h de silencio LEGITIMO. Para nao acusar isso,
+#   a tolerancia teria de passar de 66h em todo agente de dia util, e ai' uma
+#   parada real de dois dias no meio da semana nao acenderia luz nenhuma.
+#   Melhor conferir uma vez a menos e poder cobrar 10h do que conferir sempre e
+#   so' poder cobrar 70h. Na segunda a conferencia das 16h pega tudo.
 #
 # Pre-requisito: o secret AUTOMACAO_EMAILS_SECRET (o mesmo que a varredura ja'
 # usava). Nenhuma credencial nova — vigia que exige credencial nova e' vigia que
@@ -24,8 +34,8 @@ name: Vigia do Servidor (os agentes deram sinal?)
 
 on:
   schedule:
-    - cron: '0 12 * * 1-5'   # 09h BRT
-    - cron: '0 19 * * 1-5'   # 16h BRT
+    - cron: '0 14 * * 2-5'   # 11h BRT, ter-sex (na segunda o fim de semana atrapalha)
+    - cron: '0 19 * * 1-5'   # 16h BRT, seg-sex
   workflow_dispatch:
 
 concurrency:
