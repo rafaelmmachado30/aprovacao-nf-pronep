@@ -39,12 +39,6 @@ jobs:
       - name: Perguntar ao batimento quem deu sinal
         env:
           SECRET: ${{ secrets.AUTOMACAO_EMAILS_SECRET }}
-          # Quantos agentes DEVEM aparecer. Existe porque o endpoint nao tem como
-          # saber quem deveria existir: um agente que nunca postou simplesmente
-          # nao esta' na lista, e some sem deixar buraco. Se a lista encolher,
-          # alguem parou de reportar — ou o catalogo mudou e este numero tem de
-          # mudar junto, CONSCIENTEMENTE.
-          MINIMO: '5'
         run: |
           set -u
           if [ -z "$SECRET" ]; then
@@ -66,8 +60,8 @@ jobs:
             exit 1
           fi
 
-          QUANTOS=$(python3 -c "import json;print(json.load(open('/tmp/bat.json'))['quantos'])")
           MUDOS=$(python3 -c "import json;print(','.join(json.load(open('/tmp/bat.json'))['mudos']))")
+          NUNCA=$(python3 -c "import json;print(','.join(json.load(open('/tmp/bat.json')).get('nunca_reportou') or []))")
 
           python3 - <<'PY'
           import json
@@ -80,13 +74,17 @@ jobs:
                     + (f"  ({a['status']})" if a.get('status') else ''))
           PY
 
+          # ⚠ Quem sabe quantos agentes existem e' o CATALOGO DE TAREFAS do
+          # servidor, que viaja no proprio batimento. Aqui nao ha' numero cravado
+          # de proposito: um numero neste arquivo apodreceria na primeira tarefa
+          # nova, e quem a criasse nao teria motivo nenhum para vir mexer aqui.
           FALHOU=0
           if [ -n "$MUDOS" ]; then
-            echo "::error::Agente(s) sem dar sinal no prazo: $MUDOS"
+            echo "::error::Agente(s) que pararam de dar sinal: $MUDOS"
             FALHOU=1
           fi
-          if [ "$QUANTOS" -lt "$MINIMO" ]; then
-            echo "::error::So' $QUANTOS agente(s) reportaram; esperava ao menos $MINIMO. Alguem parou de postar o batimento."
+          if [ -n "$NUNCA" ]; then
+            echo "::error::Agente(s) que NUNCA deram sinal: $NUNCA"
             FALHOU=1
           fi
           if [ "$FALHOU" -eq 1 ]; then
@@ -94,4 +92,4 @@ jobs:
             echo "e o Agendador de Tarefas do PRONEP-ANALYTICS, pasta \\Pronep."
             exit 1
           fi
-          echo "Todos os $QUANTOS agentes deram sinal dentro do prazo."
+          python3 -c "import json;d=json.load(open('/tmp/bat.json'));print(f\"Todos os {d['quantos']} agentes deram sinal dentro do prazo.\")"

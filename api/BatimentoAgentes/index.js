@@ -87,6 +87,13 @@ module.exports = async function (context, req) {
         maquina: String(c.maquina || '').slice(0, 60),
         detalhe: String(c.detalhe || '').slice(0, 200)
       };
+      // A LISTA DE QUEM DEVERIA EXISTIR vem junto, e do catalogo de tarefas do
+      // servidor. Sem ela, um agente que nunca postou simplesmente nao aparece
+      // e some sem deixar buraco — e a alternativa seria um numero cravado no
+      // workflow do outro repositorio, que apodrece na primeira tarefa nova.
+      if (Array.isArray(c.esperados) && c.esperados.length) {
+        dados.esperados = c.esperados.map(function (x) { return String(x).slice(0, 60); });
+      }
       dados.atualizadoEm = new Date(agora).toISOString();
       await gravar(client, siteId, dados);
       context.res = { status: 200, headers: { 'Content-Type': 'application/json' },
@@ -110,17 +117,19 @@ module.exports = async function (context, req) {
     }).sort(function (x, y) { return y.idade_horas - x.idade_horas; });
 
     const mudos = lista.filter(function (x) { return x.mudo; });
+    const esperados = dados.esperados || [];
+    const nunca = esperados.filter(function (n) { return !ags[n]; });
     context.res = {
       status: 200,
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
       body: {
-        ok: mudos.length === 0,
-        // ⚠ `nunca_reportou` e um estado DIFERENTE de "mudo", e nao da para
-        // detecta-lo aqui: um agente que nunca postou simplesmente nao esta
-        // nesta lista. Quem sabe quais agentes DEVERIAM existir e o servidor —
-        // e se o servidor esta morto, ninguem sabe. Por isso o workflow tambem
-        // cobra um numero minimo de agentes: ver vigia-servidor.yml.
+        ok: mudos.length === 0 && nunca.length === 0,
+        // ⚠ `nunca_reportou` e um estado DIFERENTE de "mudo": mudo e quem ja
+        // deu sinal e parou; este nunca deu. Os dois derrubam o vigia, e por
+        // motivos diferentes — um agente que some e um que nunca foi instalado
+        // dao no mesmo resultado para quem depende dele.
         agentes: lista, quantos: lista.length,
+        esperados: esperados, nunca_reportou: nunca,
         mudos: mudos.map(function (x) { return x.agente; }),
         atualizadoEm: dados.atualizadoEm || null
       }
