@@ -165,6 +165,13 @@
       ]
     },
     {
+      "route": "/api/BatimentoAgentes",
+      "allowedRoles": [
+        "anonymous",
+        "authenticated"
+      ]
+    },
+    {
       "comment": "Busca de NF-e na SEFAZ: cron do GitHub Actions chama com X-Automacao-Secret. Sem o secret o endpoint exige admin. CriarListaDocumentosFiscais NAO entra aqui de proposito — so admin logado.",
       "route": "/api/BuscarNFeSefaz",
       "allowedRoles": [

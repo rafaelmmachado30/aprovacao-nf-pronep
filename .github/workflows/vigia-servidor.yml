@@ -1,0 +1,97 @@
+name: Vigia do Servidor (os agentes deram sinal?)
+
+# ESTE WORKFLOW FICA NO GITHUB DE PROPOSITO, e e' o unico que deve ficar.
+#
+# Desde 15/09/2026 as automacoes estao saindo daqui e virando agentes no
+# servidor PRONEP-ANALYTICS. A troca e' boa, mas cria um risco que nao existia:
+# o GitHub e' altamente disponivel; o servidor nao. Se ele desligar, ou o
+# Agendador de Tarefas parar, os agentes param EM SILENCIO — e a tela que
+# mostraria isso roda no mesmo servidor que caiu.
+#
+# Entao o GitHub deixa de MANDAR trabalho e passa a CONFERIR que o trabalho
+# aconteceu. E' o inverso de tudo o que ele fazia aqui, e e' o papel que ele
+# desempenha bem: estar de pe quando o resto nao esta'.
+#
+# POR QUE OS HORARIOS SAO ESTES, e nao "de hora em hora":
+#   os agentes rodam em horario comercial, dia util. Conferir de madrugada
+#   acusaria "mudo" toda noite, e alerta que toca toda noite deixa de ser lido —
+#   que e' o mesmo defeito do `::warning::` verde que nos trouxe ate' aqui.
+#   As 09h e as 16h de Brasilia, um agente horario JA' TEM de ter rodado.
+#
+# Pre-requisito: o secret AUTOMACAO_EMAILS_SECRET (o mesmo que a varredura ja'
+# usava). Nenhuma credencial nova — vigia que exige credencial nova e' vigia que
+# alguem deixa de instalar.
+
+on:
+  schedule:
+    - cron: '0 12 * * 1-5'   # 09h BRT
+    - cron: '0 19 * * 1-5'   # 16h BRT
+  workflow_dispatch:
+
+concurrency:
+  group: vigia-servidor
+  cancel-in-progress: false
+
+jobs:
+  conferir:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Perguntar ao batimento quem deu sinal
+        env:
+          SECRET: ${{ secrets.AUTOMACAO_EMAILS_SECRET }}
+          # Quantos agentes DEVEM aparecer. Existe porque o endpoint nao tem como
+          # saber quem deveria existir: um agente que nunca postou simplesmente
+          # nao esta' na lista, e some sem deixar buraco. Se a lista encolher,
+          # alguem parou de reportar — ou o catalogo mudou e este numero tem de
+          # mudar junto, CONSCIENTEMENTE.
+          MINIMO: '5'
+        run: |
+          set -u
+          if [ -z "$SECRET" ]; then
+            echo "::error::Secret AUTOMACAO_EMAILS_SECRET nao configurado no repo"; exit 1
+          fi
+          URL="https://purple-forest-09588fe10.7.azurestaticapps.net/api/BatimentoAgentes"
+          HTTP=$(curl -s -o /tmp/bat.json -w "%{http_code}" \
+            -H "X-Automacao-Secret: $SECRET" -H "Accept: application/json" \
+            --max-time 120 "$URL")
+          echo "HTTP $HTTP"
+          cat /tmp/bat.json | head -c 4000; echo ""
+
+          # ⚠ Endpoint fora do ar NAO e' prova de que os agentes estao vivos, e
+          # tambem nao e' prova de que morreram. Falha o job dizendo QUAL das
+          # duas coisas nao se sabe — silencio ambiguo e' o que este vigia existe
+          # para eliminar.
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::Nao consegui LER o batimento (HTTP $HTTP). Nao sei se os agentes rodaram."
+            exit 1
+          fi
+
+          QUANTOS=$(python3 -c "import json;print(json.load(open('/tmp/bat.json'))['quantos'])")
+          MUDOS=$(python3 -c "import json;print(','.join(json.load(open('/tmp/bat.json'))['mudos']))")
+
+          python3 - <<'PY'
+          import json
+          d = json.load(open('/tmp/bat.json'))
+          print(f"{'agente':<24} {'idade':>8}  {'prazo':>8}  situacao")
+          print('-' * 62)
+          for a in d['agentes']:
+              marca = 'MUDO' if a['mudo'] else 'ok'
+              print(f"{a['agente']:<24} {a['idade_horas']:>7.1f}h {a['tolerancia_horas']:>7}h  {marca}"
+                    + (f"  ({a['status']})" if a.get('status') else ''))
+          PY
+
+          FALHOU=0
+          if [ -n "$MUDOS" ]; then
+            echo "::error::Agente(s) sem dar sinal no prazo: $MUDOS"
+            FALHOU=1
+          fi
+          if [ "$QUANTOS" -lt "$MINIMO" ]; then
+            echo "::error::So' $QUANTOS agente(s) reportaram; esperava ao menos $MINIMO. Alguem parou de postar o batimento."
+            FALHOU=1
+          fi
+          if [ "$FALHOU" -eq 1 ]; then
+            echo "Onde olhar: o console da Central, em http://10.2.10.77:8770 (pela VPN),"
+            echo "e o Agendador de Tarefas do PRONEP-ANALYTICS, pasta \\Pronep."
+            exit 1
+          fi
+          echo "Todos os $QUANTOS agentes deram sinal dentro do prazo."
